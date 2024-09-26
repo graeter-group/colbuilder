@@ -39,7 +39,7 @@ If you find ColBuilder useful, please see the citation file for details on how t
 
 **Clone this repository and install ColBuilder:**
 
-    git@github.com:graeter-group/colbuilder.git
+    git clone git@github.com:graeter-group/colbuilder.git
     cd colbuilder
     pip install .
 
@@ -51,7 +51,7 @@ A few external tools are required to run ColBuilder. You can download them accor
 
     conda install conda-forge::pymol-open-source
 
-**NOTE**: pymol cannot be called from python if the libnetcdf.so library is missing. If running `colbuilder -h` results in an error, we recommend installing the libnetcdf.so package:
+**NOTE**: pymol cannot be called from python if the libnetcdf.so library is missing. If running `colbuilder --help` results in an error, we recommend installing the libnetcdf.so package:
 
     conda install -c conda-forge libnetcdf==4.7.3
 
