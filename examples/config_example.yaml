@@ -7,7 +7,7 @@ config_file: null  # Path to this YAML configuration file
 debug: false
 
 # Sequence Generation Configuration
-sequence_generator: true
+sequence_generator: false
 fasta_file: homosapiens.fasta
 output_prefix: "my_collagen_sequence"
 species: "Homo_sapiens"
@@ -19,7 +19,7 @@ c_term_combination: "1047.C - 104.C"
 
 # Geometry Generation Configuration
 geometry_generator: true
-# file: homosapiens_N_HLKNL_C_HLKNL.pdb  # Input PDB file. Note: Comment this line if sequence_generator is true
+file: human-D.pdb  # Input PDB file. Note: Comment this line if sequence_generator is true
 output: "collagen_human"
 working_directory: "./"
 contact_distance: 60

@@ -179,7 +179,7 @@ class Optimizer:
         """
         for current_node in (node, pr_node):
             system.add_model(model.Model(
-                id=float(system.get_size(system=system)),
+                id=float(system.get_size()),
                 unit_cell=current_node,
                 transformation=system.crystal.get_t_matrix(s_matrix=current_node),
                 pdb_file=system.crystal.pdb_file
