@@ -26,7 +26,7 @@ contact_distance: 60
 fibril_length: 334.0
 crystalcontacts_file: null # crystalcontacts_from_colbuilder.txt
 connect_file: null
-crystalcontacts_optimize: false # Note: This is always true when generating geometry from contact_distance, but has to be set to true to be performed otherwise.
+crystalcontacts_optimize: false # Note: This is always true when generating geometry from contact_distance, but has to be set to false to be performed otherwise.
 
 # Mix Configuration
 mix_bool: false
