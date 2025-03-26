@@ -1,0 +1,35 @@
+mode: null
+config_file: null
+sequence_generator: true
+geometry_generator: true
+topology_generator: true 
+debug: false
+working_directory: "./"
+
+# Input Configuration
+species: "homo_sapiens"
+
+# Sequence Settings
+fasta_file: null
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 947.A"
+c_term_combination: "1047.C - 104.C"
+
+# Geometry Parameters
+pdb_file: null
+contact_distance: 20
+fibril_length: 60.0
+crystalcontacts_file: null
+connect_file: null
+crystalcontacts_optimize: false
+
+# Mixing Options
+mix_bool: false
+
+# Replacement Options
+replace_bool: false
+
+# Topology Options
+force_field: "amber99"
