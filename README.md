@@ -122,6 +122,7 @@ To verify your installation and run a basic example:
 2. **Create a basic configuration file** (save as `config.yaml`):
    ```yaml
    # Basic human collagen microfibril configuration
+   working_directory: "./"     
    species: "homo_sapiens"
    sequence_generator: true
    geometry_generator: true
@@ -192,7 +193,7 @@ crystalcontacts_optimize: false  # Optimize crystal contacts during generation
 mix_bool: false              # Enable mixing of different crosslink types
 ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
 files_mix:                   # Required if mix_bool is true
- - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks
+ - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
  - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
 
 # Replacement Options (for fewer crosslinks)
@@ -212,6 +213,7 @@ For a complete list of configuration options, see the [detailed documentation](h
 
 ```yaml
 # config_human_basic.yaml
+working_directory: "./"      
 species: "homo_sapiens"
 sequence_generator: true
 geometry_generator: true
@@ -228,6 +230,7 @@ colbuilder --config_file config_human_basic.yaml
 
 ```yaml
 # config_bovine_crosslinked.yaml
+working_directory: "./"  
 species: "bos_taurus"
 sequence_generator: true
 geometry_generator: true
@@ -244,7 +247,7 @@ contact_distance: 15
 colbuilder --config_file config_bovine_crosslinked.yaml
 ```
 
-#### Creating a Mixed Crosslinked (80% Divalent + 20% Trivalent) Human Collagen Microfibril
+#### Creating a Mixed Crosslinked (80% Divalent + 20% Trivalent) Human Collagen Microfibril from Collagen Molecules
 
 ```yaml
 # config_mixed_crosslinks.yaml
