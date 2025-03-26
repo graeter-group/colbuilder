@@ -1,0 +1,35 @@
+0.caps.pdb ; D
+1.caps.pdb ; D
+11.caps.pdb ; D
+12.caps.pdb 28.caps.pdb ; D
+13.caps.pdb 57.caps.pdb ; D
+14.caps.pdb 29.caps.pdb ; D
+17.caps.pdb 43.caps.pdb ; D
+19.caps.pdb ; D
+2.caps.pdb ; D
+23.caps.pdb ; D
+24.caps.pdb ; D
+25.caps.pdb ; D
+26.caps.pdb ; D
+3.caps.pdb ; D
+31.caps.pdb ; D
+33.caps.pdb 58.caps.pdb ; D
+34.caps.pdb 46.caps.pdb ; D
+36.caps.pdb 41.caps.pdb ; D
+37.caps.pdb ; D
+38.caps.pdb ; D
+39.caps.pdb ; D
+44.caps.pdb ; D
+47.caps.pdb ; D
+48.caps.pdb ; D
+49.caps.pdb ; D
+5.caps.pdb ; D
+50.caps.pdb ; D
+51.caps.pdb ; D
+53.caps.pdb ; D
+55.caps.pdb ; D
+59.caps.pdb ; D
+6.caps.pdb ; D
+7.caps.pdb ; D
+8.caps.pdb ; D
+9.caps.pdb 54.caps.pdb ; D
