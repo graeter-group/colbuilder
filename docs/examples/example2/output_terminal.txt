@@ -1,0 +1,108 @@
+**************
+* Colbuilder *
+**************
+Starting Colbuilder process...
+===================
+Configuration Setup
+Fibril Parameters
+- Fibril Length: 334.0
+- Crosslinks:
+-     N-terminal: HLKNL, 9.C - 947.A
+-     C-terminal: HLKNL, 1047.C - 104.C
+Operation Modes
+- Homology ✓
+Config File: config_human-D.yaml
+Input File: None
+Output File: collagen_fibril_homo_sapiens.pdb
+Working Directory: .
+===================================
+Generating collagen triple helix...
+Homology Modelling
+Step 1/4 Performing sequence alignment
+Step 2/4 Generating structure with MODELLER
+Step 3/4 Applying crosslinks to structure
+   - Applying L5Y patch to target residue: 9 in chain C
+   - Applying L4Y patch to target residue: 947 in chain A
+   - Applying L5Y patch to target residue: 1047 in chain C
+   - Applying L4Y patch to target residue: 104 in chain C
+Step 4/4 Optimizing crosslink positions
+Homology modelling completed.
+MSA: /home/.../example2/homosapiens_alignment.fasta
+Final PDB (triple helix): /home/.../example2/homosapiens_N_HLKNL_C_HLKNL.pdb
+================
+Process Complete
+Colbuilder process completed successfully in 112.13 seconds.
+**************
+* Colbuilder *
+**************
+Starting Colbuilder process...
+===================
+Configuration Setup
+Fibril Parameters
+- Fibril Length: 334.0
+- Crosslinks:
+-     N-terminal: PYD, 9.C - 5.B - 944.B
+-     C-terminal: PYD, 1047.C - 1047.A - 104.C
+Operation Modes
+- Homology ✓
+Config File: config_human-T.yaml
+Input File: None
+Output File: collagen_fibril_homo_sapiens.pdb
+Working Directory: .
+===================================
+Generating collagen triple helix...
+Homology Modelling
+Step 1/4 Performing sequence alignment
+Step 2/4 Generating structure with MODELLER
+Step 3/4 Applying crosslinks to structure
+   - Applying LY3 patch to target residue: 9 in chain C
+   - Applying LY2 patch to target residue: 5 in chain B
+   - Applying LYX patch to target residue: 944 in chain B
+   - Applying LY3 patch to target residue: 1047 in chain C
+   - Applying LY2 patch to target residue: 1047 in chain A
+   - Applying LYX patch to target residue: 104 in chain C
+Step 4/4 Optimizing crosslink positions
+Homology modelling completed.
+MSA: /home/.../example2/homosapiens_alignment.fasta
+Final PDB (triple helix): /home/.../example2/homosapiens_N_PYD_C_PYD.pdb
+================
+Process Complete
+Colbuilder process completed successfully in 218.73 seconds.
+**************
+* Colbuilder *
+**************
+Starting Colbuilder process...
+===================
+Configuration Setup
+Fibril Parameters
+- Contact Distance: 20.0
+- Fibril Length: 70.0
+- Crosslinks:
+-     Mix Ratio: {'D': 80, 'T': 20}
+-     Mix Files: (PosixPath('homosapiens_N_HLKNL_C_HLKNL.pdb'), PosixPath('homosapiens_N_PYD_C_PYD.pdb'))
+Operation Modes
+- Mix Crosslinks ✓
+Config File: config_mix.yaml
+Output File: collagen_fibril_homo_sapiens.pdb
+Working Directory: .
+==================
+Mixing geometry...
+Mixing Geometry
+Starting mix method
+Step 1/2 Generating mix setup
+ System D:
+     Generating system from homosapiens_N_HLKNL_C_HLKNL.pdb ...
+     Cutting system to 70.0 nm
+     Adding caps
+ PyMOL not running, entering library mode (experimental)
+ System T:
+     Generating system from homosapiens_N_PYD_C_PYD.pdb ...
+     Cutting system to 70.0 nm
+     Adding caps
+Step 2/2 Mixing systems
+Replaced 56800 duplicate atom entries with newer versions when writing collagen_fibril_homo_sapiens
+Mixing completed.
+================
+Process Complete
+Colbuilder process completed successfully in 348.53 seconds.
+
