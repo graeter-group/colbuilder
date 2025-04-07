@@ -14,7 +14,7 @@ v align="center">
 - `config_human-D.yaml` and `config_human-T.yaml`
   → config files for colbuilder that produce a triplehelix with the respective crosslinks.
 - `config_mix.yaml`
-  → config files for mixing the two triplehelices accordning to the specification in the file.
+  → config file for mixing the two triplehelices accordning to the specification in the file.
 ## Output Files
 
 - `collagen_fibril_homo_sapiens.pdb`  
