@@ -1,0 +1,6 @@
+replace_bool: false          # Enable crosslink replacement
+ratio_replace: 30            # Percentage of crosslinks to replace
+replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
+
+# Topology Options
+force_field: "amber99"

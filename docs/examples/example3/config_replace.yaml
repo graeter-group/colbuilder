@@ -1,0 +1,17 @@
+# Replacement Options (for fewer crosslinks)
+
+species: "homo_sapiens"  
+fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
+crosslink: true              # Enable crosslinking in the model
+n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "HLKNL"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "9.C - 947.A"    # N-terminal residue combination
+c_term_combination: "1047.C - 104.C" # C-terminal residue combination
+
+working_directory: "./"
+replace_bool: true          # Enable crosslink replacement
+ratio_replace: 30            # Percentage of crosslinks to replace
+replace_file: "collagen_fibril_homo_sapiens.pdb"            # File with crosslinks to be replaced (set to null if geometry_generation is true)
+
+# Topology Options
+force_field: "amber99"

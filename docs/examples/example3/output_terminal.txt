@@ -1,0 +1,26 @@
+colbuilder *
+**************
+Starting Colbuilder process...
+===================
+Configuration Setup
+Fibril Parameters
+- Fibril Length: 334.0
+- Crosslinks:
+-     N-terminal: HLKNL, 9.C - 947.A
+-     C-terminal: HLKNL, 1047.C - 104.C
+Operation Modes
+- Replace Crosslinks ✓
+Config File: config_replace.yaml
+Output File: collagen_fibril_homo_sapiens.pdb
+Working Directory: .
+=======================
+Replacing crosslinks...
+Replacing Geometry
+Running crosslink replacement with ratio: 30.0%
+Using direct replacement approach
+- Input PDB: collagen_fibril_homo_sapiens.pdb
+PDB file written to collagen_fibril_homo_sapiens.pdb
+Replacement completed.
+================
+Process Complete
+Colbuilder process completed successfully in 5.15 seconds.
