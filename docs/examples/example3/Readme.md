@@ -3,6 +3,7 @@
     <p>  Modifying an existing ColBuilder-generated fibril to decrease crosslink density
 </p>
 </div>
+
 ## Files and Usage
 
 - `config_replace.yaml`  
@@ -10,11 +11,19 @@
   → Usage:  
   ```bash
   colbuilder -f config_file config_replace.yaml
-output of the structure:
-- collagen_fibril_homo_sapiens.pdb
-further output files (from sequence/gemetry/crosslink settings):
-- homosapiens_N_HLKNL_C_HLKNL_original.pdb
-- homosapiens_N_HLKNL_C_HLKNL.pdb
-- NC/
-Example terminal output:
-- output_terminal.txt
+## Output Files
+
+- `collagen_fibril_homo_sapiens.pdb`  
+  → Main structure output
+
+- `homosapiens_N_HLKNL_C_HLKNL_original.pdb`  
+  → From sequence/geometry/crosslink settings
+
+- `homosapiens_N_HLKNL_C_HLKNL.pdb`  
+  → Modified/processed version
+
+- `NC/`  
+  → Directory containing additional outputs (e.g., chains or fragments)
+
+- `output_terminal.txt`  
+  → Captured example terminal output
