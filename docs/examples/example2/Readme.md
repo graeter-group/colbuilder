@@ -1,4 +1,4 @@
-v align="center">
+<div align="center">
     <h1>Example 2</h1>
     <p>  Creating two sequences with different crosslink types and mixing them to form a heterogeneous fibril
 </p>
