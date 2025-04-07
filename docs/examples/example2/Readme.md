@@ -11,7 +11,7 @@ v align="center">
   → Usage:  
   ```bash
   ./example2.sh
-- `config_human-D.yaml and config_human-T.yaml
+- config_human-D.yaml and config_human-T.yaml
   → config files for colbuilder that produce a triplehelix with the respective crosslinks.
 ## Output Files
 
