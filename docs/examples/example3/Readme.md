@@ -1,4 +1,4 @@
-v align="center">
+<div align="center">
     <h1>Example 3</h1>
     <p>  Modifying an existing ColBuilder-generated fibril to decrease crosslink density
 </p>
