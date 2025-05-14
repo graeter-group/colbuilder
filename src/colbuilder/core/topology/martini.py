@@ -665,11 +665,11 @@ async def build_martini3(
                             LOG.debug("Successfully built contact map tool")
                     else:
                         LOG.info(
-                            "No Makefile found in contactmap directory, checking parent directory"
+                            "No makefile found in contactmap directory, checking parent directory"
                         )
-                        source_makefile = source_ff_dir / "Makefile"
+                        source_makefile = source_ff_dir / "makefile"
                         if source_makefile.exists():
-                            shutil.copy2(source_makefile, Path("Makefile"))
+                            shutil.copy2(source_makefile, Path("makefile"))
 
                             LOG.debug("Building contact map tool from source")
                             make_process = await asyncio.create_subprocess_shell(

@@ -345,14 +345,19 @@ class TransformationTracker:
         structure: Structure,
         chain_id: str,
         residue_id: str,
-        source_structure: Optional[Structure] = None,
-    ) -> None:
-        """Apply all recorded transformations to a residue in order."""
+        source_structure_id: Optional[str] = None,
+    ):
+        """Apply only transformations from the specified source structure."""
         key = f"{chain_id}_{residue_id}"
         if key not in self.transformations:
             return
 
-        sorted_transforms = sorted(self.transformations[key], key=lambda x: x["step"])
+        # Filter transformations by source if specified
+        transforms = self.transformations[key]
+        if source_structure_id:
+            transforms = [t for t in transforms if t["source"] == source_structure_id]
+
+        sorted_transforms = sorted(transforms, key=lambda x: x["step"])
         for transform in sorted_transforms:
             params = transform["params"]
 
@@ -1235,19 +1240,22 @@ def optimize_structure(
 
     # Apply transformations to initial structure
     for crosslink in crosslinks:
-        for res_type in ["R1", "R2", "R3"]:
+        for res_type, structure_id in [
+            ("R1", crosslink["R1"]["structure_id"]),
+            ("R2", crosslink["R2"]["structure_id"]),
+            ("R3", crosslink["R3"]["structure_id"]),
+        ]:
             residue = crosslink[res_type]
             chain_id = residue["chain"]
             res_id = residue["position"]
-            key = f"{chain_id}_{res_id}"
 
-            if key in master_tracker.transformations:
-                master_tracker.apply_transformations_to_residue(
-                    optimized_initial,
-                    chain_id,
-                    res_id,
-                    source_structure=structures[residue["structure_id"]],
-                )
+            # Only apply transformations that came from the correct source structure
+            master_tracker.apply_transformations_to_residue(
+                optimized_initial,
+                chain_id,
+                res_id,
+                source_structure_id=structure_id,  # Filter by source
+            )
 
     save_pdb(optimized_initial, str(optimized_pdb))
     save_pdb(structures["copy1"], "optimized_copy1.pdb")

@@ -953,6 +953,7 @@ rattus_norvegicus,LYS,N,946.A - 5.B,deHLNL,LX5,NZ,5.B,LX4,CE,946.A,NONE,NONE,NON
 rattus_norvegicus,LYS,N,5.B - 944.B,deHLNL,LX5,NZ,5.B,LX4,CE,944.B,NONE,NONE,NONE,NONE
 rattus_norvegicus,ARG_LYS,C,101.B - 1046.A,Glucosepane,AGS,NZ,101.B,LGX,CE,1046.A,NONE,NONE,NONE,NONE
 rattus_norvegicus,ARG_LYS,N,353.B - 124.C,Glucosepane,AGS,NZ,353.B,LGX,CE,124.C,NONE,NONE,NONE,NONE
+rattus_norvegicus,ARG_LYS,N,523.A - 286.C,Glucosepane,AGS,NZ,523.A,LGX,CE,286.C,NONE,NONE,NONE,NONE
 tetraodon_nigroviridis,LYS,C,1046.C - 1046.A -104.C,DPD,LX3,CG,1046.C,LX2,CB,1046.A,LXX,C13,C12,104.C
 tetraodon_nigroviridis,LYS,C,1046.C -  1046.A - 99.B,DPD,LX3,CG,1046.C,LX2,CB,1046.A,LXX,C13,C12,99.B
 tetraodon_nigroviridis,LYS,N,6.B - 9.C - 948.A,DPD,LX3,CG,6.B,LX2,CB,9.C,LXX,C13,C12,948.A

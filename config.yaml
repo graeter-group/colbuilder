@@ -1,9 +1,9 @@
 # Operation Mode
 mode: null
 config_file: null
-sequence_generator: true
+sequence_generator: false
 geometry_generator: true
-topology_generator: true
+topology_generator: false
 debug: false
 working_directory: "./"
 

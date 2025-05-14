@@ -270,7 +270,7 @@ class SequenceGenerator:
                 "sequence/modeller/par_mod.lib"
             ).resolve()
 
-            LOG.debug(f"Using libraries:")
+            LOG.debug("Using libraries:")
             LOG.debug(f"  Template PDB: {template_pdb}")
             LOG.debug(f"  RESTYP: {restyp_lib}")
             LOG.debug(f"  TOP_HEAV: {top_heav_lib}")
