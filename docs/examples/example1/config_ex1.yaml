@@ -1,0 +1,37 @@
+mode: null
+config_file: null
+sequence_generator: true
+geometry_generator: true
+topology_generator: true 
+debug: false
+
+# Input Configuration
+species: "homo_sapiens"
+
+# Sequence Settings
+fasta_file: null
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 947.A"
+c_term_combination: "1047.C - 104.C"
+
+# Geometry Parameters
+pdb_file: null
+contact_distance: 20
+fibril_length: 60.0
+crystalcontacts_file: null
+connect_file: null
+crystalcontacts_optimize: false
+
+# Mixing Options
+mix_bool: false
+ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
+#files_mix:                   # Required if mix_bool is true
+# - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
+# - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
+# Replacement Options
+replace_bool: false
+
+# Topology Options
+force_field: "amber99"
