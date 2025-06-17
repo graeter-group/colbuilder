@@ -229,6 +229,9 @@ class CrosslinkOptimizer:
             SystemError: If Chimera process fails
         """
         try:
+            print(f"optimize input path: {input_pdb}")
+            print(f"optimize output path: {output_pdb}")
+
             crosslink_info = self._prepare_crosslink_info()
             max_total_distance = self._get_distance_threshold()
             LOG.debug(f"Maximum distance threshold: {max_total_distance} Å")
@@ -249,7 +252,16 @@ class CrosslinkOptimizer:
 
                 # Generate new copies based on the current best input
                 generated_pdbs = await self._generate_copies(best_input)
+
+                print(f"optimize generated_pdbs:")
+                for path in generated_pdbs:
+                    print(path)
+
                 all_generated_pdbs.extend(generated_pdbs)
+
+                print(f"optimize all_generated_pdbs:")
+                for path in all_generated_pdbs:
+                    print(path)
 
                 if len(generated_pdbs) < 2:
                     raise SequenceGenerationError(
@@ -265,6 +277,11 @@ class CrosslinkOptimizer:
                 iteration_pdbs.append(iteration_pdb)
 
                 # Pass the current best distance to optimize_structure
+                print(f"\n optimize structure args:")
+                print(f"optimize initial_pdb: {best_input}")
+                print(f"optimize copy1_pdb: {Path(generated_pdbs[0]).resolve()}")
+                print(f"optimize copy2_pdb: {Path(generated_pdbs[1]).resolve()}")
+                print(f"optimize optimized_pdb: {iteration_pdb}\n")
                 total_distance, tracker, _ = optimize_structure(
                     initial_pdb=str(best_input),
                     copy1_pdb=str(generated_pdbs[0]),
@@ -333,8 +350,12 @@ class CrosslinkOptimizer:
     async def _generate_copies(self, input_pdb: Path) -> List[Path]:
         """Generate copies using Chimera."""
         try:
+            print(f"_generate_copies input pdb: {input_pdb}")
+
             generate_copies_script = self.chimera_scripts_dir / "generate_copies.py"
             generated_pdbs_file = Path("generated_pdbs.txt")
+
+            print(f"_generate_copies generated_pdbs_file {generated_pdbs_file}")
 
             env = os.environ.copy()
             env["INPUT_PDB"] = str(input_pdb)

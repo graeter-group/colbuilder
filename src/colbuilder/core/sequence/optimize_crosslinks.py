@@ -91,6 +91,7 @@ from typing import Dict, Tuple, Any, Optional, Union, List
 import numpy.typing as npt
 from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure
+import subprocess
 
 from colbuilder.core.utils.logger import setup_logger
 
@@ -102,11 +103,13 @@ warnings.filterwarnings("ignore", message="Ignoring unrecognized record.*")
 def load_pdb(filename: Union[str, Path]) -> PDB.Structure.Structure:
     """Load PDB structure from file."""
     parser = PDB.PDBParser()
+    print(f"\nreading file {Path(filename).resolve()}\n")
     return parser.get_structure("molecule", filename)
 
 
 def save_pdb(structure: PDB.Structure.Structure, filename: Union[str, Path]) -> None:
     """Save structure to PDB file."""
+    print(f"\nwriting file {Path(filename).resolve()}\n")
     io = PDB.PDBIO()
     io.set_structure(structure)
     io.save(filename)
@@ -1012,6 +1015,7 @@ def optimize_crosslink(
     LOG.debug("\nPhase 1: Backbone exploration")
     angle_steps = np.linspace(-np.pi / 2, np.pi / 2, 8)
     for residue_type in residue_types:
+        restype_best_tracker = TransformationTracker()
         for angle in angle_steps:
             structures_copy = {k: v.copy() for k, v in best_structures.items()}
             temp_tracker = TransformationTracker()
@@ -1032,12 +1036,13 @@ def optimize_crosslink(
             if current_distance < best_distance:
                 best_distance = current_distance
                 best_structures = {k: v.copy() for k, v in structures_copy.items()}
-                best_tracker = temp_tracker.copy()
+                restype_best_tracker = temp_tracker.copy()
                 current_tracker.update_from(temp_tracker)
                 if is_divalent:
                     LOG.debug(f"Improved distance: {dist1:.2f}")
                 else:
                     LOG.debug(f"Improved: {dist1:.2f}, {dist2:.2f}")
+            best_tracker = current_tracker.copy()
 
     # Phase 2: Main optimization
     LOG.debug("\nPhase 2: Main optimization")
@@ -1228,6 +1233,7 @@ def optimize_structure(
         # If this is the first crosslink and we have a previous best, pass it
         crosslink_previous_best = previous_best_distance if i == 0 else float("inf")
 
+        #breakpoint()
         structures, crosslink_tracker = optimize_crosslink(
             structures,
             crosslink,
