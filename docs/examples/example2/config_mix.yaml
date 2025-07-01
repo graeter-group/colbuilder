@@ -1,0 +1,13 @@
+species: "homo_sapiens"
+sequence_generator: false
+geometry_generator: false
+mix_bool: true
+ratio_mix: "A:80 B:20"
+files_mix:
+ - "homosapiens_N_HLKNL_C_HLKNL.pdb"
+ - "homosapiens_N_PYD_C_PYD.pdb"
+contact_distance: 20         # Distance threshold for contacts (Å)
+fibril_length: 70.0
+#mix_bool: false              # Enable mixing of different crosslink types
+#ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
+#files_mix:                   # Required if mix_bool is tru
