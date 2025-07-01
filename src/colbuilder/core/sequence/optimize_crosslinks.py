@@ -1015,7 +1015,7 @@ def optimize_crosslink(
     LOG.debug("\nPhase 1: Backbone exploration")
     angle_steps = np.linspace(-np.pi / 2, np.pi / 2, 8)
     for residue_type in residue_types:
-        restype_best_tracker = TransformationTracker()
+        #restype_best_tracker = TransformationTracker()
         for angle in angle_steps:
             structures_copy = {k: v.copy() for k, v in best_structures.items()}
             temp_tracker = TransformationTracker()
@@ -1036,13 +1036,13 @@ def optimize_crosslink(
             if current_distance < best_distance:
                 best_distance = current_distance
                 best_structures = {k: v.copy() for k, v in structures_copy.items()}
-                restype_best_tracker = temp_tracker.copy()
+                #restype_best_tracker = temp_tracker.copy()
                 current_tracker.update_from(temp_tracker)
                 if is_divalent:
                     LOG.debug(f"Improved distance: {dist1:.2f}")
                 else:
                     LOG.debug(f"Improved: {dist1:.2f}, {dist2:.2f}")
-            best_tracker = current_tracker.copy()
+    best_tracker = current_tracker.copy()
 
     # Phase 2: Main optimization
     LOG.debug("\nPhase 2: Main optimization")
@@ -1156,6 +1156,7 @@ def optimize_crosslink(
 
         if accept:
             current_tracker.update_from(temp_tracker)
+            best_tracker.update_from(temp_tracker)
             if new_max_distance < best_max_distance:
                 best_max_distance = new_max_distance
                 best_structures = {k: v.copy() for k, v in structures.items()}
