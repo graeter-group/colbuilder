@@ -7,6 +7,7 @@ for molecular systems, particularly focused on collagen microfibrils.
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 import asyncio
 from colorama import Fore, Style
@@ -73,7 +74,11 @@ class Amber:
         Optional[str]
             Model type if successful, None otherwise
         """
-        model = self.system.get_model(model_id=connect_id)
+        if self.system is None:
+            return None
+        if connect_id is None:
+            return None
+        model = self.system.get_model(model_id=float(connect_id))
         if model is None or model.connect is None or not model.type:
             return None
 
@@ -163,165 +168,57 @@ class Amber:
         if not processed_models:
             raise ValueError("processed_models cannot be empty")
 
-        with open(topology_file, 'w') as f:
+        if topology_file is None:
+            raise ValueError("topology_file cannot be None")
+        if not self.ff:
+            raise ValueError("Force field (self.ff) is not set")
+        with open(str(topology_file), 'w') as f:
             f.write('; Topology for Collagen Microfibril from Colbuilder 2.0\n')
-            f.write('#include "./' + self.ff + '/forcefield.itp"\n')
+            f.write(f'#include "./{self.ff}/forcefield.itp"\n')
             for model in processed_models:
                 if os.path.exists(f"col_{int(model)}.itp"):
                     f.write(f'#include "col_{int(model)}.itp"\n')
             
-            f.write('#include "./' + self.ff + '/ions.itp"\n')
-            f.write('#include "./' + self.ff + '/tip3p.itp"\n')
+            f.write(f'#include "./{self.ff}/ions.itp"\n')
+            f.write(f'#include "./{self.ff}/tip3p.itp"\n')
             f.write('\n\n[ system ]\n ;name\nCollagen Microfibril in Water\n\n[ molecules ]\n;name  number\n')
             for model in processed_models:
                 if os.path.exists(f"col_{int(model)}.itp"):
                     f.write(f'col_{int(model)}   1\n')
 
-    def write_gro(self, system: Optional[Any] = None, gro_file: Optional[str] = None, 
-        processed_models: Optional[List[int]] = None) -> None:
-        """
-        Write a GRO (Gromos87) file for the processed models.
-
-        This method combines information from individual GRO files of processed models
-        into a single GRO file, updating the total atom count.
-
-        Parameters
-        ----------
-        system : Optional[Any]
-            The molecular system (not used in the current implementation).
-        gro_file : Optional[str]
-            Path to the output GRO file.
-        processed_models : Optional[List[int]]
-            List of processed model identifiers.
-
-        Raises
-        ------
-        ValueError
-            If no processed models are provided.
-        FileNotFoundError
-            If an input GRO file for a model is not found.
-        PermissionError
-            If there's no write permission for the output file.
-        """
+    def write_gro(self, system: Optional[Any] = None, gro_file: Optional[str] = None,
+                processed_models: Optional[List[int]] = None) -> None:
         if not processed_models:
             LOG.error("No processed models to write GRO file")
             raise ValueError("processed_models cannot be empty")
 
-        LOG.debug(f"Writing GRO file: {gro_file}")
-        last_box_dims = None
-        total_atoms = 0
+        if gro_file is None:
+            raise ValueError("gro_file cannot be None")
+        gro_file_path = str(gro_file)
+
         all_atom_lines = []
-        
-        try:
-            for model in processed_models:
-                model_gro = f"col_{int(model)}.gro"
-                if os.path.exists(model_gro):
-                    with open(model_gro, 'r') as model_f:
-                        lines = model_f.readlines()
-                        
-                        try:
-                            model_atoms = int(lines[1].strip())
-                            total_atoms += model_atoms
-                        except (ValueError, IndexError) as e:
-                            LOG.warning(f"Error reading atom count from {model_gro}: {e}")
-                            continue
-                        
-                        # Store atom lines (exclude header, count, and box dimensions)
-                        if len(lines) > 3:  # Must have at least header, count, one atom, and box
-                            atom_lines = lines[2:-1]  # Exclude first two and last line
-                            all_atom_lines.extend(atom_lines)
-                        
-                        if len(lines) > 2:
-                            box_dim_line = lines[-1].strip()
-                            
-                            if self._is_valid_box_dims(box_dim_line):
-                                last_box_dims = box_dim_line
-                    
-                    # Optional cleanup - uncomment if needed
-                    os.remove(model_gro)
-                else:
-                    LOG.warning(f"GRO file not found for model: {model}")
-            
-            with open(gro_file, 'w') as f:
-                f.write("GROMACS GRO-FILE\n")
-                f.write(f"{total_atoms}\n")
-                
-                for line in all_atom_lines:
-                    f.write(line)
-                
-                if last_box_dims:
-                    f.write(f"{last_box_dims}\n")
-                else:
-                    LOG.warning("No valid box dimensions found, using default (10x10x10)")
-                    f.write("10.0 10.0 10.0\n")
-            
-        except PermissionError:
-            LOG.error(f"Permission denied when writing to file: {gro_file}")
-            raise
-        except FileNotFoundError:
-            LOG.error(f"One or more input GRO files not found")
-            raise
-        except Exception as e:
-            LOG.error(f"Unexpected error writing GRO file: {e}")
-            raise
 
-    def _is_valid_box_dims(self, line: str) -> bool:
-        """
-        Validate that a string contains valid box dimensions.
-        
-        Parameters
-        ----------
-        line : str
-            Line to validate as box dimensions
-            
-        Returns
-        -------
-        bool
-            True if the line contains valid box dimensions, False otherwise
-        """
-        try:
-            parts = line.split()
-            
-            # Box dimensions should be either 3 (orthorhombic), 6 (triclinic with skew), or 9 (full triclinic) values
-            if len(parts) not in (3, 6, 9):
-                LOG.warning(f"Box dimensions line has {len(parts)} values, expected 3, 6, or 9: {line}")
-                return False
-                
-            all_floats = all(self._can_convert_to_float(part) for part in parts)
-            if not all_floats:
-                LOG.warning(f"Box dimensions contain non-numeric values: {line}")
-                return False
-                
-            for i, part in enumerate(parts):
-                value = float(part)
-                if i % 3 == 0 and (value <= 0 or value > 1000):
-                    LOG.warning(f"Box dimension {i} has suspicious value: {value}")
-                    
-            return True
-        except Exception as e:
-            LOG.warning(f"Error validating box dimensions: {e}")
-            return False
+        for model in processed_models:
+            model_gro = f"col_{int(model)}.gro"
+            if os.path.exists(model_gro):
+                with open(model_gro, 'r') as gro_f:
+                    gro_lines = gro_f.readlines()
+                    # Collect atom lines (skip first two and last line)
+                    all_atom_lines.extend(gro_lines[2:-1])
+                    last_box_line = gro_lines[-1]
+                # subprocess.run(f"rm {model_gro}", shell=True)
+            else:
+                LOG.warning(f"GRO file not found for model: {model}")
 
-    def _can_convert_to_float(self, value: str) -> bool:
-        """
-        Check if a string can be converted to a float.
-        
-        Parameters
-        ----------
-        value : str
-            Value to check
-            
-        Returns
-        -------
-        bool
-            True if the value can be converted to float, False otherwise
-        """
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
+        # Write the final GRO file
+        with open(gro_file_path, 'w') as f:
+            f.write("GROMACS GRO-FILE\n")
+            f.write(f"{len(all_atom_lines)}\n")  # atom count
+            for line in all_atom_lines:
+                f.write(line)
+            f.write(last_box_line if last_box_line else "   1.00000   1.00000   1.00000\n")
 
+        LOG.debug(f"GRO file written with {len(all_atom_lines)} atoms")
 
 @timeit
 async def build_amber99(system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None) -> Amber:
@@ -402,7 +299,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
 
         for model in system.get_models():
             try:
-                model_type = amber.merge_pdbs(connect_id=model)
+                model_type = amber.merge_pdbs(connect_id=int(model))
                 if model_type is None:
                     continue
 
@@ -414,6 +311,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                         context={"model": str(model), "path": str(merge_pdb_path)}
                     )
 
+                # Keep -water tip3p as it was working in the old version
                 gmx_cmd = (f'export GMXLIB={working_dir} && gmx pdb2gmx -f {merge_pdb_path} '
                           f'-ignh -merge all -ff {ff} -water tip3p '
                           f'-p col_{int(model)}.top -o col_{int(model)}.gro '
@@ -456,8 +354,8 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
             topology_file = working_dir / f"collagen_fibril_{config.species}.top"
             gro_file = working_dir / f"collagen_fibril_{config.species}.gro"
             
-            amber.write_topology(topology_file=topology_file, processed_models=processed_models)
-            amber.write_gro(gro_file=gro_file, processed_models=processed_models)
+            amber.write_topology(topology_file=str(topology_file), processed_models=processed_models)
+            amber.write_gro(gro_file=str(gro_file), processed_models=processed_models)
 
         except Exception as e:
             raise TopologyGenerationError(

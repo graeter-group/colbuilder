@@ -136,6 +136,8 @@ class Itp:
         Raises:
             FileNotFoundError: If the specified ITP file cannot be found
         """
+        if model_id is None or connect_id is None:
+            raise ValueError("model_id and connect_id cannot be None when reading ITP file.")
         itp_path = f"col_{int(model_id)}.{int(connect_id)}.itp"
         bonded_type = ""
 
@@ -145,15 +147,17 @@ class Itp:
                     if line[0] == ";":
                         continue
 
+                    if cnt_con is None:
+                        raise ValueError("cnt_con cannot be None when appending to molecule.")
                     self.molecule[cnt_con].append(line)
 
                     # Parse section headers
                     if line == "[ atoms ]\n":
                         bonded_type = "atoms"
                     elif line == "[ position_restraints ]\n":
-                        self.mol_ends[cnt_con] = int(
-                            self.molecule[cnt_con][-3].split(" ")[0]
-                        )
+                        self.mol_ends[cnt_con] = [
+                            int(self.molecule[cnt_con][-3].split(" ")[0])
+                        ]
                         bonded_type = "posres"
                     elif line == "[ bonds ]\n":
                         bonded_type = "bonds"
@@ -173,6 +177,8 @@ class Itp:
                         tokens = [k for k in line.split(" ") if k and k != "\n"]
 
                         # Store tokens in appropriate data structure based on section type
+                        if cnt_con is None:
+                            raise ValueError("cnt_con cannot be None when parsing ITP sections.")
                         if bonded_type == "atoms":
                             self.atoms[cnt_con].append(tokens)
                         elif bonded_type == "posres":
@@ -214,6 +220,8 @@ class Itp:
         Raises:
             FileNotFoundError: If the specified exclusion file cannot be found
         """
+        if model_id is None or connect_id is None:
+            raise ValueError("model_id and connect_id cannot be None when reading exclusion file.")
         excl_path = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
 
         try:
@@ -226,6 +234,8 @@ class Itp:
                             if k and k != "\n" and k.strip() != ";"
                         ]
                         if tokens:
+                            if cnt_con is None:
+                                raise ValueError("cnt_con cannot be None when appending to go_exclusions.")
                             self.go_exclusions[cnt_con].append(tokens)
 
         except FileNotFoundError:
@@ -251,6 +261,8 @@ class Itp:
         Raises:
             FileNotFoundError: If the specified table file cannot be found
         """
+        if model_id is None or connect_id is None:
+            raise ValueError("model_id and connect_id cannot be None when reading Go-table file.")
         table_path = f"col_{int(model_id)}.{int(connect_id)}_go-table.itp"
 
         try:
@@ -263,6 +275,8 @@ class Itp:
                             if k and k != "\n" and k.strip() != ";"
                         ]
                         if tokens:
+                            if cnt_con is None:
+                                raise ValueError("cnt_con cannot be None when appending to go_table.")
                             self.go_table[cnt_con].append(tokens)
 
         except FileNotFoundError:
@@ -295,6 +309,8 @@ class Itp:
         Args:
             cnt_con: Counter index for the current molecular connection
         """
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when mapping virtual sites to pairs.")
         for atom_entry in self.atoms[cnt_con]:
             if atom_entry[1].startswith("col"):
                 self.vs_to_col[atom_entry[1]] = atom_entry[0]
@@ -316,6 +332,8 @@ class Itp:
             The pair entry format follows: [atom1, atom2, param1, ..., param6, vs1_id, vs2_id]
             where atom1/2 are mapped column indices and vs1/2_id are original virtual site IDs
         """
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when generating pairs.")
         for table_entry in self.go_table[cnt_con]:
             vs1, vs2 = table_entry[0:2]
 
@@ -347,9 +365,17 @@ class Itp:
             - Virtual sites and exclusions that require string formatting
         """
         # Update index offset based on previous connection
-        if cnt_con != 0:
-            self.delta_merge += self.mol_ends[cnt_con - 1]
+        if cnt_con is not None and cnt_con != 0:
+            # Ensure mol_ends contains integers, not lists
+            prev_end = self.mol_ends[cnt_con - 1]
+            if isinstance(prev_end, list):
+                # If it's a list, get the first element or handle appropriately
+                prev_end = int(prev_end[0])
+            self.delta_merge += prev_end
 
+        # Ensure cnt_con is not None before using as index
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging atoms.")
         # Process atoms with index adjustment
         merged_atoms = [
             [
@@ -366,6 +392,8 @@ class Itp:
         self.final_atoms.extend(merged_atoms)
 
         # Process position restraints
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging position restraints.")
         merged_posres = [
             [int(p[0]) + self.delta_merge, p[1], p[2], p[3], p[4]]
             for p in self.posres[cnt_con]
@@ -373,6 +401,8 @@ class Itp:
         self.final_posres.extend(merged_posres)
 
         # Process bonds and separate flexible bonds
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging bonds.")
         merged_bonds = [
             [
                 int(b[0]) + self.delta_merge,
@@ -390,6 +420,8 @@ class Itp:
                 self.final_bonds.append(bond)
 
         # Process angles
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging angles.")
         merged_angles = [
             [
                 int(a[0]) + self.delta_merge,
@@ -405,8 +437,10 @@ class Itp:
 
         # Process dihedrals based on entry length
         merged_dihedrals = []
-        if self.dihedrals[cnt_con]:
-            dihedral_length = len(self.dihedrals[cnt_con][1])
+        # Ensure cnt_con is not None and the list is not empty before accessing by index
+        if cnt_con is not None and self.dihedrals[cnt_con]:
+            # Use the first element to determine dihedral_length if available
+            dihedral_length = len(self.dihedrals[cnt_con][0])
 
             if dihedral_length == 8:
                 for dih in self.dihedrals[cnt_con]:
@@ -444,6 +478,8 @@ class Itp:
         self.final_dihedrals.extend(merged_dihedrals)
 
         # Process constraints
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging constraints.")
         merged_constraints = [
             [int(c[0]) + self.delta_merge, int(c[1]) + self.delta_merge, c[2], c[3]]
             for c in self.constraints[cnt_con]
@@ -451,6 +487,8 @@ class Itp:
         self.final_constraints.extend(merged_constraints)
 
         # Process virtual sites
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging virtual_sites.")
         merged_vsites = [
             [
                 str(int(v[0]) + self.delta_merge),
@@ -462,6 +500,8 @@ class Itp:
         self.final_virtual_sites.extend(merged_vsites)
 
         # Process Go exclusions
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging go_exclusions.")
         merged_go_excl = [
             [
                 int(e[0]) + self.delta_merge,
@@ -476,6 +516,8 @@ class Itp:
 
         # Process exclusions
         merged_excl = []
+        if cnt_con is None:
+            raise ValueError("cnt_con cannot be None when merging exclusions.")
         for excl in self.exclusions[cnt_con]:
             merged_entry = [str(int(idx) + self.delta_merge) for idx in excl if idx]
             if merged_entry:
@@ -558,6 +600,8 @@ class Itp:
             PermissionError: If writing to the output file is not permitted
             Exception: For other file operation errors
         """
+        if cnt_model is None:
+            raise ValueError("cnt_model cannot be None when writing topology file.")
         output_path = f"col_{int(cnt_model)}.itp"
 
         try:

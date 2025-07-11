@@ -50,7 +50,7 @@ class Crosslink:
             Model counter used for file naming. If provided, the merged PDB
             file will be named '{cnt_model}.merge.pdb'
         """
-        self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else None
+        self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
         self.crosslink_pdb: List[List[str]] = []
         self.crosslink_neighbors: List[Any] = []
@@ -145,7 +145,7 @@ class Crosslink:
                             residue,
                             atom, 
                             line[21:26],
-                            *coords
+                            *[str(c) for c in coords]
                         ])
                         self.crosslink_coords.append(coords)
             
@@ -181,7 +181,7 @@ class Crosslink:
             return []
         
         try:
-            pairs = pdist(self.crosslink_coords)
+            pairs = pdist(np.array(self.crosslink_coords))
             processed_indices = []
             self.crosslink_connect = []
             

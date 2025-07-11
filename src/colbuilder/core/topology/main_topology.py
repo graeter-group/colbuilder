@@ -119,7 +119,7 @@ def organize_topology_files(topology_dir: Path, species: str) -> None:
         for top_file in Path().glob(f"collagen_fibril_*.top"):
             shutil.copy2(top_file, topology_dir / top_file.name)
 
-        for gro_file in Path().glob("*.gro"):
+        for gro_file in Path().glob(f"collagen_fibril_*.gro"):
             shutil.copy2(gro_file, topology_dir / gro_file.name)
             
         for itp_file in Path().glob("*.itp"):
@@ -164,6 +164,7 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
         file_manager = file_manager or FileManager(config)
         topology_dir = file_manager.get_temp_dir("topology_gen")
         original_dir = Path.cwd()
+        output_topology_dir = None
         
         try:
             os.chdir(topology_dir)
@@ -210,6 +211,9 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
             
             for top_file in Path().glob(f"collagen_fibril_*.top"):
                 file_manager.copy_to_directory(top_file, dest_dir=output_topology_dir)
+            
+            for gro_file in Path().glob(f"collagen_fibril_*.gro"):
+                file_manager.copy_to_directory(gro_file, dest_dir=output_topology_dir)
                 
             for itp_file in Path().glob("col_[0-9]*.itp"):
                 file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
@@ -217,12 +221,14 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
             LOG.info(f"{Fore.BLUE}Topology files written at: {output_topology_dir}{Style.RESET_ALL}")
                 
             return system
-            
         finally:
             os.chdir(original_dir)
-            search_dirs = [topology_dir, output_topology_dir]
+            search_dirs = [topology_dir]
+            if output_topology_dir is not None:
+                search_dirs.append(output_topology_dir)
             if not config.topology_debug:
-                cleanup_temporary_files(config.force_field, TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
+                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
+                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
             
     except TopologyGenerationError:
         raise

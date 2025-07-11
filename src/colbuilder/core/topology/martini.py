@@ -74,48 +74,40 @@ class Martini:
         self.is_line = ("ATOM  ", "HETATM", "ANISOU", "TER   ")
         self.is_chain = ("A", "B", "C")
 
-    def merge_pdbs(
-        self, model_id: Optional[int] = None, cnt_model: Optional[int] = None
-    ) -> Optional[str]:
+    def merge_pdbs(self, model_id: Optional[int] = None, cnt_model: Optional[int] = None) -> Optional[str]:
         """
         Merge multiple PDB files based on system connectivity.
-
-        Combines PDB files for a given model based on its connection identifiers.
-        The merged file includes only relevant atom records and chain terminators.
-
-        Parameters
-        ----------
-        model_id : Optional[int]
-            Model identifier in the system
-        cnt_model : Optional[int]
-            Counter for output file naming
-
-        Returns
-        -------
-        Optional[str]
-            Path to merged PDB file if successful, None otherwise
         """
         model = self.system.get_model(model_id=model_id)
         if model is None or model.connect is None:
             return None
 
+        if cnt_model is None:
+            LOG.error("cnt_model is None in merge_pdbs; cannot generate output file name.")
+            return None
         output_file = f"{int(cnt_model)}.merge.pdb"
 
         try:
             with open(output_file, "w") as f:
                 for connect_id in model.connect:
+                    if model_id is None or connect_id is None:
+                        LOG.warning(f"model_id or connect_id is None (model_id={model_id}, connect_id={connect_id}), skipping.")
+                        continue
                     input_file = f"{int(model_id)}.{int(connect_id)}.CG.pdb"
                     if not os.path.exists(input_file):
+                        LOG.warning(f"CG PDB file not found: {input_file}")
                         continue
+
                     with open(input_file, "r") as infile:
-                        f.write(
-                            "".join(
-                                line for line in infile if line[0:6] in self.is_line
-                            )
-                        )
-                f.write("END")
+                        for line in infile:
+                            if line[0:6] in self.is_line:
+                                f.write(line)
+
+                f.write("END\n")  # Ensure END is on its own line
+                
             return output_file
-        except Exception:
+        except Exception as e:
+            LOG.error(f"Error merging PDBs: {str(e)}")
             return None
 
     def read_pdb(self, pdb_id: Optional[int] = None) -> List[str]:
@@ -140,22 +132,22 @@ class Martini:
             return pdb
 
         if model.type:
-            file_path = Path(model.type) / f"{int(pdb_id)}.caps.pdb"
-            if file_path.exists():
-                try:
-                    with open(file_path, "r") as file:
-                        pdb = [line for line in file if line[0:6] in self.is_line]
-                    LOG.debug(f"Read {len(pdb)} lines from PDB file: {file_path}")
-                    return pdb
-                except Exception as e:
-                    LOG.error(f"Error reading PDB file {file_path}: {str(e)}")
+            if pdb_id is not None:
+                file_path = Path(model.type) / f"{int(pdb_id)}.caps.pdb"
+                if file_path.exists():
+                    try:
+                        with open(file_path, "r") as file:
+                            pdb = [line for line in file if line[0:6] in self.is_line]
+                        LOG.debug(f"Read {len(pdb)} lines from PDB file: {file_path}")
+                        return pdb
+                    except Exception as e:
+                        LOG.error(f"Error reading PDB file {file_path}: {str(e)}")
 
-        alt_paths = [
-            Path(f"{int(pdb_id)}.caps.pdb"),  # Current directory
-            (
-                Path(f"./{model.type}/{int(pdb_id)}.caps.pdb") if model.type else None
-            ),  # Type directory
-        ]
+        alt_paths = []
+        if pdb_id is not None:
+            alt_paths.append(Path(f"{int(pdb_id)}.caps.pdb"))  # Current directory
+            if model.type:
+                alt_paths.append(Path(f"./{model.type}/{int(pdb_id)}.caps.pdb"))  # Type directory
 
         for path in alt_paths:
             if path and path.exists():
@@ -257,7 +249,7 @@ class Martini:
         """
         if not pdb:
             LOG.warning("Empty PDB provided to cap_pdb")
-            return pdb, "NME", "ACE"
+            return [], "NME", "ACE"
 
         LOG.debug("Capping PDB with terminal residues")
         try:
@@ -477,39 +469,26 @@ class Martini:
         except Exception as e:
             LOG.error(f"Error writing GO topology: {str(e)}")
 
-    async def translate_pdb(self, pdb: Optional[List[str]] = None) -> List[str]:
+    def translate_pdb(self, pdb: Optional[List[str]] = None) -> List[str]:
         """
-        Translate PDDs for Martinize2 by formatting coordinates.
-
-        Parameters
-        ----------
-        pdb : Optional[List[str]]
-            List of PDB file lines
-
-        Returns
-        -------
-        List[str]
-            Translated PDB lines
+        Translate PDB for Martinize2 by formatting coordinates.
+        
+        Ensures all coordinates are formatted with exactly 3 decimal places,
+        which is required for proper processing by Martinize2.
         """
         if not pdb:
             LOG.warning("Empty PDB provided to translate_pdb")
             return []
-
-        LOG.debug("Translating PDB coordinates")
-        try:
-            translated = []
-            for line in pdb:
-                if line[0:6] in self.is_line:
-                    x_coord = float(line[46:54])
-                    formatted_x = "{:.3f}".format(round(x_coord, 3))
-                    new_line = line[:46] + formatted_x.rjust(8) + line[54:]
-                    translated.append(new_line)
-
-            LOG.debug(f"Translated {len(translated)} PDB lines")
-            return translated
-        except Exception as e:
-            LOG.error(f"Error translating PDB: {str(e)}")
-            return []
+        
+        # Simple one-liner like the old version, but clearer:
+        translated = []
+        for line in pdb:
+            if line[0:6] in self.is_line:
+                # Reformat coordinates to ensure 3 decimal places
+                new_line = line[:46] + '{:.3f}'.format(round(float(line[46:54]), 3)) + line[54:]
+                translated.append(new_line)
+        
+        return translated
 
     def write_gro(
         self,
@@ -772,6 +751,8 @@ async def build_martini3(
                             LOG.warning(f"Empty PDB for connect_id: {connect_id}")
                             continue
 
+                        pdb = martini.translate_pdb(pdb=pdb)
+
                         cap_pdb, cter, nter = martini.cap_pdb(pdb=pdb)
                         order, map_pdb = martini.set_pdb(pdb=cap_pdb)
 
@@ -853,14 +834,14 @@ async def build_martini3(
                         )
                         continue
 
-                merged_pdb = martini.merge_pdbs(model_id=model_id, cnt_model=cnt_model)
+                merged_pdb = martini.merge_pdbs(model_id=int(model_id), cnt_model=cnt_model)
                 if merged_pdb:
                     try:
                         LOG.debug(f"Itp class from: {Itp.__module__}")
-                        itp_ = Itp(system=system, model_id=model_id)
-                        itp_.read_model(model_id=model_id)
-                        itp_.go_to_pairs(model_id=model_id)
-                        itp_.make_topology(model_id=model_id, cnt_model=cnt_model)
+                        itp_ = Itp(system=system, model_id=int(model_id))
+                        itp_.read_model(model_id=int(model_id))
+                        itp_.go_to_pairs(model_id=int(model_id))
+                        itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
                         processed_models.append(model_id)
                     except Exception as e:
                         LOG.error(
@@ -954,7 +935,7 @@ async def build_martini3(
 
         try:
             if not config.debug:
-                subprocess.run("rm \#*", shell=True, check=False)
+                subprocess.run(r"rm \#*", shell=True, check=False)
         except Exception as e:
             LOG.warning(f"Error cleaning up temporary files: {str(e)}")
 
