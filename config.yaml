@@ -2,8 +2,8 @@
 mode: null
 config_file: null
 sequence_generator: true
-geometry_generator: true
-topology_generator: true
+geometry_generator: false
+topology_generator: false
 debug: false
 working_directory: "./"
 
@@ -15,6 +15,9 @@ species: "homo_sapiens"  # Available options:
                         # Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
                         # Reptiles: pelodiscus_sinensis
 
+# Skip homology modeling by providing pre-mutated PDB
+mutated_pdb: "homosapiens_N_HLKNL_C_HLKNL.pdb"
+
 # Sequence Settings
 fasta_file: null # Provide custom fasta file if not choosing an available species. If null, will be auto-generated based on species.
 crosslink: true
@@ -23,9 +26,18 @@ c_term_type: "HLKNL" #"DPL"                 # Crosslink type in terminal C
 n_term_combination: "9.C - 947.A" #"9.C - 5.B - 944.B" #"9.C - 947.A"   # Crosslink position. Example: "9.C - 947.A" for resnum 9 in chainID C and resnum 947 in chainID A
 c_term_combination: "1047.C - 104.C" #"1047.C - 1047.A - 104.C"
 
+# Additional crosslinks to apply
+additional_1_type: "Glucosepane"
+additional_2_type: null #"DPL"
+additional_1_combination: "523.A - 286.C"
+additional_2_combination: null #"1050.B - 1055.A - 110.B"
+
+# Crosslink Optimization Settings
+crosslink_copies: ["D0", "D5"]  # Must be exactly 2 elements from: D0, D1, D2, D3, D4, D5
+# Default is ["D0", "D5"] if not specified
 
 # Geometry Parameters
-pdb_file: null #homosapiens_N_HLKNL_C_HLKNL.pdb #homosapiens_N_NONE_C_NONE.pdb # Set to null if sequence_generator is true
+pdb_file: homosapiens_N_HLKNL_C_HLKNL.pdb #homosapiens_N_NONE_C_NONE.pdb # Set to null if sequence_generator is true
 contact_distance: 25                      # Contact distance in Angstroms
 fibril_length: 40                         # Fibril length in nm
 crystalcontacts_file: null                # Optional: Path to a file containing crystal contacts
@@ -47,5 +59,5 @@ ratio_replace: 30    # Percentage of crosslinks to replace with standard amino a
 replace_file: homo_sapiens.pdb   # "rattus_norvegicus.pdb"   # Optional: Path to a file containing specific crosslinks to replace
 
 # Topology Options
-force_field: "amber99"  # Options: "amber99", "martini3"
+force_field: "martini3"  # Options: "amber99", "martini3"
 topology_debug: true     # Set to true to save all intermediate files for topology generation

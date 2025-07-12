@@ -118,6 +118,7 @@ def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, 
     path_keys = [
         "working_directory",
         "fasta_file",
+        "mutated_pdb",
         "pdb_file",
         "crystalcontacts_file",
         "connect_file",
@@ -179,6 +180,36 @@ class ColbuilderConfig(BaseModel):
     )
     c_term_combination: Optional[str] = Field(
         None, description="C-terminal combination"
+    )
+    
+    # Crosslink optimization settings
+    crosslink_copies: List[str] = Field(
+        default=["D0", "D5"],
+        description="Pair of unit cell translations for crosslink optimization. "
+                    "Must be exactly 2 elements from: D0, D1, D2, D3, D4, D5"
+    )
+    # Pre-mutated PDB input (skips homology modeling)
+    mutated_pdb: Optional[Path] = Field(
+        None, 
+        description="Path to pre-mutated PDB file. If provided, skips homology modeling and applies only additional crosslinks"
+    )
+    
+    # Additional crosslinks (applied when using mutated_pdb)
+    additional_1_type: Optional[str] = Field(
+        None, 
+        description="First additional crosslink type to apply to mutated_pdb"
+    )
+    additional_2_type: Optional[str] = Field(
+        None, 
+        description="Second dditional crosslink type to apply to mutated_pdb"
+    )
+    additional_1_combination: Optional[str] = Field(
+        None, 
+        description="First additional crosslink position"
+    )
+    additional_2_combination: Optional[str] = Field(
+        None, 
+        description="Second additional crosslink position"
     )
 
     # Fibril geometry generation mode
@@ -517,6 +548,71 @@ class ColbuilderConfig(BaseModel):
         if isinstance(value, list):
             return tuple(value)
         return value
+    
+    @field_validator("crosslink_copies")
+    def validate_crosslink_copies(cls, value: List[str]) -> List[str]:
+        """Validate crosslink copies - must be exactly 2 valid translation names."""
+        valid_names = ["D0", "D1", "D2", "D3", "D4", "D5"]
+        if len(value) != 2:
+            raise ConfigurationError(
+                f"crosslink_copies must contain exactly 2 elements, got {len(value)}",
+                error_code="CFG_ERR_006"
+            )
+        for item in value:
+            if item not in valid_names:
+                raise ConfigurationError(
+                    f"Invalid translation name: {item}. Valid options: {valid_names}",
+                    error_code="CFG_ERR_006"
+                )
+        if value[0] == value[1]:
+            raise ConfigurationError(
+                f"crosslink_copies must contain 2 different translations, got duplicate: {value[0]}",
+                error_code="CFG_ERR_006"
+            )
+        
+        return value
+    
+    @model_validator(mode="after")
+    def validate_mutated_pdb_config(self) -> "ColbuilderConfig":
+        """Validate mutated PDB configuration."""
+        if self.mutated_pdb:
+            # If mutated_pdb is provided, we need at least one additional crosslink
+            has_additional = any([
+                self.additional_1_type,
+                self.additional_2_type
+            ])
+            
+            if not has_additional and not self.crosslink:
+                LOG.warning(
+                    "mutated_pdb provided but no additional crosslinks specified. "
+                    "Only optimization will be performed."
+                )
+            
+            # Validate that additional crosslink positions are provided if types are specified
+            if self.additional_1_type and not self.additional_1_combination:
+                raise ConfigurationError(
+                    "additional_1_combination required when additional_1_type is specified",
+                    error_code="CFG_ERR_006"
+                )
+                
+            if self.additional_2_type and not self.additional_2_combination:
+                raise ConfigurationError(
+                    "additional_2_combination required when additional_2_type is specified",
+                    error_code="CFG_ERR_006"
+                )
+        
+        return self
+    
+    @field_validator("mutated_pdb", mode="before")
+    def validate_mutated_pdb_path(cls, value):
+        """Validate mutated PDB path."""
+        if value is not None:
+            path = Path(value)
+            if not path.is_absolute():
+                # Will be resolved relative to working directory later
+                return value
+            return value
+        return None
 
     @field_validator("files_mix", mode="before")
     def validate_files_mix(cls, value):
@@ -565,6 +661,7 @@ class ColbuilderConfig(BaseModel):
 
         # Only check paths that are specified
         optional_paths = [
+            self.mutated_pdb,
             self.pdb_file,
             self.crystalcontacts_file,
             self.connect_file,

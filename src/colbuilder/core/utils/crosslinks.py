@@ -203,10 +203,16 @@ def extract_crosslinks_from_dataframe(
 class CrosslinkOptimizer:
     """Handles the optimization of crosslink positions."""
 
-    def __init__(self, crosslink_pairs: List[CrosslinkPair], chimera_scripts_dir: Path):
+    def __init__(self, crosslink_pairs: List[CrosslinkPair], chimera_scripts_dir: Path, 
+                 crosslink_copies: List[str] = None):
         self.crosslink_pairs = crosslink_pairs
         self.chimera_scripts_dir = chimera_scripts_dir
         self.state = OptimizationState()
+        self.crosslink_copies = crosslink_copies or ["D0", "D5"]  # Default pair
+        
+        # Validate we have exactly 2 copies
+        if len(self.crosslink_copies) != 2:
+            raise ValueError(f"CrosslinkOptimizer requires exactly 2 copies, got {len(self.crosslink_copies)}")
 
     def _get_distance_threshold(self) -> float:
         """Get the distance threshold based on crosslink types."""
@@ -277,15 +283,8 @@ class CrosslinkOptimizer:
                 self.state.update(total_distance)
                 self.state.increment_attempt()
 
-                LOG.debug(
-                    f"Iteration {self.state.attempt_number-1} complete. Previous best: {best_distance:.2f} Å, New result: {total_distance:.2f} Å"
-                )
-
                 # Only update our best solution if this iteration actually improved
                 if total_distance < best_distance:
-                    LOG.debug(
-                        f"New best solution found! Improving from {best_distance:.2f} Å to {total_distance:.2f} Å"
-                    )
                     best_distance = total_distance
                     best_input = iteration_pdb
                 else:
@@ -331,13 +330,16 @@ class CrosslinkOptimizer:
                         LOG.warning(f"Failed to delete temporary file {pdb}: {str(e)}")
 
     async def _generate_copies(self, input_pdb: Path) -> List[Path]:
-        """Generate copies using Chimera."""
+        """Generate two copies using Chimera with specified translations."""
         try:
             generate_copies_script = self.chimera_scripts_dir / "generate_copies.py"
             generated_pdbs_file = Path("generated_pdbs.txt")
 
             env = os.environ.copy()
             env["INPUT_PDB"] = str(input_pdb)
+            # Pass crosslink copies configuration as JSON
+            import json
+            env["CROSSLINK_COPIES"] = json.dumps(self.crosslink_copies)
 
             generate_command = [
                 "chimera",
@@ -364,6 +366,7 @@ class CrosslinkOptimizer:
                         "stdout": stdout.decode() if stdout else None,
                         "stderr": stderr.decode() if stderr else None,
                         "command": generate_command,
+                        "crosslink_copies": self.crosslink_copies,
                     },
                 )
 
@@ -376,7 +379,20 @@ class CrosslinkOptimizer:
 
             with open(generated_pdbs_file, "r") as f:
                 generated_pdbs = [Path(line.strip()) for line in f]
-
+            
+            # Verify we got exactly 2 copies
+            if len(generated_pdbs) != 2:
+                raise SequenceGenerationError(
+                    f"Expected 2 generated PDBs, got {len(generated_pdbs)}",
+                    error_code="SEQ_ERR_004",
+                    context={
+                        "generated_pdbs": generated_pdbs,
+                        "crosslink_copies": self.crosslink_copies
+                    }
+                )
+            
+            LOG.debug(f"Generated 2 PDB copies using translations: {self.crosslink_copies}")
+            
             return generated_pdbs
 
         finally:

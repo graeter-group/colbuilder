@@ -584,6 +584,38 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     help="Fasta-input file for collagen triple helix sequence",
 )
 @click.option(
+    "--crosslink_copies",
+    nargs=2,
+    type=click.Choice(["D0", "D1", "D2", "D3", "D4", "D5"]),
+    default=["D0", "D5"],
+    help="Pair of unit cell translations for crosslink optimization (default: D0 D5)"
+)
+@click.option(
+    "--mutated_pdb",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Pre-mutated PDB file to skip homology modeling and apply additional crosslinks"
+)
+@click.option(
+    "--additional_1_type",
+    type=str,
+    help="First additional crosslink type to apply to mutated PDB"
+)
+@click.option(
+    "--additional_2_type", 
+    type=str,
+    help="Second additional crosslink type to apply to mutated PDB"
+)
+@click.option(
+    "--additional_1_combination",
+    type=str,
+    help="First additional crosslink position (e.g., '9.C - 947.A')"
+)
+@click.option(
+    "--additional_2_combination",
+    type=str,
+    help="Second additional crosslink position (e.g., '1047.C - 104.C')"
+)
+@click.option(
     "-pdb",
     "--pdb_file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -754,16 +786,6 @@ def main(**kwargs: Any) -> int:
                 config_data[key] = value
                 raw_files_mix = value
                 continue
-
-            # For boolean flags like --sequence_generator, only override if
-            # explicitly set to True on command line
-            # elif isinstance(value, bool):
-            #     if value:
-            #         config_data[key] = value
-            #     elif key not in config_data:
-            #         config_data[key] = value
-            # elif value is not None:
-            #     config_data[key] = value
 
         # Log the final configuration before validation
         LOG.debug(f"Final configuration data before validation: {config_data}")
