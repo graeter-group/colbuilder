@@ -1,14 +1,14 @@
 # Operation Mode
 mode: null
 config_file: null
-sequence_generator: true
-geometry_generator: false
+sequence_generator: false
+geometry_generator: true
 topology_generator: false
 debug: false
 working_directory: "./"
 
 # Input Configuration
-species: "homo_sapiens"  # Available options:
+species: "rattus_norvegicus"  # Available options:
                         # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
                         # Mammals (Rodents): mus_musculus, rattus_norvegicus
                         # Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
@@ -16,15 +16,15 @@ species: "homo_sapiens"  # Available options:
                         # Reptiles: pelodiscus_sinensis
 
 # Skip homology modeling by providing pre-mutated PDB
-mutated_pdb: "homosapiens_N_HLKNL_C_HLKNL.pdb"
+mutated_pdb: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"
 
 # Sequence Settings
 fasta_file: null # Provide custom fasta file if not choosing an available species. If null, will be auto-generated based on species.
 crosslink: true
 n_term_type: "HLKNL" #"DPL"                # Crosslink type in terminal N
 c_term_type: "HLKNL" #"DPL"                 # Crosslink type in terminal C
-n_term_combination: "9.C - 947.A" #"9.C - 5.B - 944.B" #"9.C - 947.A"   # Crosslink position. Example: "9.C - 947.A" for resnum 9 in chainID C and resnum 947 in chainID A
-c_term_combination: "1047.C - 104.C" #"1047.C - 1047.A - 104.C"
+n_term_combination: "9.C - 946.A" #"9.C - 5.B - 944.B" #"9.C - 947.A"   # Crosslink position. Example: "9.C - 947.A" for resnum 9 in chainID C and resnum 947 in chainID A
+c_term_combination: "1046.C - 103.C" #"1047.C - 1047.A - 104.C"
 
 # Additional crosslinks to apply
 additional_1_type: "Glucosepane"
@@ -33,11 +33,11 @@ additional_1_combination: "523.A - 286.C"
 additional_2_combination: null #"1050.B - 1055.A - 110.B"
 
 # Crosslink Optimization Settings
-crosslink_copies: ["D0", "D5"]  # Must be exactly 2 elements from: D0, D1, D2, D3, D4, D5
+crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D0, D1, D2, D3, D4, D5
 # Default is ["D0", "D5"] if not specified
 
 # Geometry Parameters
-pdb_file: homosapiens_N_HLKNL_C_HLKNL.pdb #homosapiens_N_NONE_C_NONE.pdb # Set to null if sequence_generator is true
+pdb_file: rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb #homosapiens_N_NONE_C_NONE.pdb # Set to null if sequence_generator is true
 contact_distance: 25                      # Contact distance in Angstroms
 fibril_length: 40                         # Fibril length in nm
 crystalcontacts_file: null                # Optional: Path to a file containing crystal contacts
