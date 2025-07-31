@@ -1,15 +1,16 @@
 """
 Module for generating collagen structures from input sequences.
 
-The SequenceGenerator class orchestrates the entire process of generating collagen structures,
-including sequence alignment, structure modeling, crosslink application and optimization.
+The SequenceGenerator class orchestrates the entire process of generating collagen 
+triple helical structures, including sequence alignment, structure modeling, 
+crosslink application and optimization.
 
 Key Features:
 - Sequence alignment using MUSCLE
 - 3D structure modeling with MODELLER
 - Crosslink application with support for terminal and non-terminal crosslinks
 - Crosslink optimization using Monte Carlo methods
-- Support for pre-mutated PDB workflow with additional crosslinks
+- Support for pre-mutated PDB workflow with additional crosslinks (for AGE crosslinks)
 """
 
 # Copyright (c) 2024, ColBuilder Development Team
@@ -163,7 +164,7 @@ class SequenceGenerator:
         else:
             return await self._process_from_sequence()
 
-    async def _process_mutated_pdb(self) -> Tuple[Path, Path]:
+    async def _process_mutated_pdb(self) -> Path:
         """
         Process a pre-mutated PDB file with additional crosslinks.
         
@@ -223,23 +224,9 @@ class SequenceGenerator:
                         LOG.debug(f"Additional crosslinks applied - Output: {temp_pdb}")
                 
                 final_output = await self._finalize_output_mutated(temp_pdb, file_prefix)
-                
-                msa_path = Path.cwd() / f"{file_prefix}.msa"
-                if not msa_path.exists():
-                    with open(msa_path, 'w') as f:
-                        f.write(f"# MSA file for mutated PDB workflow\n")
-                        f.write(f"# Source: {mutated_pdb_path}\n")
-                        if self._additional_crosslinks:
-                            f.write(f"# Additional crosslinks applied: {len(self._additional_crosslinks)}\n")
-                            if self._additional_crosslinks_1:
-                                f.write(f"#   Type 1: {self.config.additional_1_type} ({len(self._additional_crosslinks_1)} crosslinks)\n")
-                            if self._additional_crosslinks_2:
-                                f.write(f"#   Type 2: {self.config.additional_2_type} ({len(self._additional_crosslinks_2)} crosslinks)\n")
-                
-                final_msa = self.file_manager.copy_to_output(msa_path)
                 final_pdb = self.file_manager.copy_to_output(final_output)
                 
-                return final_msa, final_pdb
+                return final_pdb
                 
             except Exception as e:
                 LOG.error(f"Error processing mutated PDB: {str(e)}", exc_info=True)
@@ -527,7 +514,6 @@ class SequenceGenerator:
             crosslinks_file = self.file_manager.find_file("sequence/crosslinks.csv")
             crosslinks_df = pd.read_csv(crosslinks_file)
             
-            LOG.debug(f"Crosslinks CSV columns: {list(crosslinks_df.columns)}")
             LOG.debug(f"Available species: {crosslinks_df['species'].unique()}")
             
             species_crosslinks = crosslinks_df[

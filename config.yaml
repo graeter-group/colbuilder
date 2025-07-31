@@ -21,7 +21,7 @@ mode: null
 config_file: null
 sequence_generator: false    # Generate triple helix structure from sequence
 geometry_generator: true     # Build microfibril from triple helix
-topology_generator: false    # Generate simulation topology files
+topology_generator: true    # Generate simulation topology files
 debug: false                 # Keep intermediate files for debugging
 working_directory: "./"      # Directory for output files
 
@@ -43,7 +43,7 @@ species: "rattus_norvegicus"  # Available options:
 
 # Mutated PDB workflow - provide pre-optimized structure to add more crosslinks
 # Set to null for standard sequence generation workflow
-mutated_pdb: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"
+# mutated_pdb: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"
 
 # Custom sequence input - overrides species selection if provided
 fasta_file: null  # Path to custom FASTA file, or null to use species sequence
@@ -67,16 +67,15 @@ c_term_combination: "1046.C - 103.C"
 
 # Additional crosslinks (for mutated PDB workflow)
 # These are applied on top of existing crosslinks in the structure
-additional_1_type: "Glucosepane"      # First additional crosslink type
-additional_2_type: null               # Second additional crosslink type (optional)
-additional_1_combination: "523.A - 286.C"  # Position for first crosslink
-additional_2_combination: null        # Position for second crosslink
+# additional_1_type: "Glucosepane"      # First additional crosslink type
+# additional_2_type: null               # Second additional crosslink type (optional)
+# additional_1_combination: "523.A - 286.C"  # Position for first crosslink
+# additional_2_combination: null        # Position for second crosslink
 
 # Crosslink optimization settings
 # Specifies which periodic copies to use for distance optimization
-crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D0-D5
+# crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D0-D5
 # Default is ["D0", "D5"] if not specified
-
 
 # ================================================================================
 # GEOMETRY GENERATION SETTINGS
@@ -89,11 +88,11 @@ crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D0-D5
 # Set to null if sequence_generator is true
 # IMPORTANT: When using additional crosslinks, this should be the output
 # from the sequence generation step (run separately)
-pdb_file: rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb
+pdb_file: rattusnorvegicus_N_HLKNL_C_HLKNL.pdb
 
 # Microfibril parameters
-contact_distance: 25      # Maximum distance (Å) for crystal contacts
-fibril_length: 40        # Target length of microfibril (nm)
+contact_distance: 20      # Maximum distance (Å) for crystal contacts
+fibril_length: 30        # Target length of microfibril (nm)
 
 # Advanced geometry options (usually left as null/false)
 crystalcontacts_file: null     # Custom crystal contacts file
