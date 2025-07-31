@@ -109,6 +109,40 @@ class Martini:
         except Exception as e:
             LOG.error(f"Error merging PDBs: {str(e)}")
             return None
+    
+    def log_coordinate_ranges(self, pdb_lines: List[str], label: str = "") -> None:
+        """
+        Helper to log coordinate ranges from PDB lines.
+        
+        Parameters
+        ----------
+        pdb_lines : List[str]
+            List of PDB file lines
+        label : str
+            Label for the log output
+        """
+        if not pdb_lines:
+            LOG.warning(f"{label}: No PDB lines to analyze")
+            return
+        
+        x_coords = []
+        y_coords = []
+        z_coords = []
+        
+        for line in pdb_lines:
+            if line[0:6] in ("ATOM  ", "HETATM"):
+                try:
+                    x_coords.append(float(line[30:38]))
+                    y_coords.append(float(line[38:46]))
+                    z_coords.append(float(line[46:54]))
+                except:
+                    pass
+        
+        if x_coords:
+            LOG.info(f"{label} coordinate ranges:")
+            LOG.info(f"  X: [{min(x_coords):.2f}, {max(x_coords):.2f}]")
+            LOG.info(f"  Y: [{min(y_coords):.2f}, {max(y_coords):.2f}]")
+            LOG.info(f"  Z: [{min(z_coords):.2f}, {max(z_coords):.2f}]")
 
     def read_pdb(self, pdb_id: Optional[int] = None) -> List[str]:
         """
@@ -127,6 +161,23 @@ class Martini:
         LOG.debug(f"Reading PDB for pdb_id: {pdb_id}")
         pdb = []
         model = self.system.get_model(model_id=pdb_id)
+        
+        # Critical debugging: check if connect_id matches model_id
+        LOG.warning(f"=== DEBUGGING CONNECTION STRUCTURE ===")
+        LOG.warning(f"Requested pdb_id (connect_id): {pdb_id}")
+        LOG.warning(f"Model found: {model is not None}")
+        if model:
+            LOG.warning(f"Model connections: {model.connect}")
+            LOG.warning(f"Model type: {model.type}")
+        
+        # Check all models to find which one this connect_id belongs to
+        for check_model_id in self.system.get_models():
+            check_model = self.system.get_model(model_id=check_model_id)
+            if check_model and check_model.connect and pdb_id in check_model.connect:
+                LOG.warning(f"Connect_id {pdb_id} belongs to model {check_model_id}")
+                if check_model_id != pdb_id:
+                    LOG.error(f"MISMATCH: Reading connect_id {pdb_id} but it belongs to model {check_model_id}!")
+        
         if model is None:
             LOG.error(f"Model not found for pdb_id: {pdb_id}")
             return pdb
@@ -134,15 +185,40 @@ class Martini:
         if model.type:
             if pdb_id is not None:
                 file_path = Path(model.type) / f"{int(pdb_id)}.caps.pdb"
+                LOG.info(f"Attempting to read file: {file_path}")
                 if file_path.exists():
                     try:
                         with open(file_path, "r") as file:
                             pdb = [line for line in file if line[0:6] in self.is_line]
+                        
+                        # Log coordinate information
+                        self.log_coordinate_ranges(pdb, f"PDB {pdb_id} from {file_path}")
+                        
+                        # Check Z-coordinates specifically
+                        z_coords = []
+                        for line in pdb[:10]:  # Check first 10 atoms
+                            if line[0:6] in ("ATOM  ", "HETATM"):
+                                try:
+                                    z = float(line[46:54])
+                                    z_coords.append(z)
+                                except:
+                                    pass
+                        
+                        if z_coords:
+                            avg_z = sum(z_coords) / len(z_coords)
+                            LOG.warning(f"PDB {pdb_id} average Z-coordinate: {avg_z:.2f}")
+                            
+                            # Flag problematic Z-coordinates
+                            if avg_z < 3500:  # If significantly below expected ~3848
+                                LOG.error(f"WARNING: PDB {pdb_id} has LOW Z-coordinates (avg: {avg_z:.2f})")
+                                LOG.error(f"This file might belong to a different layer!")
+                        
                         LOG.debug(f"Read {len(pdb)} lines from PDB file: {file_path}")
                         return pdb
                     except Exception as e:
                         LOG.error(f"Error reading PDB file {file_path}: {str(e)}")
 
+        # Try alternative paths
         alt_paths = []
         if pdb_id is not None:
             alt_paths.append(Path(f"{int(pdb_id)}.caps.pdb"))  # Current directory
@@ -154,6 +230,10 @@ class Martini:
                 try:
                     with open(path, "r") as file:
                         pdb = [line for line in file if line[0:6] in self.is_line]
+                    
+                    # Log coordinate information for alternative paths
+                    self.log_coordinate_ranges(pdb, f"PDB {pdb_id} from {path}")
+                    
                     LOG.debug(f"Read {len(pdb)} lines from PDB file: {path}")
                     return pdb
                 except Exception as e:
@@ -567,14 +647,35 @@ async def build_martini3(
         local_contactmap_dir = Path("contactmap")
         local_contactmap_dir.mkdir(exist_ok=True)
 
-        # Step 1: Center system for Martini coarse-graining
-        LOG.info(f"Step 1/{steps} Centering system for Martini coarse-graining")
+        # Step 1: Skip translation - use coordinates from geometry generation
+        LOG.info(f"Step 1/{steps} Using coordinates from geometry generation (skipping translation)")
         try:
-            system.translate_system(crystal=system.crystal, center=[0, 0, 4000])
-            LOG.debug("System centered successfully")
+            # Log the state for debugging
+            LOG.info("System state:")
+            for model_id in system.get_models():
+                model = system.get_model(model_id=model_id)
+                LOG.info(f"Model {model_id}: type={model.type}, connect={model.connect}")
+            
+            # Log crystal information
+            LOG.info(f"Crystal info: {system.crystal}")
+            
+            # SKIP TRANSLATION - The geometry generation has already positioned the system correctly
+            # The translation was causing different models to end up at different Z-levels
+            LOG.info("Skipping system translation - using original coordinates from geometry generation")
+            
+            # Old translation code (commented out):
+            # if hasattr(system, 'translate_system'):
+            #     LOG.info("Using translate_system method")
+            #     system.translate_system(crystal=system.crystal, center=[0, 0, 4000])
+            # elif hasattr(system, 'translate_crystal'):
+            #     LOG.info("Using translate_crystal method")
+            #     system.translate_crystal(crystal=system.crystal, center=[0, 0, 4000])
+            
+            LOG.info("Using original coordinates successfully")
         except Exception as e:
+            LOG.error(f"Error in Step 1: {str(e)}")
             raise TopologyGenerationError(
-                message="Failed to center system for Martini topology",
+                message="Failed in coordinate setup for Martini topology",
                 original_error=e,
                 error_code="TOP_MART_001",
                 context={"crystal": str(system.crystal)},
@@ -737,19 +838,57 @@ async def build_martini3(
             LOG.info(f"     Model type directory: {type_dir}")
 
         models_list = [model_id for model_id in system.get_models()]
+        
+        # Add debugging to understand the connection structure
+        LOG.warning("=== SYSTEM CONNECTION STRUCTURE ===")
+        for model_id in models_list:
+            model = system.get_model(model_id=model_id)
+            if model and model.connect:
+                LOG.warning(f"Model {model_id} has connections: {model.connect}")
+                # Check for multi-connection models
+                if len(model.connect) > 1:
+                    LOG.error(f"MULTI-CONNECTION MODEL: Model {model_id} has {len(model.connect)} connections!")
+                # Check for self-connections vs cross-connections
+                for conn in model.connect:
+                    if conn != model_id:
+                        LOG.error(f"CROSS-CONNECTION: Model {model_id} connects to different model {conn}!")
+        
         for model_id in tqdm(models_list, desc="Building topology", unit="%"):
             model = system.get_model(model_id=model_id)
             if model is None or model.connect is None:
                 LOG.warning(f"Skipping model {model_id}: No connections found")
                 continue
 
+            LOG.info(f"Processing model {model_id} with connections: {model.connect}")
+            
             try:
                 for connect_id in model.connect:
                     try:
+                        LOG.info(f"Processing model {model_id}, connection {connect_id}")
+                        
+                        # Check if this is a cross-connection
+                        if connect_id != model_id:
+                            LOG.warning(f"Cross-connection detected: model {model_id} -> connection {connect_id}")
+                        
                         pdb = martini.read_pdb(pdb_id=connect_id)
                         if not pdb:
                             LOG.warning(f"Empty PDB for connect_id: {connect_id}")
                             continue
+
+                        # Debug: Check coordinates before processing
+                        z_coords = []
+                        for i, line in enumerate(pdb[:5]):
+                            if line[0:6] in ("ATOM  ", "HETATM"):
+                                try:
+                                    z = float(line[46:54])
+                                    z_coords.append(z)
+                                    LOG.debug(f"Model {model_id}, Connect {connect_id}, Atom {i} Z-coord: {z:.2f}")
+                                except:
+                                    pass
+                        
+                        if z_coords:
+                            avg_z = sum(z_coords) / len(z_coords)
+                            LOG.info(f"Model {model_id}, Connect {connect_id} average Z before processing: {avg_z:.2f}")
 
                         pdb = martini.translate_pdb(pdb=pdb)
 
@@ -764,7 +903,7 @@ async def build_martini3(
                             f"-collagen -from amber99 -o topol.top -bonds-fudge 1.4 -p backbone "
                             f"-ff {martini.ff}00C -x {int(model_id)}.{int(connect_id)}.CG.pdb "
                             f"-nter {nter} -cter {cter} -govs-include -govs-moltype "
-                            f"col_{int(model_id)}.{int(connect_id)}"
+                            f"col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
                         )
 
                         cmd = get_conda_command_with_path("martinize2", martinize_args)
