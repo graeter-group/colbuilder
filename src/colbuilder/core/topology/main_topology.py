@@ -217,6 +217,23 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 
             for itp_file in Path().glob("col_[0-9]*.itp"):
                 file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
+            
+            ff_dir_name = "amber99sb-star-ildnp.ff"
+            ff_source_dir = Path() / ff_dir_name  
+                
+            if ff_source_dir.exists() and ff_source_dir.is_dir():
+                ff_dest_dir = output_topology_dir / ff_dir_name
+                try:
+                    shutil.copytree(ff_source_dir, ff_dest_dir, dirs_exist_ok=True)
+                    LOG.info(f"Force field directory '{ff_dir_name}' copied to output directory")
+                except Exception as e:
+                    LOG.warning(f"Failed to copy force field directory '{ff_dir_name}': {str(e)}")
+            
+            # Check if force field files exist and inform user
+            ff_files_present = (output_topology_dir / ff_dir_name).exists()
+            if ff_files_present:
+                LOG.info(f"{Fore.YELLOW}Force field files can be found in the output directory. "
+                        f"Please check and modify these files according to your custom needs and requirements.{Style.RESET_ALL}")
                     
             LOG.info(f"{Fore.BLUE}Topology files written at: {output_topology_dir}{Style.RESET_ALL}")
                 
