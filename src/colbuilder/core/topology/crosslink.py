@@ -155,7 +155,7 @@ class Crosslink:
                     self.crosslink_connect.append(tmp)
                     LOG.debug(f"Found connection group with {len(tmp)} atoms")
             
-            LOG.info(f"Found {len(self.crosslink_connect)} potential crosslink connections")
+            LOG.debug(f"Found {len(self.crosslink_connect)} potential crosslink connections")
                 
         except Exception as e:
             LOG.error(f"Error finding crosslink connections: {str(e)}")
@@ -210,7 +210,7 @@ class Crosslink:
                                     clx[0], cly[0], str(int(cly[0])-1), '1', self.al2yx_3, f"{self.k_angle}\n"
                                 ])
                                 connections_found += 1
-                                LOG.info(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+                                LOG.debug(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                                 
                             # LYX-LY3 crosslinks
                             elif (clx[1] == 'LYX' and clx[2] == 'SC5' and cly[1] == 'LY3'):
@@ -227,7 +227,7 @@ class Crosslink:
                                     clx[0], cly[0], str(int(cly[0])-1), '1', self.al3yx_3, f"{self.k_angle}\n"
                                 ])
                                 connections_found += 1
-                                LOG.info(f"Added LYX-LY3 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+                                LOG.debug(f"Added LYX-LY3 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                                 
                             # L4Y-L5Y crosslinks
                             elif (clx[1] == 'L4Y' and clx[2] == 'SC1' and 
@@ -242,11 +242,11 @@ class Crosslink:
                                     str(int(clx[0])-1), clx[0], cly[0], '1', self.al45y_2, f"{self.k_angle}\n"
                                 ])
                                 connections_found += 1
-                                LOG.info(f"Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+                                LOG.debug(f"Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                         else:
                             LOG.debug(f"Distance {dist:.3f} Å too large for crosslinking between {clx[1]}{clx[2]} and {cly[1]}{cly[2]}")
                 
-            LOG.info(f"Created {len(self.crosslink_bonded['bonds'])} bonds and "
+            LOG.debug(f"Created {len(self.crosslink_bonded['bonds'])} bonds and "
                     f"{len(self.crosslink_bonded['angles'])} angles from "
                     f"{connections_found} crosslink connections")
                 

@@ -132,7 +132,7 @@ class Itp:
         LOG.debug(f"Processed {cnt_con} connections for model {model_id}")
         
         atoms_read = sum(len(atoms) for atoms in self.atoms if atoms)
-        LOG.info(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
+        LOG.debug(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
 
     def read_itp(
         self,
@@ -578,10 +578,10 @@ class Itp:
                 self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
                 
                 if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
-                    LOG.info(f"Found crosslinks for model {model_id}:")
-                    LOG.info(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
-                    LOG.info(f"  Angles: {len(self.crosslink_bonded['angles'])}")
-                    LOG.info(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
+                    LOG.debug(f"Found crosslinks for model {model_id}:")
+                    LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
+                    LOG.debug(f"  Angles: {len(self.crosslink_bonded['angles'])}")
+                    LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
                 else:
                     LOG.debug(f"No crosslinks found for model {model_id}")
                     
