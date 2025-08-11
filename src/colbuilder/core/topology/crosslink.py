@@ -23,21 +23,6 @@ class Crosslink:
     The class supports two types of crosslinks:
     - Divalent HLKNL-crosslinks between L4Y and L5Y residues
     - Trivalent PYD-crosslinks between LYX, LY2, and LY3 residues
-    
-    Attributes
-    ----------
-    file : str
-        Path to the merged PDB file
-    crosslink_coords : List[List[float]]
-        Coordinates of identified crosslink sites
-    crosslink_pdb : List[List[str]]
-        PDB data for crosslink atoms
-    crosslink_neighbors : List[Any]
-        Neighboring atoms for each crosslink site
-    crosslink_connect : List[List[List[str]]]
-        Connected crosslink sites
-    crosslink_bonded : Dict[str, List[List[Any]]]
-        Bonded parameters for crosslinks
     """
     
     def __init__(self, cnt_model: Optional[int] = None) -> None:
@@ -52,9 +37,9 @@ class Crosslink:
         """
         self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
-        self.crosslink_pdb: List[List[str]] = []
+        self.crosslink_pdb: List[List[Any]] = []  # Mix of str and float
         self.crosslink_neighbors: List[Any] = []
-        self.crosslink_connect: List[List[List[str]]] = []
+        self.crosslink_connect: List[List[List[Any]]] = []
         self.crosslink_bonded: Dict[str, List[List[Any]]] = {
             'bonds': [], 
             'angles': [], 
@@ -88,27 +73,13 @@ class Crosslink:
         """
         Extract coordinates of crosslink sites from a PDB file.
         
-        Parses PDB file to identify atoms involved in crosslinks, including:
-        - LYX SC4/SC5 atoms for PYD crosslinks
-        - LY2/LY3 SC1 atoms for PYD crosslinks  
-        - L4Y SC1 and L5Y SC2 atoms for HLKNL crosslinks
-        
-        Parameters
-        ----------
-        cnt_model : Optional[int]
-            Model counter for PDB file naming. If None, uses instance file path
-        
-        Returns
-        -------
-        List[List[float]]
-            List of [x,y,z] coordinates for each crosslink site
-        
-        Notes
-        -----
-        Also populates self.crosslink_pdb with atom metadata including:
-        atom index, residue name, atom name, chain ID, and coordinates
+        Following the working version pattern: stores coordinates as floats.
         """
-        file = self.file if cnt_model is None else f"{int(cnt_model)}.merge.pdb"
+        if cnt_model is None:
+            file = self.file
+        else:
+            file = f"{int(cnt_model)}.merge.pdb"
+            
         LOG.debug(f"Reading crosslink coordinates from {file}")
         
         if not os.path.exists(file):
@@ -117,37 +88,33 @@ class Crosslink:
             
         self.crosslink_coords = []
         self.crosslink_pdb = []
-        atom_index = 0
+        it_pdb = 0
         
         try:
             with open(file, 'r') as f:
                 for line in f:
-                    if not line.startswith('ATOM'):
-                        continue
+                    if line[0:4] == 'ATOM':
+                        it_pdb += 1
                         
-                    atom_index += 1
-                    residue = line[17:20]
-                    atom = line[12:15]
-                    
-                    if ((residue == 'LYX' and atom in ['SC4', 'SC5']) or
-                        (residue in ['LY2', 'LY3'] and atom == 'SC1') or
-                        (residue == 'L4Y' and atom == 'SC1') or
-                        (residue == 'L5Y' and atom == 'SC2')):
+                    if ((line[17:20] == 'LYX' and line[12:15] in ['SC4', 'SC5']) or
+                        (line[17:20] in ['LY2', 'LY3'] and line[12:15] == 'SC1') or
+                        (line[17:20] == 'L4Y' and line[12:15] == 'SC1') or
+                        (line[17:20] == 'L5Y' and line[12:15] == 'SC2')):
                         
-                        coords = [
-                            float(line[29:38]),
-                            float(line[38:46]), 
-                            float(line[46:56])
-                        ]
+                        coords = [float(line[29:38]), float(line[38:46]), float(line[46:56])]
                         
                         self.crosslink_pdb.append([
-                            str(atom_index),
-                            residue,
-                            atom, 
-                            line[21:26],
-                            *[str(c) for c in coords]
+                            str(it_pdb),           # atom index as string
+                            line[17:20],           # residue name
+                            line[12:15],           # atom name  
+                            line[21:26],           # chain info
+                            coords[0],             # x coordinate as float
+                            coords[1],             # y coordinate as float
+                            coords[2]              # z coordinate as float
                         ])
                         self.crosslink_coords.append(coords)
+                        
+                        LOG.debug(f"Found crosslink site: {line[17:20].strip()} {line[12:15].strip()} (atom {it_pdb})")
             
             LOG.debug(f"Found {len(self.crosslink_coords)} crosslink sites")
                 
@@ -156,23 +123,11 @@ class Crosslink:
             
         return self.crosslink_coords
 
-    def get_crosslink_connect(self, cnt_model: Optional[int] = None) -> List[List[List[str]]]:
+    def get_crosslink_connect(self, cnt_model: Optional[int] = None) -> List[List[List[Any]]]:
         """
-        Identify connections between crosslink sites based on proximity.
+        Get nearest crosslinks to determine connections.
         
-        Uses pairwise distance calculations to find nearest neighbor crosslink 
-        sites that could potentially form bonds. For each site, up to 4 nearest
-        neighbors are considered as potential connection points.
-        
-        Parameters
-        ----------
-        cnt_model : Optional[int]
-            Model counter for PDB file naming. If None, uses instance file path
-        
-        Returns
-        -------
-        List[List[List[str]]]
-            Nested list of crosslink site metadata for connected pairs
+        Following the working version pattern.
         """
         self.get_crosslink_coords(cnt_model=cnt_model)
         
@@ -180,47 +135,40 @@ class Crosslink:
             LOG.warning("No crosslink coordinates found")
             return []
         
+        if len(self.crosslink_coords) < 2:
+            LOG.warning("Need at least 2 crosslink sites to form connections")
+            return []
+        
         try:
-            pairs = pdist(np.array(self.crosslink_coords))
-            processed_indices = []
+            pairs = pdist(self.crosslink_coords)
+            out = []
             self.crosslink_connect = []
             
-            for distances in pairs:
-                connections = []
-                for idx in np.argsort(distances)[:4]:
-                    if idx not in processed_indices:
-                        connections.append(self.crosslink_pdb[idx])
-                        processed_indices.append(idx)
+            for p in pairs:
+                tmp = []
+                for k in np.argsort(p)[0:4]:
+                    if k not in out:
+                        tmp.append(self.crosslink_pdb[k])
+                        out.append(k)
                         
-                if connections:
-                    self.crosslink_connect.append(connections)
-                    
-            LOG.debug(f"Found {len(self.crosslink_connect)} potential connections")
+                if tmp:
+                    self.crosslink_connect.append(tmp)
+                    LOG.debug(f"Found connection group with {len(tmp)} atoms")
+            
+            LOG.info(f"Found {len(self.crosslink_connect)} potential crosslink connections")
                 
         except Exception as e:
             LOG.error(f"Error finding crosslink connections: {str(e)}")
+            self.crosslink_connect = []
             
         return self.crosslink_connect
     
     def set_crosslink_bonded(self, cnt_model: Optional[int] = None, 
-                           crosslink_connect: Optional[List[List[List[str]]]] = None) -> Dict[str, List[List[Any]]]:
+                           crosslink_connect: Optional[List[List[List[Any]]]] = None) -> Dict[str, List[List[Any]]]:
         """
-        Setup topology for crosslink bonded parameters: bonds, angles, and dihedrals.
+        Setup topology for crosslink bonded parameters: bonds, angles and dihedrals.
         
-        Identifies different types of crosslinks and sets up the
-        appropriate bonded parameters for each.
-        
-        Parameters
-        ----------
-        cnt_model : Optional[int]
-            The model counter for file naming if different from initialization
-        crosslink_connect : Optional[List[List[List[str]]]]
-            List of connected crosslink sites (optional)
-            
-        Returns
-        -------
-        Dict[str, List[List[Any]]]
-            Dictionary of bonded parameters for crosslinks
+        Following the working version pattern: uses atom indices directly.
         """
         LOG.debug(f"Setting up crosslink bonded parameters for model {cnt_model}")
         
@@ -233,37 +181,72 @@ class Crosslink:
             LOG.debug("No crosslink connections found, returning empty parameters")
             return self.crosslink_bonded
             
+        connections_found = 0
+        
         try:
-            connections_found = 0
             for c in crosslink_connect:
-                for i, clx in enumerate(c):
-                    for j, cly in enumerate(c):
-                        if i == j:
+                for clx in c:
+                    for cly in c:
+                        if clx == cly:  # Skip self-comparison
                             continue
                             
-                        try:
-                            dist = np.linalg.norm(np.array(clx[-3:]) - np.array(cly[-3:]))
-                        except (ValueError, TypeError) as e:
-                            LOG.warning(f"Error calculating distance: {str(e)}")
-                            continue
-                            
-                        if dist < 10.0:
-                            if clx[1] == 'LYX' and clx[2] == 'SC4' and cly[1] == 'LY2':
-                                self._add_lyx_ly2_bonds(clx, cly)
+                        dist = np.linalg.norm(np.array(clx[-3:]) - np.array(cly[-3:]))
+                        
+                        LOG.debug(f"Distance between {clx[1]}{clx[2]} and {cly[1]}{cly[2]}: {dist:.3f} Å")
+                        
+                        if dist < 10.0:  # Within crosslinking distance
+                            # LYX-LY2 crosslinks
+                            if (clx[1] == 'LYX' and clx[2] == 'SC4' and cly[1] == 'LY2'):
+                                self.crosslink_bonded['bonds'].append([
+                                    clx[0], cly[0], '1', self.dlyxly2, f"{self.klyxly2}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    str(int(clx[0])+1), clx[0], cly[0], '1', self.al2yx_1, f"{self.k_angle}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    str(int(clx[0])-1), clx[0], cly[0], '1', self.al2yx_2, f"{self.k_angle}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    clx[0], cly[0], str(int(cly[0])-1), '1', self.al2yx_3, f"{self.k_angle}\n"
+                                ])
                                 connections_found += 1
-                                LOG.debug(f"Added LYX-LY2 bonds between {clx[0]} and {cly[0]}")
+                                LOG.info(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                                 
-                            elif clx[1] == 'LYX' and clx[2] == 'SC5' and cly[1] == 'LY3':
-                                self._add_lyx_ly3_bonds(clx, cly)
+                            # LYX-LY3 crosslinks
+                            elif (clx[1] == 'LYX' and clx[2] == 'SC5' and cly[1] == 'LY3'):
+                                self.crosslink_bonded['bonds'].append([
+                                    clx[0], cly[0], '1', self.dlyxly3, f"{self.klyxly3}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    str(int(clx[0])-1), clx[0], cly[0], '1', self.al3yx_1, f"{self.k_angle}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    str(int(clx[0])-2), clx[0], cly[0], '1', self.al3yx_2, f"{self.k_angle}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    clx[0], cly[0], str(int(cly[0])-1), '1', self.al3yx_3, f"{self.k_angle}\n"
+                                ])
                                 connections_found += 1
-                                LOG.debug(f"Added LYX-LY3 bonds between {clx[0]} and {cly[0]}")
+                                LOG.info(f"Added LYX-LY3 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                                 
-                            if clx[1] == 'L4Y' and clx[2] == 'SC1' and cly[1] == 'L5Y' and cly[2] == 'SC2':
-                                self._add_l4y_l5y_bonds(clx, cly)
+                            # L4Y-L5Y crosslinks
+                            elif (clx[1] == 'L4Y' and clx[2] == 'SC1' and 
+                                  cly[1] == 'L5Y' and cly[2] == 'SC2'):
+                                self.crosslink_bonded['bonds'].append([
+                                    clx[0], cly[0], '1', self.dly45, f"{self.kly45}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    clx[0], cly[0], str(int(cly[0])-1), '1', self.al45y_1, f"{self.k_angle}\n"
+                                ])
+                                self.crosslink_bonded['angles'].append([
+                                    str(int(clx[0])-1), clx[0], cly[0], '1', self.al45y_2, f"{self.k_angle}\n"
+                                ])
                                 connections_found += 1
-                                LOG.debug(f"Added L4Y-L5Y bonds between {clx[0]} and {cly[0]}")
-                    
-            LOG.debug(f"Created {len(self.crosslink_bonded['bonds'])} bonds and "
+                                LOG.info(f"Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+                        else:
+                            LOG.debug(f"Distance {dist:.3f} Å too large for crosslinking between {clx[1]}{clx[2]} and {cly[1]}{cly[2]}")
+                
+            LOG.info(f"Created {len(self.crosslink_bonded['bonds'])} bonds and "
                     f"{len(self.crosslink_bonded['angles'])} angles from "
                     f"{connections_found} crosslink connections")
                 
@@ -271,75 +254,3 @@ class Crosslink:
             LOG.error(f"Error setting up crosslink bonded parameters: {str(e)}")
             
         return self.crosslink_bonded
-    
-    def _add_lyx_ly2_bonds(self, clx: List[Any], cly: List[Any]) -> None:
-        """
-        Add bonded parameters for LYX-LY2 crosslink.
-        
-        Parameters
-        ----------
-        clx : List[Any]
-            First crosslink atom data
-        cly : List[Any]
-            Second crosslink atom data
-        """
-        self.crosslink_bonded['bonds'].append([
-            clx[0], cly[0], '1', self.dlyxly2, f"{self.klyxly2}\n"
-        ])
-        
-        self.crosslink_bonded['angles'].append([
-            str(int(clx[0])+1), clx[0], cly[0], '1', self.al2yx_1, f"{self.k_angle}\n"
-        ])
-        self.crosslink_bonded['angles'].append([
-            str(int(clx[0])-1), clx[0], cly[0], '1', self.al2yx_2, f"{self.k_angle}\n"
-        ])
-        self.crosslink_bonded['angles'].append([
-            clx[0], cly[0], str(int(cly[0])-1), '1', self.al2yx_3, f"{self.k_angle}\n"
-        ])
-    
-    def _add_lyx_ly3_bonds(self, clx: List[Any], cly: List[Any]) -> None:
-        """
-        Add bonded parameters for LYX-LY3 crosslink.
-        
-        Parameters
-        ----------
-        clx : List[Any]
-            First crosslink atom data
-        cly : List[Any]
-            Second crosslink atom data
-        """
-        self.crosslink_bonded['bonds'].append([
-            clx[0], cly[0], '1', self.dlyxly3, f"{self.klyxly3}\n"
-        ])
-        
-        self.crosslink_bonded['angles'].append([
-            str(int(clx[0])-1), clx[0], cly[0], '1', self.al3yx_1, f"{self.k_angle}\n"
-        ])
-        self.crosslink_bonded['angles'].append([
-            str(int(clx[0])-2), clx[0], cly[0], '1', self.al3yx_2, f"{self.k_angle}\n"
-        ])
-        self.crosslink_bonded['angles'].append([
-            clx[0], cly[0], str(int(cly[0])-1), '1', self.al3yx_3, f"{self.k_angle}\n"
-        ])
-    
-    def _add_l4y_l5y_bonds(self, clx: List[Any], cly: List[Any]) -> None:
-        """
-        Add bonded parameters for L4Y-L5Y crosslink.
-        
-        Parameters
-        ----------
-        clx : List[Any]
-            First crosslink atom data
-        cly : List[Any]
-            Second crosslink atom data
-        """
-        self.crosslink_bonded['bonds'].append([
-            clx[0], cly[0], '1', self.dly45, f"{self.kly45}\n"
-        ])
-        
-        self.crosslink_bonded['angles'].append([
-            clx[0], cly[0], str(int(cly[0])-1), '1', self.al45y_1, f"{self.k_angle}\n"
-        ])
-        self.crosslink_bonded['angles'].append([
-            str(int(clx[0])-1), clx[0], cly[0], '1', self.al45y_2, f"{self.k_angle}\n"
-        ])
