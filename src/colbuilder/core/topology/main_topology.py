@@ -208,6 +208,12 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 )
                 
             output_topology_dir = file_manager.ensure_dir(f"{config.species}_topology_files")
+
+            for cg_pdb_file in Path().glob("collagen_fibril_CG_*.pdb"):
+                file_manager.copy_to_directory(cg_pdb_file, dest_dir=output_topology_dir)
+            
+            for go_file in Path().glob("*go-sites.itp"):
+                file_manager.copy_to_directory(go_file, dest_dir=output_topology_dir)
             
             for top_file in Path().glob(f"collagen_fibril_*.top"):
                 file_manager.copy_to_directory(top_file, dest_dir=output_topology_dir)
