@@ -1,51 +1,48 @@
 # Operation Mode
-mode: null
-config_file: null
-sequence_generator: true
-geometry_generator: true
-topology_generator: true
-debug: false
-working_directory: "./"
+mode: null                   # Specific operation mode if needed
+config_file: null            # Path to another config file (for nested configs)
+sequence_generator: false     # Generate sequence from species
+geometry_generator: true     # Generate fibril geometry
+topology_generator: true    # Generate topology files
+debug: false                 # Enable debug mode
 
 # Input Configuration
-species: "homo_sapiens"  # Available options:
-                        # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
-                        # Mammals (Rodents): mus_musculus, rattus_norvegicus
-                        # Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
-                        # Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
-                        # Reptiles: pelodiscus_sinensis
+species: "mus_musculus"      # Species for collagen sequence
+# Available species options:
+# Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
+# Mammals (Rodents): mus_musculus, rattus_norvegicus
+# Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
+# Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
+# Reptiles: pelodiscus_sinensis
 
 # Sequence Settings
-fasta_file: null # Provide custom fasta file if not choosing an available species. If null, will be auto-generated based on species.
-crosslink: true
-n_term_type: "HLKNL" #"DPL"                # Crosslink type in terminal N
-c_term_type: "HLKNL" #"DPL"                 # Crosslink type in terminal C
-n_term_combination: "9.C - 947.A" #"9.C - 5.B - 944.B" #"9.C - 947.A"   # Crosslink position. Example: "9.C - 947.A" for resnum 9 in chainID C and resnum 947 in chainID A
-c_term_combination: "1047.C - 104.C" #"1047.C - 1047.A - 104.C"
-
+fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
+crosslink: true              # Enable crosslinking in the model
+# Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
+n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue combination
+c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
 
 # Geometry Parameters
-pdb_file: null #homosapiens_N_HLKNL_C_HLKNL.pdb #homosapiens_N_NONE_C_NONE.pdb # Set to null if sequence_generator is true
-contact_distance: 25                      # Contact distance in Angstroms
-fibril_length: 40                         # Fibril length in nm
-crystalcontacts_file: null                # Optional: Path to a file containing crystal contacts
-connect_file: null                        # Optional: Path to a file containing connection information
-crystalcontacts_optimize: false           # Note: This is automatically true when generating geometry from contact_distance, but has to be manually set to true to be performed otherwise.
+pdb_file: "musmusculus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
+contact_distance: 20         # Distance threshold for contacts (Å)
+fibril_length: 40.0          # Length of the generated fibril (nm)
+crystalcontacts_file: null   # File with crystal contacts 
+connect_file: null           # File with connection information
+crystalcontacts_optimize: false  # Optimize crystal contacts during generation
 
 # Mixing Options (for mixed crosslinked microfibril)
-mix_bool: false
-ratio_mix: "D:80 T:20"  # Format: "Type:percentage (0-100) Type:percentage (0-100)"
-# Example: "D:80 T:20" means 80% Divalent and 20% Trivalent crosslinks
-files_mix:              # Required if mix_bool is true
-  - "homosapiens_N_HLKNL_C_HLKNL.pdb"       # Divalent
-  - "homosapiens_N_DPL_C_DPL.pdb"       # Trivalent
-  # Example: "human-D.pdb" and "human-T.pdb" are the PDB files for collagen triple helices with Divalent and Trivalent crosslinks respectively
+mix_bool: false              # Enable mixing of different crosslink types
+ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
+files_mix:                   # Required if mix_bool is true
+ - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
+ - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
 
-# Replacement Options (for less crosslinks)
-replace_bool: false  # Set to true to enable replacement of crosslinks
-ratio_replace: 30    # Percentage of crosslinks to replace with standard amino acids (0-100)
-replace_file: homo_sapiens.pdb   # "rattus_norvegicus.pdb"   # Optional: Path to a file containing specific crosslinks to replace
+# Replacement Options (for fewer crosslinks)
+replace_bool: false          # Enable crosslink replacement
+ratio_replace: 30            # Percentage of crosslinks to replace
+replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
 
 # Topology Options
-force_field: "amber99"  # Options: "amber99", "martini3"
-topology_debug: true     # Set to true to save all intermediate files for topology generation
+force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")

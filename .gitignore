@@ -107,7 +107,7 @@ colbuilder_paper_output/
 config.yaml
 glucosepane/
 .tmp/
-*_topology_files/
+*_topology_files*/
 logs/
 homosapiens*
 homo_sapiens*/
