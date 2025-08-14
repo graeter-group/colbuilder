@@ -837,7 +837,7 @@ async def build_martini3(
                 LOG.error(f"Error processing model {model_id}: {str(e)}")
                 model_status[model_id] = f"error: {str(e)}"
 
-        LOG.debug(f"Successfully processed: {len(processed_models)} models")
+        LOG.info(f"Successfully processed: {len(processed_models)} models")
         
         if failed_martinize:
             LOG.warning(f"Failed at Martinize2: {failed_martinize}")
