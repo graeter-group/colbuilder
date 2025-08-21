@@ -249,7 +249,10 @@ class CrosslinkOptimizer:
 
                 # Generate new copies based on the current best input
                 generated_pdbs = await self._generate_copies(best_input)
+
+
                 all_generated_pdbs.extend(generated_pdbs)
+
 
                 if len(generated_pdbs) < 2:
                     raise SequenceGenerationError(
@@ -333,6 +336,7 @@ class CrosslinkOptimizer:
     async def _generate_copies(self, input_pdb: Path) -> List[Path]:
         """Generate copies using Chimera."""
         try:
+
             generate_copies_script = self.chimera_scripts_dir / "generate_copies.py"
             generated_pdbs_file = Path("generated_pdbs.txt")
 
