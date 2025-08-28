@@ -132,73 +132,49 @@ def organize_topology_files(topology_dir: Path, species: str) -> None:
 
 @timeit
 async def build_topology(system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None) -> Any:
-    """
-    Build molecular system topology and organize output files.
-    
-    Handles the complete topology generation process including:
-    - Setting up working directories
-    - Copying necessary geometry files
-    - Generating topology based on selected force field
-    - Organizing output files
-    
-    Parameters
-    ----------
-    system : System
-        Molecular system to process
-    config : ColbuilderConfig
-        Configuration settings including force field parameters
-    file_manager : Optional[FileManager]
-        File manager for handling I/O operations
-        
-    Returns
-    -------
-    Any
-        Processed molecular system
-        
-    Raises
-    ------
-    TopologyGenerationError
-        If topology generation fails at any stage
-    """
     try:
         file_manager = file_manager or FileManager(config)
         topology_dir = file_manager.get_temp_dir("topology_gen")
         original_dir = Path.cwd()
         output_topology_dir = None
-        
+
+        # pick up the single switch (default True = pairs-only)
+        use_go_pairs = getattr(config, "use_go_pairs", True)
+
         try:
             os.chdir(topology_dir)
             geometry_dir = Path(".tmp/geometry_gen")
             if not geometry_dir.exists():
                 geometry_dir = Path(original_dir) / ".tmp" / "geometry_gen"
-            
+
             if geometry_dir.exists():
                 cap_files = list(geometry_dir.glob("**/*.caps.pdb"))
-                
+
                 if list(system.get_models()):
                     first_model = system.get_model(model_id=list(system.get_models())[0])
                     model_type = first_model.type
                     type_dir = topology_dir / model_type
                     type_dir.mkdir(exist_ok=True, parents=True)
-                    
+
                     for cap_file in cap_files:
                         dest_file = type_dir / cap_file.name
                         shutil.copy(cap_file, dest_file)
-            
+
             force_field = config.force_field
-            
+
             if force_field == 'amber99':
                 ff = f"{force_field}sb-star-ildnp"
                 LOG.subsection(f'Building topology based on the {force_field} force field')
                 await build_amber99(system=system, config=config, file_manager=file_manager)
-                
+
             elif force_field == 'martini3':
                 ff = force_field
-                LOG.subsection(f'Building topology based on the {force_field} force field')
-                
+                mode_str = "Pairs-only" if use_go_pairs else "Virtual Sites (VS)"
+                LOG.subsection(f'Building topology based on the {force_field} force field [{mode_str}]')
+
                 from colbuilder.core.utils.martinize_finder import find_and_install_custom_force_field
                 find_and_install_custom_force_field(config.FORCE_FIELD_DIR)
-                
+
                 await build_martini3(system=system, config=config, file_manager=file_manager)
             else:
                 raise TopologyGenerationError(
@@ -206,27 +182,35 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     error_code="TOP_ERR_001",
                     context={"force_field": force_field}
                 )
-                
+
             output_topology_dir = file_manager.ensure_dir(f"{config.species}_topology_files")
 
+            # Copy final artifacts
             for cg_pdb_file in Path().glob("collagen_fibril_CG_*.pdb"):
                 file_manager.copy_to_directory(cg_pdb_file, dest_dir=output_topology_dir)
-            
-            for go_file in Path().glob("*go-sites.itp"):
-                file_manager.copy_to_directory(go_file, dest_dir=output_topology_dir)
-            
+                    
+            use_go_pairs = getattr(config, "use_go_pairs", True)
+
+            # Copy GO-VS site files only in VS mode
+            if not use_go_pairs:
+                for go_file in Path().glob("*go-sites.itp"):
+                    file_manager.copy_to_directory(go_file, dest_dir=output_topology_dir)
+                # Also copy the global GO table used by VS mode
+                for go_tab in Path().glob("go-table.itp"):
+                    file_manager.copy_to_directory(go_tab, dest_dir=output_topology_dir)
+
             for top_file in Path().glob(f"collagen_fibril_*.top"):
                 file_manager.copy_to_directory(top_file, dest_dir=output_topology_dir)
-            
+
             for gro_file in Path().glob(f"collagen_fibril_*.gro"):
                 file_manager.copy_to_directory(gro_file, dest_dir=output_topology_dir)
-                
+
             for itp_file in Path().glob("col_[0-9]*.itp"):
                 file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
-            
+
+            # Amber FF copy unchanged...
             ff_dir_name = "amber99sb-star-ildnp.ff"
-            ff_source_dir = Path() / ff_dir_name  
-                
+            ff_source_dir = Path() / ff_dir_name
             if ff_source_dir.exists() and ff_source_dir.is_dir():
                 ff_dest_dir = output_topology_dir / ff_dir_name
                 try:
@@ -234,25 +218,23 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     LOG.info(f"Force field directory '{ff_dir_name}' copied to output directory")
                 except Exception as e:
                     LOG.warning(f"Failed to copy force field directory '{ff_dir_name}': {str(e)}")
-            
-            # Check if force field files exist and inform user
+
             ff_files_present = (output_topology_dir / ff_dir_name).exists()
             if ff_files_present:
                 LOG.info(f"{Fore.YELLOW}Force field files can be found in the output directory. "
-                        f"Please check and modify these files according to your custom needs and requirements.{Style.RESET_ALL}")
-                    
+                         f"Please check and modify these files according to your custom needs and requirements.{Style.RESET_ALL}")
+
             LOG.info(f"{Fore.BLUE}Topology files written at: {output_topology_dir}{Style.RESET_ALL}")
-                
             return system
+
         finally:
             os.chdir(original_dir)
-            search_dirs = [topology_dir]
-            if output_topology_dir is not None:
-                search_dirs.append(output_topology_dir)
+
             if not config.topology_debug:
-                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
-                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
-            
+                cleanup_temporary_files(config.force_field or "unknown_force_field",
+                                        TEMP_FILES_TO_CLEAN,
+                                        search_dirs=[topology_dir])
+
     except TopologyGenerationError:
         raise
     except Exception as e:

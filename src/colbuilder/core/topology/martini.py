@@ -436,6 +436,7 @@ class Martini:
                 f.write('#include "martini_v3.0.0.itp"\n')
                 if not use_go_pairs:
                     f.write('#include "go-sites.itp"\n')
+                    f.write('#include "go-table.itp"\n')
                 f.write("\n")
 
                 for m in range(size):
