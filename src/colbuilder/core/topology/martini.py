@@ -13,6 +13,7 @@ with a focus on collagen microfibrils. It provides functionality for:
 The module requires the Martinize2 tool and custom contact map utilities.
 """
 
+import cmd
 import os
 import subprocess
 import shutil
@@ -250,62 +251,68 @@ class Martini:
 
     def cap_pdb(self, pdb: Optional[List[str]] = None) -> Tuple[List[str], str, str]:
         """
-        Cap PDBs according to connect_id in system by adding terminal residues.
-
-        Parameters
-        ----------
-        pdb : Optional[List[str]]
-            List of PDB file lines
-
-        Returns
-        -------
-        Tuple[List[str], str, str]
-            Tuple containing (modified_pdb, cter, nter) with capped PDB and terminal types
+        Decide martinize2 -nter/-cter flags robustly.
+        1) Rename terminal ALA -> CLA in the PDB *before* flag decisions.
+        2) If any chain starts/ends on a special block, use 'none' for that side.
+        Special blocks include ACE/CLA and crosslink blocks (LY2/LY3/L4Y/L5Y/LYX),
+        and also NME (since it's already an explicit cap).
         """
         if not pdb:
             LOG.warning("Empty PDB provided to cap_pdb")
-            return [], "NME", "ACE"
+            return [], "none", "none"
 
         try:
-            cter, nter = "NME", "ACE"
-            chain_length = self.get_chain_length(pdb)
-            
-            first_residues = {}
+            # 1) Rename terminal ALA -> CLA (bookkeeping only; never pass 'CLA' as a CLI mod)
+            chain_length = self.get_chain_length(pdb)  # e.g. {"A": " 178", "B": "...", "C": "..."}
+            for i in range(len(pdb)):
+                line = pdb[i]
+                if not line.startswith(("ATOM  ", "HETATM")):
+                    continue
+                if line[17:20] == "ALA":
+                    tag = line[21:26]  # e.g., "A 178"
+                    if tag in {f"A{chain_length['A']}", f"B{chain_length['B']}", f"C{chain_length['C']}"}:
+                        pdb[i] = line[:17] + "CLA " + line[21:]
+
+            # 2) Inspect first/last residue per chain *after* the rename above
+            first_res = {}   # chain -> resname
+            last_res  = {}   # chain -> (resid, resname)
             for line in pdb:
-                if line[0:6] in ("ATOM  ", "HETATM"):
-                    chain_id = line[21:22]
-                    if chain_id in self.is_chain and chain_id not in first_residues:
-                        first_residues[chain_id] = line[17:20].strip()
+                if not line.startswith(("ATOM  ", "HETATM")):
+                    continue
+                ch = line[21:22]
+                if ch not in self.is_chain:
+                    continue
+                resname = line[17:20].strip()
+                try:
+                    resid = int(line[22:26])
+                except ValueError:
+                    continue
+                if ch not in first_res:
+                    first_res[ch] = resname
+                if ch not in last_res or resid >= last_res[ch][0]:
+                    last_res[ch] = (resid, resname)
 
-            for line_it in range(len(pdb)):
-                if pdb[line_it][17:20] == "ALA":
-                    if pdb[line_it][21:26] == "A" + chain_length["A"]:
-                        pdb[line_it] = pdb[line_it][0:17] + "CLA " + pdb[line_it][21:]
-                    elif pdb[line_it][21:26] == "B" + chain_length["B"]:
-                        pdb[line_it] = pdb[line_it][0:17] + "CLA " + pdb[line_it][21:]
-                    elif pdb[line_it][21:26] == "C" + chain_length["C"]:
-                        pdb[line_it] = pdb[line_it][0:17] + "CLA " + pdb[line_it][21:]
+            firsts = set(first_res.values()) if first_res else set()
+            lasts  = {name for _, name in last_res.values()} if last_res else set()
 
-            has_ace = any(res == "ACE" for res in first_residues.values())
-            all_ace = all(res == "ACE" for res in first_residues.values())
-            all_gln = all(res == "GLN" for res in first_residues.values())
-            
-            if all_ace:
-                nter = "none"
-            elif all_gln:
-                nter = "N-ter"
-            elif has_ace:
-                nter = "none"
-            else:
-                nter = "ACE"
+            # Anything here means "don't ask martinize2 to apply a terminal mod":
+            special_first = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX"}
+            special_last  = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "NME"}
 
-            if len(pdb) > 2 and pdb[-2][17:20] == "CLA":
-                cter = "CLA"
+            # N-terminus: be conservative (ACE often causes issues on GLN etc. in some FF)
+            nter_flag = "none" if (not firsts or (firsts & special_first)) else "none"
 
-            return pdb, cter, nter
+            # C-terminus: allow NME only if all chains end on standard residues (not special, not NME)
+            cter_flag = "NME"
+            if not lasts or (lasts & special_last):
+                cter_flag = "none"
+
+            # LOG.debug(f"cap_pdb decided: -nter {nter_flag}, -cter {cter_flag} (first={firsts}, last={lasts})")
+            return pdb, cter_flag, nter_flag
+
         except Exception as e:
             LOG.error(f"Error in cap_pdb: {str(e)}")
-            return pdb, "NME", "ACE"
+            return pdb or [], "none", "none"
 
     def get_chain_length(self, pdb: Optional[List[str]] = None) -> Dict[str, str]:
         """
@@ -485,23 +492,28 @@ class Martini:
             LOG.error(f"Error writing GO topology: {str(e)}")
 
     def translate_pdb(self, pdb: Optional[List[str]] = None) -> List[str]:
-        """
-        Translate PDB for Martinize2 by formatting coordinates.
-        
-        Ensures all coordinates are formatted with exactly 3 decimal places,
-        which is required for proper processing by Martinize2.
-        """
         if not pdb:
             LOG.warning("Empty PDB provided to translate_pdb")
             return []
-        
+
         translated = []
         for line in pdb:
             if line[0:6] in self.is_line:
-                new_line = line[:46] + '{:.3f}'.format(round(float(line[46:54]), 3)) + line[54:]
-                translated.append(new_line)
-        
+                try:
+                    # Columns: x[30:38], y[38:46], z[46:54]
+                    x = float(line[30:38])
+                    y = float(line[38:46])
+                    z = float(line[46:54])
+                    new_line = f"{line[:30]}{x:8.3f}{y:8.3f}{z:8.3f}{line[54:]}"
+                    translated.append(new_line)
+                except ValueError:
+                    # If parse fails, keep original to avoid data loss but log it
+                    LOG.warning(f"Bad coord formatting, keeping original: {line.rstrip()}")
+                    translated.append(line)
+            else:
+                translated.append(line)
         return translated
+
 
     def write_gro(
         self,
@@ -543,28 +555,9 @@ async def build_martini3(
 ) -> Martini:
     """
     Build a Martini 3 topology for the given molecular system.
-
-    Parameters
-    ----------
-    system : System
-        The molecular system to process
-    config : ColbuilderConfig
-        Configuration object containing settings
-    file_manager : Optional[FileManager]
-        File manager for consistent file handling
-
-    Returns
-    -------
-    Martini
-        A Martini object representing the processed system
-
-    Raises
-    ------
-    TopologyGenerationError
-        If topology generation fails
     """
     ff = f"{config.force_field}"
-    go_epsilon = config.go_epsilon if hasattr(config, "go_epsilon") else 9.414
+    go_epsilon = getattr(config, "go_epsilon", 9.414)
 
     if file_manager is None:
         file_manager = FileManager(config)
@@ -621,14 +614,12 @@ async def build_martini3(
                 else:
                     for src_file in source_contactmap_dir.glob("*.c"):
                         shutil.copy2(src_file, local_contactmap_dir / src_file.name)
-
                     for header_file in source_contactmap_dir.glob("*.h"):
                         shutil.copy2(header_file, local_contactmap_dir / header_file.name)
 
                     source_makefile = source_contactmap_dir / "makefile"
                     if source_makefile.exists():
                         shutil.copy2(source_makefile, local_contactmap_dir / "makefile")
-
                         make_process = await asyncio.create_subprocess_shell(
                             "make",
                             cwd=str(local_contactmap_dir),
@@ -636,7 +627,6 @@ async def build_martini3(
                             stderr=asyncio.subprocess.PIPE,
                         )
                         stdout, stderr = await make_process.communicate()
-
                         if make_process.returncode != 0:
                             LOG.error(f"Failed to build contact map tool: {stderr.decode()}")
                         else:
@@ -645,14 +635,12 @@ async def build_martini3(
                         source_makefile = source_ff_dir / "makefile"
                         if source_makefile.exists():
                             shutil.copy2(source_makefile, Path("makefile"))
-
                             make_process = await asyncio.create_subprocess_shell(
                                 "make",
                                 stdout=asyncio.subprocess.PIPE,
                                 stderr=asyncio.subprocess.PIPE,
                             )
                             stdout, stderr = await make_process.communicate()
-
                             if make_process.returncode != 0:
                                 LOG.error(f"Failed to build contact map tool: {stderr.decode()}")
                             else:
@@ -673,17 +661,12 @@ async def build_martini3(
             )
 
         LOG.info(f"Step 3/{steps} Processing models with Martinize2")
-        connect_size = system.get_connect_size()
         processed_models = []
 
         try:
             martinize2_command = getattr(config, "martinize2_command", None)
-            martinize2_env = getattr(config, "martinize2_env", None)
-            use_conda_run = getattr(config, "use_conda_run", False)
-
             if not martinize2_command:
                 from shutil import which
-
                 martinize2_cmd = which("martinize2")
                 if martinize2_cmd:
                     config.martinize2_command = "martinize2"
@@ -693,7 +676,6 @@ async def build_martini3(
                         error_code="TOP_MART_005",
                         context={"force_field": ff},
                     )
-
         except Exception as e:
             LOG.error(f"Error checking for Martinize2 command: {str(e)}")
             raise TopologyGenerationError(
@@ -712,15 +694,10 @@ async def build_martini3(
             type_dir.mkdir(exist_ok=True, parents=True)
 
         models_list = [model_id for model_id in system.get_models()]
-        
         model_status = {}
-        failed_martinize = []
-        failed_contact = []
-        failed_go = []
-        failed_itp = []
-        
-        processed_in_topology = set()
-        
+        failed_martinize, failed_contact, failed_go, failed_itp = [], [], [], []
+        processed_in_topology: set = set()
+
         for model_id in tqdm(models_list, desc="Building topology", unit="%"):
             model = system.get_model(model_id=model_id)
             if model is None or model.connect is None:
@@ -742,31 +719,34 @@ async def build_martini3(
                             continue
 
                         pdb = martini.translate_pdb(pdb=pdb)
-                        cap_pdb, cter, nter = martini.cap_pdb(pdb=pdb)
-                        order, map_pdb = martini.set_pdb(pdb=cap_pdb)
+                        pdb_capped, cter, nter = martini.cap_pdb(pdb=pdb)
+                        order, map_pdb = martini.set_pdb(pdb=pdb_capped)
 
                         martini.write_pdb(pdb=order, file="tmp.pdb")
                         martini.write_pdb(pdb=map_pdb, file="map.pdb")
 
-                        martinize_args = (
-                            f"-f tmp.pdb -sep -merge A,B,C "
-                            f"-collagen -from amber99 -o topol.top -bonds-fudge 1.4 -p backbone "
-                            f"-ff {martini.ff}00C -x {int(model_id)}.{int(connect_id)}.CG.pdb "
-                            f"-nter {nter} -cter {cter} "
-                            f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
-                        )
+                        def _martinize_cmd(nter_flag: str, cter_flag: str) -> str:
+                            args = (
+                                f"-f tmp.pdb -sep -merge A,B,C "
+                                f"-collagen -from amber99 -o topol.top -bonds-fudge 1.4 -p backbone "
+                                f"-ff {martini.ff}00C -x {int(model_id)}.{int(connect_id)}.CG.pdb "
+                                f"-nter {nter_flag} -cter {cter_flag} "
+                                f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
+                            )
+                            return get_conda_command_with_path("martinize2", args)
 
-                        cmd = get_conda_command_with_path("martinize2", martinize_args)
-
+                        cmd = _martinize_cmd(nter, cter)
                         process = await asyncio.create_subprocess_shell(
-                            cmd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
+                            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                         )
                         stdout, stderr = await process.communicate()
+                        stderr_txt = stderr.decode(errors="ignore")
+                        stdout_txt = stdout.decode(errors="ignore")
 
                         if process.returncode != 0:
                             LOG.error(f"Martinize2 failed for model {model_id} -> connection {connect_id}")
+                            LOG.error(f"martinize2 stderr:\n{stderr_txt}")
+                            LOG.debug(f"martinize2 stdout:\n{stdout_txt}")
                             failed_martinize.append((model_id, connect_id))
                             continue
 
@@ -784,7 +764,6 @@ async def build_martini3(
                             stderr=asyncio.subprocess.PIPE,
                         )
                         contact_stdout, contact_stderr = await contact_process.communicate()
-
                         if contact_process.returncode != 0:
                             LOG.error(f"Contact map failed for model {model_id} -> connection {connect_id}")
                             failed_contact.append((model_id, connect_id))
@@ -794,14 +773,12 @@ async def build_martini3(
                             f"python create_goVirt.py -s {int(model_id)}.{int(connect_id)}.CG.pdb "
                             f"-f map.out --moltype col_{int(model_id)}.{int(connect_id)} --go_eps {go_epsilon}"
                         )
-
                         go_process = await asyncio.create_subprocess_shell(
                             go_cmd,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
                         )
                         go_stdout, go_stderr = await go_process.communicate()
-
                         if go_process.returncode != 0:
                             LOG.error(f"GO virtual sites creation failed for model {model_id} -> connection {connect_id}")
                             failed_go.append((model_id, connect_id))
@@ -820,10 +797,8 @@ async def build_martini3(
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
                         processed_models.append(model_id)
-                        
                         for connect_id in model.connect:
                             processed_in_topology.add(connect_id)
-                        
                     except Exception as e:
                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
                         failed_itp.append(model_id)
@@ -838,7 +813,7 @@ async def build_martini3(
                 model_status[model_id] = f"error: {str(e)}"
 
         LOG.info(f"Successfully processed: {len(processed_models)} models")
-        
+
         if failed_martinize:
             LOG.warning(f"Failed at Martinize2: {failed_martinize}")
         if failed_contact:
@@ -847,7 +822,7 @@ async def build_martini3(
             LOG.warning(f"Failed at GO creation: {failed_go}")
         if failed_itp:
             LOG.warning(f"Failed at ITP processing: {failed_itp}")
-        
+
         check_output_files(Path.cwd(), cnt_model)
 
         if not processed_models:
@@ -864,9 +839,8 @@ async def build_martini3(
             system_pdb = martini.get_system_pdb(size=cnt_model)
             pdb_file_path = Path(f"collagen_fibril_CG_{config.species}.pdb")
             martini.write_pdb(pdb=system_pdb, file=str(pdb_file_path))
-
             if pdb_file_path.exists():
-                dest_path = file_manager.copy_to_directory(pdb_file_path, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(pdb_file_path, dest_dir=output_topology_dir)
         except Exception as e:
             raise TopologyGenerationError(
                 message="Failed to create system PDB file",
@@ -881,20 +855,20 @@ async def build_martini3(
 
             topology_file_path = Path(final_topology_file)
             if topology_file_path.exists():
-                dest_path = file_manager.copy_to_directory(topology_file_path, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(topology_file_path, dest_dir=output_topology_dir)
 
             for itp_file in Path().glob("col_[0-9]*.itp"):
-                dest_path = file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
 
             for excl_file in Path().glob("col_[0-9]*_go-excl.itp"):
-                dest_path = file_manager.copy_to_directory(excl_file, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(excl_file, dest_dir=output_topology_dir)
 
             for go_site_file in Path().glob("*go-sites.itp"):
-                dest_path = file_manager.copy_to_directory(go_site_file, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(go_site_file, dest_dir=output_topology_dir)
 
             source_martini_files = list(source_ff_dir.glob("martini_v3.0.0*"))
             for source_file in source_martini_files:
-                dest_path = file_manager.copy_to_directory(source_file, dest_dir=output_topology_dir)
+                file_manager.copy_to_directory(source_file, dest_dir=output_topology_dir)
 
             if not source_martini_files:
                 LOG.warning("No Martini force field files found in source directory")
@@ -916,7 +890,6 @@ async def build_martini3(
         LOG.info(f"{Fore.BLUE}Martini topology generated successfully for {len(processed_models)} models.{Style.RESET_ALL}")
 
         os.chdir(original_dir)
-
         return martini
 
     except TopologyGenerationError:

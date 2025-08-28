@@ -197,13 +197,13 @@ class Crosslink:
             elif atom[1] == 'L5Y' and atom[2] == 'SC2':
                 l5y_sc2_atoms.append(atom)
         
-        LOG.info(f"Crosslink atom inventory:")
-        LOG.info(f"  LYX SC4: {len(lyx_sc4_atoms)}")
-        LOG.info(f"  LYX SC5: {len(lyx_sc5_atoms)}")
-        LOG.info(f"  LY2 SC1: {len(ly2_sc1_atoms)}")
-        LOG.info(f"  LY3 SC1: {len(ly3_sc1_atoms)}")
-        LOG.info(f"  L4Y SC1: {len(l4y_sc1_atoms)}")
-        LOG.info(f"  L5Y SC2: {len(l5y_sc2_atoms)}")
+        LOG.debug(f"Crosslink atoms:")
+        LOG.debug(f"  LYX SC4: {len(lyx_sc4_atoms)}")
+        LOG.debug(f"  LYX SC5: {len(lyx_sc5_atoms)}")
+        LOG.debug(f"  LY2 SC1: {len(ly2_sc1_atoms)}")
+        LOG.debug(f"  LY3 SC1: {len(ly3_sc1_atoms)}")
+        LOG.debug(f"  L4Y SC1: {len(l4y_sc1_atoms)}")
+        LOG.debug(f"  L5Y SC2: {len(l5y_sc2_atoms)}")
         
         # Find LYX SC4 - LY2 SC1 pairs
         for lyx_atom in lyx_sc4_atoms:
@@ -235,7 +235,6 @@ class Crosslink:
                     self.crosslink_pairs.append((l4y_atom, l5y_atom))
                     LOG.info(f"Added L4Y-L5Y pair: atoms {l4y_atom[0]} - {l5y_atom[0]} (distance: {dist:.3f} Å)")
         
-        LOG.info(f"Found {len(self.crosslink_pairs)} valid crosslink pairs")
         return self.crosslink_pairs
     
     def set_crosslink_bonded(self, cnt_model: Optional[int] = None, 
