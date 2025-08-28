@@ -535,6 +535,11 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
         for item in filter(None, get_items()):
             LOG.info(f"- {item}")
 
+    # Show GO interaction mode
+    mode = "Pairs-only" if getattr(cfg, "use_go_pairs", True) else "Virtual Sites (VS)"
+    LOG.subsection("Topology Mode")
+    LOG.info(f"- GO interactions: {mode}")
+
     if cfg.config_file:
         LOG.info(f"Config File: {cfg.config_file}")
     if cfg.pdb_file and (cfg.geometry_generator):
@@ -672,6 +677,11 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     help="Specify force field to be used, e.g. -ff amber99 OR -ff martini3",
 )
 @click.option(
+    "--go-mode",
+    type=click.Choice(["pairs", "vs"]),
+    help="Choose GO interaction representation: 'pairs' (default) or 'vs' (virtual sites).",
+)
+@click.option(
     "-top_debug",
     "--topology_debug",
     is_flag=True,
@@ -746,6 +756,11 @@ def main(**kwargs: Any) -> int:
         # Override with command-line arguments if they are explicitly provided
         for key, value in kwargs.items():
             if key == "config_file":
+                continue
+
+            elif key == "go_mode" and value:
+                # CLI wins: pairs=True, vs=False
+                config_data["use_go_pairs"] = (value == "pairs")
                 continue
 
             # Special handling for files_mix (it's a tuple from command line)

@@ -7,7 +7,7 @@ topology_generator: true    # Generate topology files
 debug: false                 # Enable debug mode
 
 # Input Configuration
-species: "mus_musculus"      # Species for collagen sequence
+species: "rattus_norvegicus"      # Species for collagen sequence
 # Available species options:
 # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
 # Mammals (Rodents): mus_musculus, rattus_norvegicus
@@ -19,15 +19,20 @@ species: "mus_musculus"      # Species for collagen sequence
 fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
 crosslink: true              # Enable crosslinking in the model
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
-n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
-c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
-n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue combination
-c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
+# n_term_type: "PYD"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+# c_term_type: "PYD"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+c_term_type: "HLKNL"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+# n_term_combination: "9.C - 5.B - 944.B"    # N-terminal residue combination
+n_term_combination: "9.C - 944.B"    # N-terminal residue combination
+# c_term_combination: "1046.C - 1046.A - 103.C" # C-terminal residue combination
+c_term_combination: "1046.C - 103.C" # C-terminal residue combination
 
 # Geometry Parameters
-pdb_file: "musmusculus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
+# pdb_file: "rattusnorvegicus_N_PYD_C_PYD.pdb"               # Input PDB file (set to null if sequence_generator is true)
+pdb_file: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
 contact_distance: 20         # Distance threshold for contacts (Å)
-fibril_length: 40.0          # Length of the generated fibril (nm)
+fibril_length: 50.0          # Length of the generated fibril (nm)
 crystalcontacts_file: null   # File with crystal contacts 
 connect_file: null           # File with connection information
 crystalcontacts_optimize: false  # Optimize crystal contacts during generation
@@ -46,3 +51,4 @@ replace_file: null           # File with crosslinks to be replaced (set to null 
 
 # Topology Options
 force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")
+use_go_pairs: false           # true = pairs-only (default); false = VS-only

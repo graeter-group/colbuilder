@@ -565,25 +565,13 @@ class Itp:
         LOG.debug(f"Merged connection {cnt_con}: {len(merged_atoms)} atoms, final total: {len(self.final_atoms)}")
 
     def make_topology(
-        self, model_id: Optional[int] = None, cnt_model: Optional[int] = None
+        self, model_id: Optional[int] = None, cnt_model: Optional[int] = None, use_go_pairs: bool = True
     ) -> None:
-        """
-        Create a complete topology by merging connections and adding crosslinks.
-
-        Creates a complete molecular topology by:
-        1. Merging all component topologies with proper index adjustments
-        2. Setting up crosslink structures (simplified approach)
-        3. Writing the final topology and exclusion files
-
-        Args:
-            model_id: Identifier for the molecular model being processed
-            cnt_model: Counter index used for output file naming
-        """
         # Merge all connection topologies first
         for cnt_con in range(len(self.system.get_model(model_id=model_id).connect)):
             self.merge_topology(cnt_con=cnt_con)
-        
-        # Set up crosslinks using simplified approach (following working version)
+
+        # Crosslinks
         if len(self.system.get_model(model_id=model_id).connect) == 1:
             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
             LOG.debug(f"Single connection model {model_id}: no crosslinks")
@@ -591,8 +579,6 @@ class Itp:
             try:
                 crosslinker = Crosslink(cnt_model=cnt_model)
                 self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
-                
-                # Log crosslink information for debugging
                 if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
                     LOG.debug(f"Found crosslinks for model {model_id}:")
                     LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
@@ -600,46 +586,29 @@ class Itp:
                     LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
                 else:
                     LOG.debug(f"No crosslinks found for model {model_id}")
-                    
             except Exception as e:
                 LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
-                # Initialize empty crosslink structures if processing fails
                 self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
 
-        # Write final topology files
-        self.write_topology(cnt_model=cnt_model)
+        # Write final topology files with the chosen mode
+        self.write_topology(cnt_model=cnt_model, use_go_pairs=use_go_pairs)
         self.write_excl(cnt_model=cnt_model)
 
-    def write_topology(self, cnt_model: Optional[int] = None) -> None:
-        """Write the complete molecular topology to an ITP file.
 
-        Creates a structured topology file containing all merged molecular components
-        and their interactions. Uses the simplified crosslink format from the working version.
-
-        Args:
-            cnt_model: Model counter used for output file naming
-
-        Raises:
-            PermissionError: If writing to the output file is not permitted
-            Exception: For other file operation errors
-        """
+    def write_topology(self, cnt_model: Optional[int] = None, use_go_pairs: bool = True) -> None:
         if cnt_model is None:
             raise ValueError("cnt_model cannot be None when writing topology file.")
         output_path = f"col_{int(cnt_model)}.itp"
 
         try:
             with open(output_path, "w") as f:
-                f.write("; Merging of topologies for models due to system\n")
+                f.write("; Merged topology for model\n")
                 f.write("[ moleculetype ]\n")
                 f.write(f"col_{cnt_model} 1\n")
 
                 f.write("\n\n[ atoms ]\n")
                 for atom in self.final_atoms:
-                    f.write(
-                        "{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}\n".format(
-                            *[atom[i] for i in range(7)]
-                        )
-                    )
+                    f.write("{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}\n".format(*[atom[i] for i in range(7)]))
 
                 f.write("\n[ position_restraints ]\n")
                 f.write("#ifdef POSRES\n")
@@ -656,14 +625,20 @@ class Itp:
                     f.write(" ".join(str(i) for i in flex_bond))
                 f.write("#endif\n")
 
-                # Crosslink bonds (simplified format from working version)
+                # Crosslink bonds
                 f.write("; crosslink bonds \n")
                 for cb in self.crosslink_bonded['bonds']:
                     f.write(" ".join(str(i) for i in cb))
 
-                f.write("\n[ pairs ]\n")
-                for pair in self.final_pairs:
-                    f.write(" ".join(str(i) for i in pair))
+                # Either pairs OR virtual sites
+                if use_go_pairs:
+                    f.write("\n[ pairs ]\n")
+                    for pair in self.final_pairs:
+                        f.write(" ".join(str(i) for i in pair))
+                else:
+                    f.write("\n[ virtual_sitesn ]\n")
+                    for vsite in self.final_virtual_sites:
+                        f.write(" ".join(str(i) for i in vsite))
 
                 f.write("\n[ constraints ]\n")
                 f.write("#ifndef FLEXIBLE\n")
@@ -671,15 +646,11 @@ class Itp:
                     f.write(" ".join(str(i) for i in constraint))
                 f.write("#endif\n")
 
-                f.write("\n[ virtual_sitesn ]\n")
-                for vsite in self.final_virtual_sites:
-                    f.write(" ".join(str(i) for i in vsite))
-
                 f.write("\n[ angles ]\n")
                 for angle in self.final_angles:
                     f.write(" ".join(str(i) for i in angle))
 
-                # Crosslink angles (simplified format from working version)
+                # Crosslink angles
                 f.write("; crosslink angles \n")
                 for ca in self.crosslink_bonded['angles']:
                     f.write(" ".join(str(i) for i in ca))
@@ -688,7 +659,7 @@ class Itp:
                 for dihedral in self.final_dihedrals:
                     f.write(" ".join(str(i) for i in dihedral))
 
-                # Crosslink dihedrals (simplified format from working version)
+                # Crosslink dihedrals
                 f.write("; crosslink dihedrals \n")
                 for cd in self.crosslink_bonded['dihedrals']:
                     f.write(" ".join(str(i) for i in cd))

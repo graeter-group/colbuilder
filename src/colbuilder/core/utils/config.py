@@ -252,6 +252,7 @@ class ColbuilderConfig(BaseModel):
         default=9.414,
         description="GO epsilon value for Martini3-CG parametrization (default: 9.414)",
     )
+    use_go_pairs: bool = True  # True = pairs-only (default); False = VS-only
 
     # Path Configuration
     PROJECT_ROOT: Path = Field(

@@ -418,17 +418,10 @@ class Martini:
             return []
 
     def write_system_topology(
-        self, topology_file: str = "system.top", size: Optional[int] = None
+        self, topology_file: str = "system.top", size: Optional[int] = None, use_go_pairs: bool = True
     ) -> None:
         """
         Write final topology file for the system.
-
-        Parameters
-        ----------
-        topology_file : str
-            Path to the output topology file
-        size : Optional[int]
-            Number of models to include
         """
         if not size:
             LOG.warning("No size provided to write_system_topology")
@@ -436,10 +429,14 @@ class Martini:
 
         try:
             with open(topology_file, "w") as f:
-                f.write("; This is the topology for the collagen microfibril\n")
-                f.write("#define GO_VIRT\n")
+                f.write("; Topology for the collagen microfibril\n")
+                # Only VS mode needs GO_VIRT and go-sites
+                if not use_go_pairs:
+                    f.write("#define GO_VIRT\n")
                 f.write('#include "martini_v3.0.0.itp"\n')
-                f.write('#include "go-sites.itp"\n\n')
+                if not use_go_pairs:
+                    f.write('#include "go-sites.itp"\n')
+                f.write("\n")
 
                 for m in range(size):
                     f.write(f'#include "col_{m}.itp"\n')
@@ -451,10 +448,10 @@ class Martini:
                 f.write("\n[ system ]\n")
                 f.write("Collagen, Martini 3 and Go-Potentials \n")
                 f.write("\n[ molecules ]\n")
-
                 for t in range(size):
                     f.write(f"col_{t}     1\n")
 
+            # GO sites atomtype header (kept as-is; harmless in pairs mode if not referenced)
             self.write_go_topology(name_type="sites.itp")
 
         except PermissionError:
@@ -558,6 +555,7 @@ async def build_martini3(
     """
     ff = f"{config.force_field}"
     go_epsilon = getattr(config, "go_epsilon", 9.414)
+    use_go_pairs = getattr(config, "use_go_pairs", True)  # <-- single switch
 
     if file_manager is None:
         file_manager = FileManager(config)
@@ -794,8 +792,9 @@ async def build_martini3(
                     try:
                         itp_ = Itp(system=system, model_id=int(model_id))
                         itp_.read_model(model_id=int(model_id))
-                        itp_.go_to_pairs(model_id=int(model_id))
-                        itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
+                        if use_go_pairs:
+                            itp_.go_to_pairs(model_id=int(model_id))  # switch only in pairs mode
+                        itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model, use_go_pairs=use_go_pairs)
                         processed_models.append(model_id)
                         for connect_id in model.connect:
                             processed_in_topology.add(connect_id)
@@ -851,7 +850,9 @@ async def build_martini3(
 
         try:
             final_topology_file = f"collagen_fibril_{config.species}.top"
-            martini.write_system_topology(topology_file=final_topology_file, size=cnt_model)
+            martini.write_system_topology(
+                topology_file=final_topology_file, size=cnt_model, use_go_pairs=use_go_pairs
+            )
 
             topology_file_path = Path(final_topology_file)
             if topology_file_path.exists():
@@ -863,15 +864,13 @@ async def build_martini3(
             for excl_file in Path().glob("col_[0-9]*_go-excl.itp"):
                 file_manager.copy_to_directory(excl_file, dest_dir=output_topology_dir)
 
-            for go_site_file in Path().glob("*go-sites.itp"):
-                file_manager.copy_to_directory(go_site_file, dest_dir=output_topology_dir)
+            # Copy go-sites only in VS mode (clean outputs)
+            if not use_go_pairs:
+                for go_site_file in Path().glob("*go-sites.itp"):
+                    file_manager.copy_to_directory(go_site_file, dest_dir=output_topology_dir)
 
-            source_martini_files = list(source_ff_dir.glob("martini_v3.0.0*"))
-            for source_file in source_martini_files:
+            for source_file in source_ff_dir.glob("martini_v3.0.0*"):
                 file_manager.copy_to_directory(source_file, dest_dir=output_topology_dir)
-
-            if not source_martini_files:
-                LOG.warning("No Martini force field files found in source directory")
 
         except Exception as e:
             raise TopologyGenerationError(
@@ -882,7 +881,7 @@ async def build_martini3(
             )
 
         try:
-            if not config.debug:
+            if not getattr(config, "debug", False):
                 subprocess.run(r"rm \#*", shell=True, check=False)
         except Exception as e:
             LOG.warning(f"Error cleaning up temporary files: {str(e)}")
