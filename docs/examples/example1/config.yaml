@@ -1,0 +1,48 @@
+# Operation Mode
+mode: null                   # Specific operation mode if needed
+config_file: null            # Path to another config file (for nested configs)
+sequence_generator: true     # Generate sequence from species
+geometry_generator: true     # Generate fibril geometry
+topology_generator: false    # Generate topology files
+debug: false                 # Enable debug mode
+
+# Input Configuration
+species: "homo_sapiens"      # Species for collagen sequence
+# Available species options:
+# Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
+# Mammals (Rodents): mus_musculus, rattus_norvegicus
+# Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
+# Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
+# Reptiles: pelodiscus_sinensis
+
+# Sequence Settings
+fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
+crosslink: true              # Enable crosslinking in the model
+# Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
+n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "HLKNL"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "9.C - 947.A"    # N-terminal residue combination
+c_term_combination: "1047.C - 104.C" # C-terminal residue combination
+
+# Geometry Parameters
+pdb_file: null               # Input PDB file (set to null if sequence_generator is true)
+contact_distance: 20         # Distance threshold for contacts (Å)
+fibril_length: 70.0          # Length of the generated fibril (nm)
+crystalcontacts_file: null   # File with crystal contacts 
+connect_file: null           # File with connection information
+crystalcontacts_optimize: false  # Optimize crystal contacts during generation
+
+# Mixing Options (for mixed crosslinked microfibril)
+mix_bool: false              # Enable mixing of different crosslink types
+ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
+files_mix:                   # Required if mix_bool is true
+ - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
+ - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
+
+# Replacement Options (for fewer crosslinks)
+replace_bool: false          # Enable crosslink replacement
+ratio_replace: 30            # Percentage of crosslinks to replace
+replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
+
+# Topology Options
+force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
