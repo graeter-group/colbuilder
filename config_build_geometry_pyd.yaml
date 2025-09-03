@@ -1,13 +1,13 @@
 # Operation Mode
 mode: null                   # Specific operation mode if needed
 config_file: null            # Path to another config file (for nested configs)
-sequence_generator: true     # Generate sequence from species
+sequence_generator: false     # Generate sequence from species
 geometry_generator: true     # Generate fibril geometry
-topology_generator: false    # Generate topology files
+topology_generator: true    # Generate topology files
 debug: false                 # Enable debug mode
 
 # Input Configuration
-species: "mus_musculus"      # Species for collagen sequence
+species: "rattus_norvegicus"      # Species for collagen sequence
 # Available species options:
 # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
 # Mammals (Rodents): mus_musculus, rattus_norvegicus
@@ -17,7 +17,7 @@ species: "mus_musculus"      # Species for collagen sequence
 
 # Sequence Settings
 fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
-crosslink: true              # Enable crosslinking in the model
+crosslink: false              # Enable crosslinking in the model
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
 n_term_type: "PYD"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
 # n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
@@ -30,9 +30,9 @@ c_term_combination: "1046.C - 1046.A - 103.C" # C-terminal residue combination
 
 # Geometry Parameters
 # pdb_file: "rattusnorvegicus_N_PYD_C_PYD.pdb"               # Input PDB file (set to null if sequence_generator is true)
-pdb_file: null # "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
-contact_distance: 40         # Distance threshold for contacts (Å)
-fibril_length: 80.0          # Length of the generated fibril (nm)
+pdb_file: "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
+contact_distance: 20         # Distance threshold for contacts (Å)
+fibril_length: 40.0          # Length of the generated fibril (nm)
 crystalcontacts_file: null   # File with crystal contacts 
 connect_file: null           # File with connection information
 crystalcontacts_optimize: false  # Optimize crystal contacts during generation

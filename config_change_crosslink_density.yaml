@@ -1,9 +1,9 @@
 # Operation Mode
 mode: null                   # Specific operation mode if needed
 config_file: null            # Path to another config file (for nested configs)
-sequence_generator: true     # Generate sequence from species
-geometry_generator: true     # Generate fibril geometry
-topology_generator: false    # Generate topology files
+sequence_generator: false     # Generate sequence from species
+geometry_generator: false     # Generate fibril geometry
+topology_generator: true    # Generate topology files
 debug: false                 # Enable debug mode
 
 # Input Configuration
@@ -45,9 +45,9 @@ files_mix:                   # Required if mix_bool is true
  - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
 
 # Replacement Options (for fewer crosslinks)
-replace_bool: false          # Enable crosslink replacement
+replace_bool: true          # Enable crosslink replacement
 ratio_replace: 20            # Percentage of crosslinks to replace
-replace_file: null # "collagen_fibril_mus_musculus.pdb"           # File with crosslinks to be replaced (set to null if geometry_generation is true)
+replace_file: "collagen_fibril_mus_musculus.pdb"           # File with crosslinks to be replaced (set to null if geometry_generation is true)
 
 # Topology Options
 force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")
