@@ -87,16 +87,16 @@ class Itp:
     def allocate(self, model_id: Optional[int] = None) -> List[List[Any]]:
         """Create storage arrays based on the number of molecular connections.
 
-        Args:
-            model_id: Identifier for the molecular model
-
-        Returns:
-            A list of empty lists, with one list per molecular connection
-            in the specified model
+        If connections are missing, allocate at least one slot so later logic can still run.
         """
-        # Allocate for ALL connections (including cross-connections)
-        # Even though cross-connections don't have ITP files, we need the slots
-        size = len(self.system.get_model(model_id=model_id).connect)
+        size = 1
+        try:
+            model = self.system.get_model(model_id=model_id) if self.system else None
+            conns = getattr(model, "connect", None)
+            if isinstance(conns, (list, tuple)) and len(conns) > 0:
+                size = len(conns)
+        except Exception as e:
+            LOG.debug(f"allocate(): defaulting to size=1 due to: {e}")
         return [[] for _ in range(size)]
 
     def read_model(
@@ -105,40 +105,94 @@ class Itp:
         """
         Read and merge all connected ITP files for a single model.
 
-        Reads ITP files for ALL connections (both self and cross-connections) to ensure
-        that crosslinks referencing atoms from different connections work properly.
-
-        Args:
-            model_id: Unique identifier for the model to process
-            system: Reserved for future system-level configuration (not currently used)
+        Patch #2:
+        - If model.connect is empty/missing, infer connections from on-disk files:
+            'col_<model>.<connect>.itp'
+        - If nothing is found, fall back to a self-connection [model_id]
+        - Ensure internal arrays are sized to the inferred number of connections
         """
-        cnt_con = 0
-        connect_ids = self.system.get_model(model_id=model_id).connect
+        if model_id is None:
+            raise ValueError("model_id cannot be None in read_model().")
 
+        # 1) Try to get connectivity from the System
+        connect_ids = None
+        try:
+            model = self.system.get_model(model_id=model_id) if self.system else None
+            if model is not None:
+                conns = getattr(model, "connect", None)
+                if isinstance(conns, (list, tuple)) and len(conns) > 0:
+                    connect_ids = list(conns)
+        except Exception as e:
+            LOG.debug(f"read_model(): unable to fetch connect from system for model {model_id}: {e}")
+
+        # 2) If missing, infer from disk: col_<model>.<connect>.itp
+        if not connect_ids:
+            import re
+            inferred: List[int] = []
+            pat = re.compile(rf"col_{int(model_id)}\.(\d+)\.itp$")
+
+            for p in Path().glob(f"col_{int(model_id)}.*.itp"):
+                m = pat.fullmatch(p.name)
+                if m:
+                    try:
+                        inferred.append(int(m.group(1)))
+                    except ValueError:
+                        pass
+
+            if inferred:
+                connect_ids = inferred
+                LOG.debug(f"Inferred connections for model {model_id} from disk: {connect_ids}")
+            else:
+                connect_ids = [int(model_id)]
+                LOG.debug(f"No connections present for model {model_id}; using self-connection: {connect_ids[0]}")
+
+        needed = len(connect_ids)
+        current = len(self.atoms)
+        if needed > current:
+            def _extend(attr_name: str, how_many: int) -> None:
+                lst = getattr(self, attr_name)
+                lst.extend([[] for _ in range(how_many)])
+
+            grow = needed - current
+            for name in [
+                "molecule", "mol_ends", "atoms", "posres", "bonds", "constraints",
+                "angles", "exclusions", "go_exclusions", "dihedrals",
+                "virtual_sites", "go_table", "pairs"
+            ]:
+                _extend(name, grow)
+            LOG.debug(f"read_model(): extended internal arrays from {current} to {needed} slots for model {model_id}")
+
+        cnt_con = 0
         for connect_id in connect_ids:
-            # Check if ITP files exist for this connection
             itp_path = f"col_{int(model_id)}.{int(connect_id)}.itp"
             excl_path = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
             table_path = f"col_{int(model_id)}.{int(connect_id)}_go-table.itp"
-            
+
             if os.path.exists(itp_path):
-                # Read the ITP files for this connection
                 LOG.debug(f"Reading ITP files for model {model_id} connection {connect_id}")
                 self.read_itp(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-                self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-                self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+                # These may or may not exist depending on mode; read if present.
+                if os.path.exists(excl_path):
+                    self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+                else:
+                    LOG.debug(f"Exclusion file not found (ok in VS mode): {excl_path}")
+
+                if os.path.exists(table_path):
+                    self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+                else:
+                    LOG.debug(f"Go-table file not found (ok in VS mode): {table_path}")
+
                 LOG.debug(f"Successfully read ITP files for connection {connect_id}")
             else:
-                # ITP files don't exist for this connection - leave empty but still allocate space
-                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id} (expected for cross-connections)")
-                
+                LOG.debug(
+                    f"No ITP for model {model_id} → connection {connect_id} "
+                    f"(expected for some cross-connections or VS-only runs)"
+                )
+
             cnt_con += 1
-            
+
         LOG.debug(f"Processed {cnt_con} connections for model {model_id}")
-        
-        # Log what we actually read
-        # atoms_read = sum(len(atoms) for atoms in self.atoms if atoms)
-        # LOG.info(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
+
 
     def read_itp(
         self,
@@ -674,6 +728,7 @@ class Itp:
         except Exception as e:
             LOG.error(f"Error writing topology file: {str(e)}")
             raise
+
 
     def write_excl(self, cnt_model: Optional[int] = None) -> None:
         """Write the merged Go-exclusions to an ITP file.

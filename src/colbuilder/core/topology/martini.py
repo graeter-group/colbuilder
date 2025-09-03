@@ -693,6 +693,14 @@ async def build_martini3(
             type_dir.mkdir(exist_ok=True, parents=True)
 
         models_list = [model_id for model_id in system.get_models()]
+        patched = 0
+        for mid in models_list:
+            m = system.get_model(model_id=mid)
+            if m is not None and (getattr(m, "connect", None) in (None, [], ())):
+                m.connect = [mid]
+                patched += 1
+        LOG.debug(f"Patched {patched} models with self-connections (of {len(models_list)} total)")
+
         model_status = {}
         failed_martinize, failed_contact, failed_go, failed_itp = [], [], [], []
         processed_in_topology: set = set()
