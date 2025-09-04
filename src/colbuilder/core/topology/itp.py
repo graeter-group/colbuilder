@@ -85,18 +85,28 @@ class Itp:
         )
 
     def allocate(self, model_id: Optional[int] = None) -> List[List[Any]]:
-        """Create storage arrays based on the number of molecular connections.
+        """Create storage arrays sized to connection count.
 
-        Args:
-            model_id: Identifier for the molecular model
-
-        Returns:
-            A list of empty lists, with one list per molecular connection
-            in the specified model
+        Primary: len(system.get_model(model_id).connect)
+        Fallback: number of on-disk ITPs 'col_{model_id}.[0-9]*.itp'
+        Final fallback: 1
         """
-        # Allocate for ALL connections (including cross-connections)
-        # Even though cross-connections don't have ITP files, we need the slots
-        size = len(self.system.get_model(model_id=model_id).connect)
+        size = 0
+        try:
+            model = self.system.get_model(model_id=model_id)
+            if model is not None and getattr(model, "connect", None):
+                size = len(model.connect)
+        except Exception as e:
+            LOG.debug(f"allocate: could not read connect for model {model_id}: {e}")
+
+        if size == 0 and model_id is not None:
+            files = list(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
+            if files:
+                size = len(files)
+
+        if size == 0:
+            size = 1
+
         return [[] for _ in range(size)]
 
     def read_model(
@@ -105,40 +115,66 @@ class Itp:
         """
         Read and merge all connected ITP files for a single model.
 
-        Reads ITP files for ALL connections (both self and cross-connections) to ensure
-        that crosslinks referencing atoms from different connections work properly.
-
-        Args:
-            model_id: Unique identifier for the model to process
-            system: Reserved for future system-level configuration (not currently used)
+        Falls back to scanning on-disk ITPs if System connectivity is absent.
         """
-        cnt_con = 0
-        connect_ids = self.system.get_model(model_id=model_id).connect
+        if model_id is None:
+            LOG.warning("read_model called without model_id")
+            return
 
+        # Build connect list from System if present
+        connect_ids: List[int] = []
+        try:
+            mdl = self.system.get_model(model_id=model_id)
+            if mdl is not None and getattr(mdl, "connect", None):
+                connect_ids = list(mdl.connect)
+        except Exception as e:
+            LOG.debug(f"read_model: could not read connect for model {model_id}: {e}")
+
+        # Fallback: read from disk col_{model}.[0-9]*.itp
+        if not connect_ids:
+            paths = sorted(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
+            if paths:
+                # Extract connect id from 'col_{model}.{connect}.itp'
+                for p in paths:
+                    stem = p.stem  # e.g. 'col_5.44'
+                    try:
+                        _, rest = stem.split("_", 1)   # '5.44'
+                        model_part, connect_part = rest.split(".", 1)
+                        connect_ids.append(int(connect_part))
+                    except Exception:
+                        LOG.debug(f"Skipping unexpected itp name: {p.name}")
+            else:
+                # Last-resort: self-connection (likely col_{model}.{model}.itp)
+                connect_ids = [int(model_id)]
+                LOG.debug(f"Model {model_id}: no System connections; expecting self-connection ITPs")
+
+        cnt_con = 0
         for connect_id in connect_ids:
-            # Check if ITP files exist for this connection
-            itp_path = f"col_{int(model_id)}.{int(connect_id)}.itp"
-            excl_path = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
+            itp_path   = f"col_{int(model_id)}.{int(connect_id)}.itp"
+            excl_path  = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
             table_path = f"col_{int(model_id)}.{int(connect_id)}_go-table.itp"
-            
+
             if os.path.exists(itp_path):
-                # Read the ITP files for this connection
                 LOG.debug(f"Reading ITP files for model {model_id} connection {connect_id}")
                 self.read_itp(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-                self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-                self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+
+                if os.path.exists(excl_path):
+                    self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+                else:
+                    LOG.debug(f"Go-excl not found (ok): {excl_path}")
+
+                if os.path.exists(table_path):
+                    self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+                else:
+                    LOG.debug(f"Go-table not found (ok): {table_path}")
+
                 LOG.debug(f"Successfully read ITP files for connection {connect_id}")
             else:
-                # ITP files don't exist for this connection - leave empty but still allocate space
-                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id} (expected for cross-connections)")
-                
+                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id}")
             cnt_con += 1
-            
+
         LOG.debug(f"Processed {cnt_con} connections for model {model_id}")
-        
-        # Log what we actually read
-        # atoms_read = sum(len(atoms) for atoms in self.atoms if atoms)
-        # LOG.info(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
+
 
     def read_itp(
         self,
@@ -308,23 +344,15 @@ class Itp:
             raise
 
     def go_to_pairs(self, model_id: Optional[int] = None) -> None:
-        """Convert Go-model table entries to pair interactions.
-
-        Processes all molecular connections in a model to:
-        1. Map virtual sites to corresponding column atoms
-        2. Generate pair interaction parameters from Go-model definitions
-
-        Args:
-            model_id: Identifier for the model being processed
-        """
-        num_connections = len(self.system.get_model(model_id=model_id).connect)
-
+        """Convert Go-model table entries to pair interactions."""
+        # Use allocated buffers rather than System connectivity
+        num_connections = len(self.atoms)
         for cnt_con in range(num_connections):
-            # Skip empty connections (cross-connections)
             if not self.atoms[cnt_con]:
                 continue
             self.match_vs_to_pairs(cnt_con=cnt_con)
             self.get_pairs(cnt_con=cnt_con)
+
 
     def match_vs_to_pairs(self, cnt_con: Optional[int] = None) -> None:
         """Map virtual sites to their corresponding column atoms.
@@ -569,30 +597,19 @@ class Itp:
     ) -> None:
         """
         Create a complete topology by merging connections and adding crosslinks.
-
-        Creates a complete molecular topology by:
-        1. Merging all component topologies with proper index adjustments
-        2. Setting up crosslink structures (simplified approach)
-        3. Writing the final topology and exclusion files
-
-        Args:
-            model_id: Identifier for the molecular model being processed
-            cnt_model: Counter index used for output file naming
         """
-        # Merge all connection topologies first
-        for cnt_con in range(len(self.system.get_model(model_id=model_id).connect)):
+        # Merge all connection topologies using our allocated lists
+        for cnt_con in range(len(self.atoms)):
             self.merge_topology(cnt_con=cnt_con)
-        
-        # Set up crosslinks using simplified approach (following working version)
-        if len(self.system.get_model(model_id=model_id).connect) == 1:
+
+        # Crosslinks: decide based on connection count we actually merged
+        if len(self.atoms) <= 1:
             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
             LOG.debug(f"Single connection model {model_id}: no crosslinks")
         else:
             try:
                 crosslinker = Crosslink(cnt_model=cnt_model)
                 self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
-                
-                # Log crosslink information for debugging
                 if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
                     LOG.debug(f"Found crosslinks for model {model_id}:")
                     LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
@@ -600,10 +617,8 @@ class Itp:
                     LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
                 else:
                     LOG.debug(f"No crosslinks found for model {model_id}")
-                    
             except Exception as e:
                 LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
-                # Initialize empty crosslink structures if processing fails
                 self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
 
         # Write final topology files

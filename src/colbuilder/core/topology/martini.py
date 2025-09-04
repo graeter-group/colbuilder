@@ -79,32 +79,64 @@ class Martini:
     def merge_pdbs(self, model_id: Optional[int] = None, cnt_model: Optional[int] = None) -> Optional[str]:
         """
         Merge multiple PDB files based on system connectivity.
-        
-        Merges all CG PDB files created for a model's connections into a single file.
-        This includes both self-connections and cross-connections to ensure proper
-        crosslink detection.
-        """
-        model = self.system.get_model(model_id=model_id)
-        if model is None or model.connect is None:
-            LOG.error(f"No model or connections for model_id {model_id}")
-            return None
 
+        Primary path: use System connectivity (model.connect).
+        Fallback: if no connections are present in the System, infer connect IDs
+        from files on disk matching '{model_id}.[0-9]*.CG.pdb'.
+        """
         if cnt_model is None:
             LOG.error("cnt_model is None in merge_pdbs")
             return None
-            
+
         output_file = f"{int(cnt_model)}.merge.pdb"
         merged_count = 0
 
+        # Try to read connections from the System
+        sys_connect_ids: Optional[list] = None
+        if model_id is not None and self.system is not None:
+            try:
+                model = self.system.get_model(model_id=model_id)
+                if model is not None and getattr(model, "connect", None):
+                    sys_connect_ids = list(model.connect)
+            except Exception as e:
+                LOG.debug(f"Could not read connect list from System for model {model_id}: {e}")
+
+        # Fallback: infer from files
+        if not sys_connect_ids:
+            inferred_files = sorted(Path().glob(f"{int(model_id)}.[0-9]*.CG.pdb")) if model_id is not None else []
+            if not inferred_files:
+                LOG.error(f"No model or connections for model_id {model_id} and no CG files found on disk")
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+                return None
+            LOG.debug(f"Model {model_id}: no connections in System; merging from disk ({len(inferred_files)} CG files).")
+
+            try:
+                with open(output_file, "w") as f:
+                    for cg_path in inferred_files:
+                        with open(cg_path, "r") as infile:
+                            lines_written = 0
+                            for line in infile:
+                                if line[0:6] in self.is_line:
+                                    f.write(line)
+                                    lines_written += 1
+                            LOG.debug(f"Merged {lines_written} lines from {cg_path.name}")
+                            merged_count += 1
+                    f.write("END\n")
+                LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
+                return output_file
+            except Exception as e:
+                LOG.error(f"Error merging PDBs (fallback): {e}")
+                return None
+
+        # Normal path using System connect IDs
         try:
             with open(output_file, "w") as f:
-                for connect_id in model.connect:
+                for connect_id in sys_connect_ids:
                     input_file = f"{int(model_id)}.{int(connect_id)}.CG.pdb"
-                    
                     if not os.path.exists(input_file):
                         LOG.warning(f"CG PDB file not found: {input_file}")
                         continue
-
                     with open(input_file, "r") as infile:
                         lines_written = 0
                         for line in infile:
@@ -113,23 +145,20 @@ class Martini:
                                 lines_written += 1
                         LOG.debug(f"Merged {lines_written} lines from {input_file}")
                         merged_count += 1
-
                 f.write("END\n")
-            
+
             if merged_count == 0:
                 LOG.error(f"No CG files were merged for model {model_id}")
                 if os.path.exists(output_file):
                     os.remove(output_file)
                 return None
-                
+
             LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
-            
-            if len(model.connect) > 1:
-                LOG.debug(f"Model {model_id} merge file contains {merged_count} structures from connections: {model.connect}")
-            
+            if sys_connect_ids and len(sys_connect_ids) > 1:
+                LOG.debug(f"Model {model_id} merge contains {merged_count} structures from connections: {sys_connect_ids}")
             return output_file
         except Exception as e:
-            LOG.error(f"Error merging PDBs: {str(e)}")
+            LOG.error(f"Error merging PDBs: {e}")
             return None
 
     def read_pdb(self, pdb_id: Optional[int] = None) -> List[str]:
@@ -548,7 +577,6 @@ def check_output_files(topology_dir: Path, expected_models: int):
     
     return len(merge_files)
 
-
 @timeit
 async def build_martini3(
     system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None
@@ -678,13 +706,6 @@ async def build_martini3(
                     )
         except Exception as e:
             LOG.error(f"Error checking for Martinize2 command: {str(e)}")
-            raise TopologyGenerationError(
-                message="Failed to configure Martinize2 command",
-                original_error=e,
-                error_code="TOP_MART_005",
-                context={"force_field": ff},
-            )
-
         LOG.info(f"{Fore.BLUE}Building coarse-grained topology:{Style.RESET_ALL}")
 
         if len(list(system.get_models())) > 0:
@@ -700,18 +721,27 @@ async def build_martini3(
 
         for model_id in tqdm(models_list, desc="Building topology", unit="%"):
             model = system.get_model(model_id=model_id)
-            if model is None or model.connect is None:
-                LOG.warning(f"Skipping model {model_id}: No connections found")
+            if model is None:
+                LOG.warning(f"Skipping model {model_id}: model not found in System")
+                model_status[model_id] = "no_model"
+                continue
+
+            # === NEW: build connect_ids fallback ===
+            sys_connect = getattr(model, "connect", None)
+            if sys_connect:
+                connect_ids = list(sys_connect)
+            else:
+                connect_ids = [model_id]  # self-connection
+                LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
+
+            # (Optional guard: skip if we truly have nothing—unlikely now)
+            if not connect_ids:
+                LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
                 model_status[model_id] = "no_connections"
                 continue
 
-            if model_id in processed_in_topology:
-                LOG.debug(f"Skipping model {model_id}: Already included in another model's topology file")
-                model_status[model_id] = "already_processed"
-                continue
-
             try:
-                for connect_id in model.connect:
+                for connect_id in connect_ids:
                     try:
                         pdb = martini.read_pdb(pdb_id=connect_id)
                         if not pdb:
@@ -797,8 +827,11 @@ async def build_martini3(
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
                         processed_models.append(model_id)
-                        for connect_id in model.connect:
+
+                        # Track what we processed
+                        for connect_id in connect_ids:
                             processed_in_topology.add(connect_id)
+
                     except Exception as e:
                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
                         failed_itp.append(model_id)

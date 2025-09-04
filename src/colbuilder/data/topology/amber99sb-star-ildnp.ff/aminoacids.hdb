@@ -171,14 +171,14 @@ LX5     6
 2       6       HG      CG      CB      CD
 2       6       HD      CD      CG      CE
 1       6       HE1     CE      CD      NZ
-L4Y	7
-1	1	H	N	-C	CA	
-1	5	HA	CA	N	CB	C	
-2	6	HB	CB	CA	CG	
-2	6	HG	CG	CB	CD	
-1	6	HD1	CD	CG	CE
-1       2       HOD     OD      CD      CE
-2	6	HE	CE	CD	CB	
+L4Y    7
+1   1   H     N    -C    CA
+1   5   HA    CA    N    CB    C
+2   6   HB    CB    CA    CG
+2   6   HG    CG    CB    CD
+1   6   HD1   CD    CE    OD
+1   2   HOD   OD    CD    CE
+2   6   HE    CE    CD    CB
 L5Y	6
 1	1	H	N	-C	CA	
 1	5	HA	CA	N	CB	C	

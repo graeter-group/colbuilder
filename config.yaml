@@ -1,13 +1,13 @@
 # Operation Mode
 mode: null                   # Specific operation mode if needed
 config_file: null            # Path to another config file (for nested configs)
-sequence_generator: false     # Generate sequence from species
+sequence_generator: true     # Generate sequence from species
 geometry_generator: true     # Generate fibril geometry
 topology_generator: true    # Generate topology files
 debug: false                 # Enable debug mode
 
 # Input Configuration
-species: "mus_musculus"      # Species for collagen sequence
+species: "rattus_norvegicus"      # Species for collagen sequence
 # Available species options:
 # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
 # Mammals (Rodents): mus_musculus, rattus_norvegicus
@@ -17,7 +17,7 @@ species: "mus_musculus"      # Species for collagen sequence
 
 # Sequence Settings
 fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
-crosslink: true              # Enable crosslinking in the model
+crosslink: true             # enable crosslinking in the model
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
 n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
 c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
@@ -25,7 +25,7 @@ n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue 
 c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
 
 # Geometry Parameters
-pdb_file: "musmusculus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
+pdb_file: null # "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
 contact_distance: 20         # Distance threshold for contacts (Å)
 fibril_length: 40.0          # Length of the generated fibril (nm)
 crystalcontacts_file: null   # File with crystal contacts 
@@ -45,4 +45,4 @@ ratio_replace: 30            # Percentage of crosslinks to replace
 replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
 
 # Topology Options
-force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")
+force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
