@@ -171,14 +171,14 @@ LX5     6
 2       6       HG      CG      CB      CD
 2       6       HD      CD      CG      CE
 1       6       HE1     CE      CD      NZ
-L4Y    7
-1   1   H     N    -C    CA
-1   5   HA    CA    N    CB    C
-2   6   HB    CB    CA    CG
-2   6   HG    CG    CB    CD
-1   6   HD1   CD    CE    OD
-1   2   HOD   OD    CD    CE
-2   6   HE    CE    CD    CB
+L4Y	7
+1	1	H	N	-C	CA	
+1	5	HA	CA	N	CB	C	
+2	6	HB	CB	CA	CG	
+2	6	HG	CG	CB	CD	
+1	6	HD1	CD	CG	CE
+1       2       HOD     OD      CD      CE
+2	6	HE	CE	CD	CB	
 L5Y	6
 1	1	H	N	-C	CA	
 1	5	HA	CA	N	CB	C	
@@ -294,28 +294,6 @@ L5S	7
 2	6	HD	CD	CG	CE	
 1	6	HE1	CE	CD	NZ	
 1	1	HZ1	NZ	CE	CD
-AGS 14
-1   1  H    N    -C   CA       
-1   5  HA   CA   N    CB   C   
-2   6  HB   CB   CA   CG     
-2   6  HG   CG   CB   CD      
-2   6  HD   CD   CG   NE     
-1   1  HE  NE   CD   CZ      
-1   1  H15  C15  C16  NZ       
-2   6  H17  C17  C15  NZ     
-1   1  H18  C18  C17  O18     
-1   1  H19  C19  C18  C20     
-2   6  H20  C20  C19  C16     
-1   1  HNZ  NZ   C15  C17     
-1   2  HO18 O18  C18  C17     
-1   2  HO19 O19  C19  C18      
-LGX 6
-1   1  H    N    -C   CA       
-1   5  HA   CA   N    CB   C  
-2   6  HB   CB   CA   CG       
-2   6  HG   CG   CB   CD       
-2   6  HD   CD   CG   CE      
-2   6  HE   CE   CD   CG      
 ORN	6
 1	1	H	N	-C	CA	
 1	5	HA	CA	N	CB	C	
