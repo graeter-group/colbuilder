@@ -1,483 +1,560 @@
 diff --git a/config.yaml b/config.yaml
-index 6003d6c..25b4659 100644
+index 25b4659..bf67cf3 100644
 --- a/config.yaml
 +++ b/config.yaml
-@@ -1,13 +1,13 @@
- # Operation Mode
- mode: null                   # Specific operation mode if needed
- config_file: null            # Path to another config file (for nested configs)
--sequence_generator: false     # Generate sequence from species
-+sequence_generator: true     # Generate sequence from species
- geometry_generator: true     # Generate fibril geometry
- topology_generator: true    # Generate topology files
- debug: false                 # Enable debug mode
- 
- # Input Configuration
--species: "mus_musculus"      # Species for collagen sequence
-+species: "rattus_norvegicus"      # Species for collagen sequence
- # Available species options:
- # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
- # Mammals (Rodents): mus_musculus, rattus_norvegicus
-@@ -17,7 +17,7 @@ species: "mus_musculus"      # Species for collagen sequence
- 
- # Sequence Settings
+@@ -19,14 +19,14 @@ species: "rattus_norvegicus"      # Species for collagen sequence
  fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
--crosslink: true              # Enable crosslinking in the model
-+crosslink: true             # enable crosslinking in the model
+ crosslink: true             # enable crosslinking in the model
  # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
- n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
- c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
-@@ -25,7 +25,7 @@ n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue
- c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
+-n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+-c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+-n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue combination
+-c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
++n_term_type: "DPD" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
++c_term_type: "DPD" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
++n_term_combination: "5.B - 9.C - 946.A" # "6.B - 9.C - 946.A"  # N-terminal residue combination
++c_term_combination: "1046.C - 1046.A -103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
  
  # Geometry Parameters
--pdb_file: "musmusculus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
-+pdb_file: null # "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
- contact_distance: 20         # Distance threshold for contacts (Å)
+-pdb_file: null # "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
+-contact_distance: 20         # Distance threshold for contacts (Å)
++pdb_file: null # "rattusnorvegicus_N_PYD_C_PYD.pdb"               # Input PDB file (set to null if sequence_generator is true)
++contact_distance: 35         # Distance threshold for contacts (Å)
  fibril_length: 40.0          # Length of the generated fibril (nm)
  crystalcontacts_file: null   # File with crystal contacts 
-@@ -45,4 +45,4 @@ ratio_replace: 30            # Percentage of crosslinks to replace
- replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
- 
- # Topology Options
--force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")
-\ No newline at end of file
-+force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
-\ No newline at end of file
-diff --git a/src/colbuilder/core/topology/itp.py b/src/colbuilder/core/topology/itp.py
-index 9ae0df0..1001ce2 100644
---- a/src/colbuilder/core/topology/itp.py
-+++ b/src/colbuilder/core/topology/itp.py
-@@ -4,6 +4,7 @@
- from typing import List, Dict, Any, Optional, Tuple, Set, Union
- from pathlib import Path
- import os
-+import re
- 
- from colbuilder.core.utils.logger import setup_logger
- from colbuilder.core.topology.crosslink import Crosslink
-@@ -85,18 +86,28 @@ class Itp:
-         )
- 
-     def allocate(self, model_id: Optional[int] = None) -> List[List[Any]]:
--        """Create storage arrays based on the number of molecular connections.
-+        """Create storage arrays sized to connection count.
- 
--        Args:
--            model_id: Identifier for the molecular model
--
--        Returns:
--            A list of empty lists, with one list per molecular connection
--            in the specified model
-+        Primary: len(system.get_model(model_id).connect)
-+        Fallback: number of on-disk ITPs 'col_{model_id}.[0-9]*.itp'
-+        Final fallback: 1
-         """
--        # Allocate for ALL connections (including cross-connections)
--        # Even though cross-connections don't have ITP files, we need the slots
--        size = len(self.system.get_model(model_id=model_id).connect)
-+        size = 0
-+        try:
-+            model = self.system.get_model(model_id=model_id)
-+            if model is not None and getattr(model, "connect", None):
-+                size = len(model.connect)
-+        except Exception as e:
-+            LOG.debug(f"allocate: could not read connect for model {model_id}: {e}")
-+
-+        if size == 0 and model_id is not None:
-+            files = list(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
-+            if files:
-+                size = len(files)
-+
-+        if size == 0:
-+            size = 1
-+
-         return [[] for _ in range(size)]
- 
-     def read_model(
-@@ -105,40 +116,66 @@ class Itp:
-         """
-         Read and merge all connected ITP files for a single model.
- 
--        Reads ITP files for ALL connections (both self and cross-connections) to ensure
--        that crosslinks referencing atoms from different connections work properly.
--
--        Args:
--            model_id: Unique identifier for the model to process
--            system: Reserved for future system-level configuration (not currently used)
-+        Falls back to scanning on-disk ITPs if System connectivity is absent.
-         """
--        cnt_con = 0
--        connect_ids = self.system.get_model(model_id=model_id).connect
-+        if model_id is None:
-+            LOG.warning("read_model called without model_id")
-+            return
-+
-+        # Build connect list from System if present
-+        connect_ids: List[int] = []
-+        try:
-+            mdl = self.system.get_model(model_id=model_id)
-+            if mdl is not None and getattr(mdl, "connect", None):
-+                connect_ids = list(mdl.connect)
-+        except Exception as e:
-+            LOG.debug(f"read_model: could not read connect for model {model_id}: {e}")
-+
-+        # Fallback: read from disk col_{model}.[0-9]*.itp
-+        if not connect_ids:
-+            paths = sorted(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
-+            if paths:
-+                # Extract connect id from 'col_{model}.{connect}.itp'
-+                for p in paths:
-+                    stem = p.stem  # e.g. 'col_5.44'
-+                    try:
-+                        _, rest = stem.split("_", 1)   # '5.44'
-+                        model_part, connect_part = rest.split(".", 1)
-+                        connect_ids.append(int(connect_part))
-+                    except Exception:
-+                        LOG.debug(f"Skipping unexpected itp name: {p.name}")
-+            else:
-+                # Last-resort: self-connection (likely col_{model}.{model}.itp)
-+                connect_ids = [int(model_id)]
-+                LOG.debug(f"Model {model_id}: no System connections; expecting self-connection ITPs")
- 
-+        cnt_con = 0
-         for connect_id in connect_ids:
--            # Check if ITP files exist for this connection
--            itp_path = f"col_{int(model_id)}.{int(connect_id)}.itp"
--            excl_path = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
-+            itp_path   = f"col_{int(model_id)}.{int(connect_id)}.itp"
-+            excl_path  = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
-             table_path = f"col_{int(model_id)}.{int(connect_id)}_go-table.itp"
--            
-+
-             if os.path.exists(itp_path):
--                # Read the ITP files for this connection
-                 LOG.debug(f"Reading ITP files for model {model_id} connection {connect_id}")
-                 self.read_itp(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
--                self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
--                self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-+
-+                if os.path.exists(excl_path):
-+                    self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-+                else:
-+                    LOG.debug(f"Go-excl not found (ok): {excl_path}")
-+
-+                if os.path.exists(table_path):
-+                    self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
-+                else:
-+                    LOG.debug(f"Go-table not found (ok): {table_path}")
-+
-                 LOG.debug(f"Successfully read ITP files for connection {connect_id}")
-             else:
--                # ITP files don't exist for this connection - leave empty but still allocate space
--                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id} (expected for cross-connections)")
--                
-+                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id}")
-             cnt_con += 1
--            
-+
-         LOG.debug(f"Processed {cnt_con} connections for model {model_id}")
--        
--        # Log what we actually read
--        # atoms_read = sum(len(atoms) for atoms in self.atoms if atoms)
--        # LOG.info(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
-+
- 
-     def read_itp(
-         self,
-@@ -308,24 +345,16 @@ class Itp:
-             raise
- 
-     def go_to_pairs(self, model_id: Optional[int] = None) -> None:
--        """Convert Go-model table entries to pair interactions.
--
--        Processes all molecular connections in a model to:
--        1. Map virtual sites to corresponding column atoms
--        2. Generate pair interaction parameters from Go-model definitions
--
--        Args:
--            model_id: Identifier for the model being processed
--        """
--        num_connections = len(self.system.get_model(model_id=model_id).connect)
--
-+        """Convert Go-model table entries to pair interactions."""
-+        # Use allocated buffers rather than System connectivity
-+        num_connections = len(self.atoms)
-         for cnt_con in range(num_connections):
--            # Skip empty connections (cross-connections)
-             if not self.atoms[cnt_con]:
-                 continue
-             self.match_vs_to_pairs(cnt_con=cnt_con)
-             self.get_pairs(cnt_con=cnt_con)
- 
-+
-     def match_vs_to_pairs(self, cnt_con: Optional[int] = None) -> None:
-         """Map virtual sites to their corresponding column atoms.
- 
-@@ -569,30 +598,19 @@ class Itp:
-     ) -> None:
-         """
-         Create a complete topology by merging connections and adding crosslinks.
--
--        Creates a complete molecular topology by:
--        1. Merging all component topologies with proper index adjustments
--        2. Setting up crosslink structures (simplified approach)
--        3. Writing the final topology and exclusion files
--
--        Args:
--            model_id: Identifier for the molecular model being processed
--            cnt_model: Counter index used for output file naming
-         """
--        # Merge all connection topologies first
--        for cnt_con in range(len(self.system.get_model(model_id=model_id).connect)):
-+        # Merge all connection topologies using our allocated lists
-+        for cnt_con in range(len(self.atoms)):
-             self.merge_topology(cnt_con=cnt_con)
--        
--        # Set up crosslinks using simplified approach (following working version)
--        if len(self.system.get_model(model_id=model_id).connect) == 1:
-+
-+        # Crosslinks: decide based on connection count we actually merged
-+        if len(self.atoms) <= 1:
-             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
-             LOG.debug(f"Single connection model {model_id}: no crosslinks")
-         else:
-             try:
-                 crosslinker = Crosslink(cnt_model=cnt_model)
-                 self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
--                
--                # Log crosslink information for debugging
-                 if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
-                     LOG.debug(f"Found crosslinks for model {model_id}:")
-                     LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
-@@ -600,10 +618,8 @@ class Itp:
-                     LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
-                 else:
-                     LOG.debug(f"No crosslinks found for model {model_id}")
--                    
-             except Exception as e:
-                 LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
--                # Initialize empty crosslink structures if processing fails
-                 self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
- 
-         # Write final topology files
-diff --git a/src/colbuilder/core/topology/martini.py b/src/colbuilder/core/topology/martini.py
-index 025e3e8..041ec86 100644
---- a/src/colbuilder/core/topology/martini.py
-+++ b/src/colbuilder/core/topology/martini.py
-@@ -79,32 +79,64 @@ class Martini:
-     def merge_pdbs(self, model_id: Optional[int] = None, cnt_model: Optional[int] = None) -> Optional[str]:
-         """
-         Merge multiple PDB files based on system connectivity.
--        
--        Merges all CG PDB files created for a model's connections into a single file.
--        This includes both self-connections and cross-connections to ensure proper
--        crosslink detection.
--        """
--        model = self.system.get_model(model_id=model_id)
--        if model is None or model.connect is None:
--            LOG.error(f"No model or connections for model_id {model_id}")
--            return None
- 
-+        Primary path: use System connectivity (model.connect).
-+        Fallback: if no connections are present in the System, infer connect IDs
-+        from files on disk matching '{model_id}.[0-9]*.CG.pdb'.
-+        """
-         if cnt_model is None:
-             LOG.error("cnt_model is None in merge_pdbs")
-             return None
--            
-+
-         output_file = f"{int(cnt_model)}.merge.pdb"
-         merged_count = 0
- 
-+        # Try to read connections from the System
-+        sys_connect_ids: Optional[list] = None
-+        if model_id is not None and self.system is not None:
-+            try:
-+                model = self.system.get_model(model_id=model_id)
-+                if model is not None and getattr(model, "connect", None):
-+                    sys_connect_ids = list(model.connect)
-+            except Exception as e:
-+                LOG.debug(f"Could not read connect list from System for model {model_id}: {e}")
-+
-+        # Fallback: infer from files
-+        if not sys_connect_ids:
-+            inferred_files = sorted(Path().glob(f"{int(model_id)}.[0-9]*.CG.pdb")) if model_id is not None else []
-+            if not inferred_files:
-+                LOG.error(f"No model or connections for model_id {model_id} and no CG files found on disk")
-+                if os.path.exists(output_file):
-+                    os.remove(output_file)
-+                return None
-+            LOG.debug(f"Model {model_id}: no connections in System; merging from disk ({len(inferred_files)} CG files).")
-+
-+            try:
-+                with open(output_file, "w") as f:
-+                    for cg_path in inferred_files:
-+                        with open(cg_path, "r") as infile:
-+                            lines_written = 0
-+                            for line in infile:
-+                                if line[0:6] in self.is_line:
-+                                    f.write(line)
-+                                    lines_written += 1
-+                            LOG.debug(f"Merged {lines_written} lines from {cg_path.name}")
-+                            merged_count += 1
-+                    f.write("END\n")
-+                LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
-+                return output_file
-+            except Exception as e:
-+                LOG.error(f"Error merging PDBs (fallback): {e}")
-+                return None
-+
-+        # Normal path using System connect IDs
-         try:
-             with open(output_file, "w") as f:
--                for connect_id in model.connect:
-+                for connect_id in sys_connect_ids:
-                     input_file = f"{int(model_id)}.{int(connect_id)}.CG.pdb"
--                    
-                     if not os.path.exists(input_file):
-                         LOG.warning(f"CG PDB file not found: {input_file}")
-                         continue
--
-                     with open(input_file, "r") as infile:
-                         lines_written = 0
-                         for line in infile:
-@@ -113,23 +145,20 @@ class Martini:
-                                 lines_written += 1
-                         LOG.debug(f"Merged {lines_written} lines from {input_file}")
-                         merged_count += 1
--
-                 f.write("END\n")
--            
-+
-             if merged_count == 0:
-                 LOG.error(f"No CG files were merged for model {model_id}")
-                 if os.path.exists(output_file):
-                     os.remove(output_file)
-                 return None
--                
-+
-             LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
--            
--            if len(model.connect) > 1:
--                LOG.debug(f"Model {model_id} merge file contains {merged_count} structures from connections: {model.connect}")
--            
-+            if sys_connect_ids and len(sys_connect_ids) > 1:
-+                LOG.debug(f"Model {model_id} merge contains {merged_count} structures from connections: {sys_connect_ids}")
-             return output_file
-         except Exception as e:
--            LOG.error(f"Error merging PDBs: {str(e)}")
-+            LOG.error(f"Error merging PDBs: {e}")
-             return None
- 
-     def read_pdb(self, pdb_id: Optional[int] = None) -> List[str]:
-@@ -548,7 +577,6 @@ def check_output_files(topology_dir: Path, expected_models: int):
-     
-     return len(merge_files)
- 
--
- @timeit
- async def build_martini3(
-     system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None
-@@ -678,13 +706,6 @@ async def build_martini3(
-                     )
-         except Exception as e:
-             LOG.error(f"Error checking for Martinize2 command: {str(e)}")
--            raise TopologyGenerationError(
--                message="Failed to configure Martinize2 command",
--                original_error=e,
--                error_code="TOP_MART_005",
--                context={"force_field": ff},
--            )
--
-         LOG.info(f"{Fore.BLUE}Building coarse-grained topology:{Style.RESET_ALL}")
- 
-         if len(list(system.get_models())) > 0:
-@@ -700,18 +721,27 @@ async def build_martini3(
- 
-         for model_id in tqdm(models_list, desc="Building topology", unit="%"):
-             model = system.get_model(model_id=model_id)
--            if model is None or model.connect is None:
--                LOG.warning(f"Skipping model {model_id}: No connections found")
--                model_status[model_id] = "no_connections"
-+            if model is None:
-+                LOG.warning(f"Skipping model {model_id}: model not found in System")
-+                model_status[model_id] = "no_model"
-                 continue
- 
--            if model_id in processed_in_topology:
--                LOG.debug(f"Skipping model {model_id}: Already included in another model's topology file")
--                model_status[model_id] = "already_processed"
-+            # === NEW: build connect_ids fallback ===
-+            sys_connect = getattr(model, "connect", None)
-+            if sys_connect:
-+                connect_ids = list(sys_connect)
-+            else:
-+                connect_ids = [model_id]  # self-connection
-+                LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
-+
-+            # (Optional guard: skip if we truly have nothing—unlikely now)
-+            if not connect_ids:
-+                LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
-+                model_status[model_id] = "no_connections"
-                 continue
- 
-             try:
--                for connect_id in model.connect:
-+                for connect_id in connect_ids:
-                     try:
-                         pdb = martini.read_pdb(pdb_id=connect_id)
-                         if not pdb:
-@@ -797,8 +827,11 @@ async def build_martini3(
-                         itp_.go_to_pairs(model_id=int(model_id))
-                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
-                         processed_models.append(model_id)
--                        for connect_id in model.connect:
-+
-+                        # Track what we processed
-+                        for connect_id in connect_ids:
-                             processed_in_topology.add(connect_id)
-+
-                     except Exception as e:
-                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
-                         failed_itp.append(model_id)
+ connect_file: null           # File with connection information
+diff --git a/diff b/diff
+index f9f5059..e69de29 100644
+--- a/diff
++++ b/diff
+@@ -1,483 +0,0 @@
+-diff --git a/config.yaml b/config.yaml
+-index 6003d6c..25b4659 100644
+---- a/config.yaml
+-+++ b/config.yaml
+-@@ -1,13 +1,13 @@
+- # Operation Mode
+- mode: null                   # Specific operation mode if needed
+- config_file: null            # Path to another config file (for nested configs)
+--sequence_generator: false     # Generate sequence from species
+-+sequence_generator: true     # Generate sequence from species
+- geometry_generator: true     # Generate fibril geometry
+- topology_generator: true    # Generate topology files
+- debug: false                 # Enable debug mode
+- 
+- # Input Configuration
+--species: "mus_musculus"      # Species for collagen sequence
+-+species: "rattus_norvegicus"      # Species for collagen sequence
+- # Available species options:
+- # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
+- # Mammals (Rodents): mus_musculus, rattus_norvegicus
+-@@ -17,7 +17,7 @@ species: "mus_musculus"      # Species for collagen sequence
+- 
+- # Sequence Settings
+- fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
+--crosslink: true              # Enable crosslinking in the model
+-+crosslink: true             # enable crosslinking in the model
+- # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
+- n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+- c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+-@@ -25,7 +25,7 @@ n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue
+- c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
+- 
+- # Geometry Parameters
+--pdb_file: "musmusculus_N_HLKNL_C_HLKNL.pdb"               # Input PDB file (set to null if sequence_generator is true)
+-+pdb_file: null # "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
+- contact_distance: 20         # Distance threshold for contacts (Å)
+- fibril_length: 40.0          # Length of the generated fibril (nm)
+- crystalcontacts_file: null   # File with crystal contacts 
+-@@ -45,4 +45,4 @@ ratio_replace: 30            # Percentage of crosslinks to replace
+- replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
+- 
+- # Topology Options
+--force_field: "martini3"       # Force field for topology generation (Options: "amber99", "martini3")
+-\ No newline at end of file
+-+force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
+-\ No newline at end of file
+-diff --git a/src/colbuilder/core/topology/itp.py b/src/colbuilder/core/topology/itp.py
+-index 9ae0df0..1001ce2 100644
+---- a/src/colbuilder/core/topology/itp.py
+-+++ b/src/colbuilder/core/topology/itp.py
+-@@ -4,6 +4,7 @@
+- from typing import List, Dict, Any, Optional, Tuple, Set, Union
+- from pathlib import Path
+- import os
+-+import re
+- 
+- from colbuilder.core.utils.logger import setup_logger
+- from colbuilder.core.topology.crosslink import Crosslink
+-@@ -85,18 +86,28 @@ class Itp:
+-         )
+- 
+-     def allocate(self, model_id: Optional[int] = None) -> List[List[Any]]:
+--        """Create storage arrays based on the number of molecular connections.
+-+        """Create storage arrays sized to connection count.
+- 
+--        Args:
+--            model_id: Identifier for the molecular model
+--
+--        Returns:
+--            A list of empty lists, with one list per molecular connection
+--            in the specified model
+-+        Primary: len(system.get_model(model_id).connect)
+-+        Fallback: number of on-disk ITPs 'col_{model_id}.[0-9]*.itp'
+-+        Final fallback: 1
+-         """
+--        # Allocate for ALL connections (including cross-connections)
+--        # Even though cross-connections don't have ITP files, we need the slots
+--        size = len(self.system.get_model(model_id=model_id).connect)
+-+        size = 0
+-+        try:
+-+            model = self.system.get_model(model_id=model_id)
+-+            if model is not None and getattr(model, "connect", None):
+-+                size = len(model.connect)
+-+        except Exception as e:
+-+            LOG.debug(f"allocate: could not read connect for model {model_id}: {e}")
+-+
+-+        if size == 0 and model_id is not None:
+-+            files = list(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
+-+            if files:
+-+                size = len(files)
+-+
+-+        if size == 0:
+-+            size = 1
+-+
+-         return [[] for _ in range(size)]
+- 
+-     def read_model(
+-@@ -105,40 +116,66 @@ class Itp:
+-         """
+-         Read and merge all connected ITP files for a single model.
+- 
+--        Reads ITP files for ALL connections (both self and cross-connections) to ensure
+--        that crosslinks referencing atoms from different connections work properly.
+--
+--        Args:
+--            model_id: Unique identifier for the model to process
+--            system: Reserved for future system-level configuration (not currently used)
+-+        Falls back to scanning on-disk ITPs if System connectivity is absent.
+-         """
+--        cnt_con = 0
+--        connect_ids = self.system.get_model(model_id=model_id).connect
+-+        if model_id is None:
+-+            LOG.warning("read_model called without model_id")
+-+            return
+-+
+-+        # Build connect list from System if present
+-+        connect_ids: List[int] = []
+-+        try:
+-+            mdl = self.system.get_model(model_id=model_id)
+-+            if mdl is not None and getattr(mdl, "connect", None):
+-+                connect_ids = list(mdl.connect)
+-+        except Exception as e:
+-+            LOG.debug(f"read_model: could not read connect for model {model_id}: {e}")
+-+
+-+        # Fallback: read from disk col_{model}.[0-9]*.itp
+-+        if not connect_ids:
+-+            paths = sorted(Path().glob(f"col_{int(model_id)}.[0-9]*.itp"))
+-+            if paths:
+-+                # Extract connect id from 'col_{model}.{connect}.itp'
+-+                for p in paths:
+-+                    stem = p.stem  # e.g. 'col_5.44'
+-+                    try:
+-+                        _, rest = stem.split("_", 1)   # '5.44'
+-+                        model_part, connect_part = rest.split(".", 1)
+-+                        connect_ids.append(int(connect_part))
+-+                    except Exception:
+-+                        LOG.debug(f"Skipping unexpected itp name: {p.name}")
+-+            else:
+-+                # Last-resort: self-connection (likely col_{model}.{model}.itp)
+-+                connect_ids = [int(model_id)]
+-+                LOG.debug(f"Model {model_id}: no System connections; expecting self-connection ITPs")
+- 
+-+        cnt_con = 0
+-         for connect_id in connect_ids:
+--            # Check if ITP files exist for this connection
+--            itp_path = f"col_{int(model_id)}.{int(connect_id)}.itp"
+--            excl_path = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
+-+            itp_path   = f"col_{int(model_id)}.{int(connect_id)}.itp"
+-+            excl_path  = f"col_{int(model_id)}.{int(connect_id)}_go-excl.itp"
+-             table_path = f"col_{int(model_id)}.{int(connect_id)}_go-table.itp"
+--            
+-+
+-             if os.path.exists(itp_path):
+--                # Read the ITP files for this connection
+-                 LOG.debug(f"Reading ITP files for model {model_id} connection {connect_id}")
+-                 self.read_itp(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+--                self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+--                self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+-+
+-+                if os.path.exists(excl_path):
+-+                    self.read_excl(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+-+                else:
+-+                    LOG.debug(f"Go-excl not found (ok): {excl_path}")
+-+
+-+                if os.path.exists(table_path):
+-+                    self.read_table(model_id=model_id, connect_id=connect_id, cnt_con=cnt_con)
+-+                else:
+-+                    LOG.debug(f"Go-table not found (ok): {table_path}")
+-+
+-                 LOG.debug(f"Successfully read ITP files for connection {connect_id}")
+-             else:
+--                # ITP files don't exist for this connection - leave empty but still allocate space
+--                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id} (expected for cross-connections)")
+--                
+-+                LOG.debug(f"No ITP files found for model {model_id} → connection {connect_id}")
+-             cnt_con += 1
+--            
+-+
+-         LOG.debug(f"Processed {cnt_con} connections for model {model_id}")
+--        
+--        # Log what we actually read
+--        # atoms_read = sum(len(atoms) for atoms in self.atoms if atoms)
+--        # LOG.info(f"Total atoms read from ITP files for model {model_id}: {atoms_read}")
+-+
+- 
+-     def read_itp(
+-         self,
+-@@ -308,24 +345,16 @@ class Itp:
+-             raise
+- 
+-     def go_to_pairs(self, model_id: Optional[int] = None) -> None:
+--        """Convert Go-model table entries to pair interactions.
+--
+--        Processes all molecular connections in a model to:
+--        1. Map virtual sites to corresponding column atoms
+--        2. Generate pair interaction parameters from Go-model definitions
+--
+--        Args:
+--            model_id: Identifier for the model being processed
+--        """
+--        num_connections = len(self.system.get_model(model_id=model_id).connect)
+--
+-+        """Convert Go-model table entries to pair interactions."""
+-+        # Use allocated buffers rather than System connectivity
+-+        num_connections = len(self.atoms)
+-         for cnt_con in range(num_connections):
+--            # Skip empty connections (cross-connections)
+-             if not self.atoms[cnt_con]:
+-                 continue
+-             self.match_vs_to_pairs(cnt_con=cnt_con)
+-             self.get_pairs(cnt_con=cnt_con)
+- 
+-+
+-     def match_vs_to_pairs(self, cnt_con: Optional[int] = None) -> None:
+-         """Map virtual sites to their corresponding column atoms.
+- 
+-@@ -569,30 +598,19 @@ class Itp:
+-     ) -> None:
+-         """
+-         Create a complete topology by merging connections and adding crosslinks.
+--
+--        Creates a complete molecular topology by:
+--        1. Merging all component topologies with proper index adjustments
+--        2. Setting up crosslink structures (simplified approach)
+--        3. Writing the final topology and exclusion files
+--
+--        Args:
+--            model_id: Identifier for the molecular model being processed
+--            cnt_model: Counter index used for output file naming
+-         """
+--        # Merge all connection topologies first
+--        for cnt_con in range(len(self.system.get_model(model_id=model_id).connect)):
+-+        # Merge all connection topologies using our allocated lists
+-+        for cnt_con in range(len(self.atoms)):
+-             self.merge_topology(cnt_con=cnt_con)
+--        
+--        # Set up crosslinks using simplified approach (following working version)
+--        if len(self.system.get_model(model_id=model_id).connect) == 1:
+-+
+-+        # Crosslinks: decide based on connection count we actually merged
+-+        if len(self.atoms) <= 1:
+-             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
+-             LOG.debug(f"Single connection model {model_id}: no crosslinks")
+-         else:
+-             try:
+-                 crosslinker = Crosslink(cnt_model=cnt_model)
+-                 self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
+--                
+--                # Log crosslink information for debugging
+-                 if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
+-                     LOG.debug(f"Found crosslinks for model {model_id}:")
+-                     LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
+-@@ -600,10 +618,8 @@ class Itp:
+-                     LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
+-                 else:
+-                     LOG.debug(f"No crosslinks found for model {model_id}")
+--                    
+-             except Exception as e:
+-                 LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
+--                # Initialize empty crosslink structures if processing fails
+-                 self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
+- 
+-         # Write final topology files
+-diff --git a/src/colbuilder/core/topology/martini.py b/src/colbuilder/core/topology/martini.py
+-index 025e3e8..041ec86 100644
+---- a/src/colbuilder/core/topology/martini.py
+-+++ b/src/colbuilder/core/topology/martini.py
+-@@ -79,32 +79,64 @@ class Martini:
+-     def merge_pdbs(self, model_id: Optional[int] = None, cnt_model: Optional[int] = None) -> Optional[str]:
+-         """
+-         Merge multiple PDB files based on system connectivity.
+--        
+--        Merges all CG PDB files created for a model's connections into a single file.
+--        This includes both self-connections and cross-connections to ensure proper
+--        crosslink detection.
+--        """
+--        model = self.system.get_model(model_id=model_id)
+--        if model is None or model.connect is None:
+--            LOG.error(f"No model or connections for model_id {model_id}")
+--            return None
+- 
+-+        Primary path: use System connectivity (model.connect).
+-+        Fallback: if no connections are present in the System, infer connect IDs
+-+        from files on disk matching '{model_id}.[0-9]*.CG.pdb'.
+-+        """
+-         if cnt_model is None:
+-             LOG.error("cnt_model is None in merge_pdbs")
+-             return None
+--            
+-+
+-         output_file = f"{int(cnt_model)}.merge.pdb"
+-         merged_count = 0
+- 
+-+        # Try to read connections from the System
+-+        sys_connect_ids: Optional[list] = None
+-+        if model_id is not None and self.system is not None:
+-+            try:
+-+                model = self.system.get_model(model_id=model_id)
+-+                if model is not None and getattr(model, "connect", None):
+-+                    sys_connect_ids = list(model.connect)
+-+            except Exception as e:
+-+                LOG.debug(f"Could not read connect list from System for model {model_id}: {e}")
+-+
+-+        # Fallback: infer from files
+-+        if not sys_connect_ids:
+-+            inferred_files = sorted(Path().glob(f"{int(model_id)}.[0-9]*.CG.pdb")) if model_id is not None else []
+-+            if not inferred_files:
+-+                LOG.error(f"No model or connections for model_id {model_id} and no CG files found on disk")
+-+                if os.path.exists(output_file):
+-+                    os.remove(output_file)
+-+                return None
+-+            LOG.debug(f"Model {model_id}: no connections in System; merging from disk ({len(inferred_files)} CG files).")
+-+
+-+            try:
+-+                with open(output_file, "w") as f:
+-+                    for cg_path in inferred_files:
+-+                        with open(cg_path, "r") as infile:
+-+                            lines_written = 0
+-+                            for line in infile:
+-+                                if line[0:6] in self.is_line:
+-+                                    f.write(line)
+-+                                    lines_written += 1
+-+                            LOG.debug(f"Merged {lines_written} lines from {cg_path.name}")
+-+                            merged_count += 1
+-+                    f.write("END\n")
+-+                LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
+-+                return output_file
+-+            except Exception as e:
+-+                LOG.error(f"Error merging PDBs (fallback): {e}")
+-+                return None
+-+
+-+        # Normal path using System connect IDs
+-         try:
+-             with open(output_file, "w") as f:
+--                for connect_id in model.connect:
+-+                for connect_id in sys_connect_ids:
+-                     input_file = f"{int(model_id)}.{int(connect_id)}.CG.pdb"
+--                    
+-                     if not os.path.exists(input_file):
+-                         LOG.warning(f"CG PDB file not found: {input_file}")
+-                         continue
+--
+-                     with open(input_file, "r") as infile:
+-                         lines_written = 0
+-                         for line in infile:
+-@@ -113,23 +145,20 @@ class Martini:
+-                                 lines_written += 1
+-                         LOG.debug(f"Merged {lines_written} lines from {input_file}")
+-                         merged_count += 1
+--
+-                 f.write("END\n")
+--            
+-+
+-             if merged_count == 0:
+-                 LOG.error(f"No CG files were merged for model {model_id}")
+-                 if os.path.exists(output_file):
+-                     os.remove(output_file)
+-                 return None
+--                
+-+
+-             LOG.debug(f"Successfully merged {merged_count} files into {output_file}")
+--            
+--            if len(model.connect) > 1:
+--                LOG.debug(f"Model {model_id} merge file contains {merged_count} structures from connections: {model.connect}")
+--            
+-+            if sys_connect_ids and len(sys_connect_ids) > 1:
+-+                LOG.debug(f"Model {model_id} merge contains {merged_count} structures from connections: {sys_connect_ids}")
+-             return output_file
+-         except Exception as e:
+--            LOG.error(f"Error merging PDBs: {str(e)}")
+-+            LOG.error(f"Error merging PDBs: {e}")
+-             return None
+- 
+-     def read_pdb(self, pdb_id: Optional[int] = None) -> List[str]:
+-@@ -548,7 +577,6 @@ def check_output_files(topology_dir: Path, expected_models: int):
+-     
+-     return len(merge_files)
+- 
+--
+- @timeit
+- async def build_martini3(
+-     system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None
+-@@ -678,13 +706,6 @@ async def build_martini3(
+-                     )
+-         except Exception as e:
+-             LOG.error(f"Error checking for Martinize2 command: {str(e)}")
+--            raise TopologyGenerationError(
+--                message="Failed to configure Martinize2 command",
+--                original_error=e,
+--                error_code="TOP_MART_005",
+--                context={"force_field": ff},
+--            )
+--
+-         LOG.info(f"{Fore.BLUE}Building coarse-grained topology:{Style.RESET_ALL}")
+- 
+-         if len(list(system.get_models())) > 0:
+-@@ -700,18 +721,27 @@ async def build_martini3(
+- 
+-         for model_id in tqdm(models_list, desc="Building topology", unit="%"):
+-             model = system.get_model(model_id=model_id)
+--            if model is None or model.connect is None:
+--                LOG.warning(f"Skipping model {model_id}: No connections found")
+--                model_status[model_id] = "no_connections"
+-+            if model is None:
+-+                LOG.warning(f"Skipping model {model_id}: model not found in System")
+-+                model_status[model_id] = "no_model"
+-                 continue
+- 
+--            if model_id in processed_in_topology:
+--                LOG.debug(f"Skipping model {model_id}: Already included in another model's topology file")
+--                model_status[model_id] = "already_processed"
+-+            # === NEW: build connect_ids fallback ===
+-+            sys_connect = getattr(model, "connect", None)
+-+            if sys_connect:
+-+                connect_ids = list(sys_connect)
+-+            else:
+-+                connect_ids = [model_id]  # self-connection
+-+                LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
+-+
+-+            # (Optional guard: skip if we truly have nothing—unlikely now)
+-+            if not connect_ids:
+-+                LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
+-+                model_status[model_id] = "no_connections"
+-                 continue
+- 
+-             try:
+--                for connect_id in model.connect:
+-+                for connect_id in connect_ids:
+-                     try:
+-                         pdb = martini.read_pdb(pdb_id=connect_id)
+-                         if not pdb:
+-@@ -797,8 +827,11 @@ async def build_martini3(
+-                         itp_.go_to_pairs(model_id=int(model_id))
+-                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
+-                         processed_models.append(model_id)
+--                        for connect_id in model.connect:
+-+
+-+                        # Track what we processed
+-+                        for connect_id in connect_ids:
+-                             processed_in_topology.add(connect_id)
+-+
+-                     except Exception as e:
+-                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
+-                         failed_itp.append(model_id)
+-diff --git a/src/colbuilder/data/sequence/modeller/top_heav_mod.lib b/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
+-index bf5e67e..988ebc7 100644
+---- a/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
+-+++ b/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
+-@@ -494,6 +494,7 @@ IMPR CD  CG  CE  OD
+- IC CB   CG    CD   OD    1.4607  114.8100   60.0000  108.1600    1.4252
+- IC OD   CG   *CD   CE    1.4252  112.1600 -124.1300  115.9100    1.5324
+- 
+-+
+- PRES RL5Y      1.00000
+- ATOM OD  O 0.2000
+- BOND OD CD
+-diff --git a/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb b/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
+-index 6ff6e97..4e3bdd1 100644
+---- a/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
+-+++ b/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
+-@@ -171,14 +171,14 @@ LX5     6
+- 2       6       HG      CG      CB      CD
+- 2       6       HD      CD      CG      CE
+- 1       6       HE1     CE      CD      NZ
+--L4Y	7
+--1	1	H	N	-C	CA	
+--1	5	HA	CA	N	CB	C	
+--2	6	HB	CB	CA	CG	
+--2	6	HG	CG	CB	CD	
+--1	6	HD1	CD	CG	CE
+--1       2       HOD     OD      CD      CE
+--2	6	HE	CE	CD	CB	
+-+L4Y    7
+-+1   1   H     N    -C    CA
+-+1   5   HA    CA    N    CB    C
+-+2   6   HB    CB    CA    CG
+-+2   6   HG    CG    CB    CD
+-+1   6   HD1   CD    CE    OD
+-+1   2   HOD   OD    CD    CE
+-+2   6   HE    CE    CD    CB
+- L5Y	6
+- 1	1	H	N	-C	CA	
+- 1	5	HA	CA	N	CB	C	
+diff --git a/src/colbuilder/data/sequence/crosslinks.csv b/src/colbuilder/data/sequence/crosslinks.csv
+index e90c174..20dc30a 100644
+--- a/src/colbuilder/data/sequence/crosslinks.csv
++++ b/src/colbuilder/data/sequence/crosslinks.csv
+@@ -904,10 +904,12 @@ rattus_norvegicus,LYS,C,1046.C - 1046.A - 98.B,DPL,L3X,CG,1046.C,L2X,CG,1046.A,L
+ rattus_norvegicus,LYS,N,5.B - 9.C - 946.A,DPL,L3X,CG,5.B,L2X,CG,9.C,LYY,C13,C12,946.A
+ rattus_norvegicus,LYS,N,9.C - 5.B - 944.B,DPL,L3X,CG,9.C,L2X,CG,5.B,LYY,C13,C12,944.B
+ rattus_norvegicus,LYS,C,1046.C - 103.C,HLKNL,L5Y,NZ,1046.C,L4Y,CE,103.C,NONE,NONE,NONE,NONE
++rattus_norvegicus,LYS,C,1040.C - 97.C,HLKNL,L5Y,NZ,1040.C,L4Y,CE,97.C,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,C,1046.C - 98.B,HLKNL,L5Y,NZ,1046.C,L4Y,CE,98.B,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,C,103.C - 1046.A,HLKNL,L5Y,NZ,1046.A,L4Y,CE,103.C,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,C,1046.A - 98.B,HLKNL,L5Y,NZ,1046.A,L4Y,CE,98.B,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,N,9.C - 946.A,HLKNL,L5Y,NZ,9.C,L4Y,CE,946.A,NONE,NONE,NONE,NONE
++rattus_norvegicus,LYS,N,3.C - 940.A,HLKNL,L5Y,NZ,3.C,L4Y,CE,940.A,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,N,9.C - 944.B,HLKNL,L5Y,NZ,9.C,L4Y,CE,944.B,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,N,946.A - 5.B,HLKNL,L5Y,NZ,5.B,L4Y,CE,946.A,NONE,NONE,NONE,NONE
+ rattus_norvegicus,LYS,N,5.B - 944.B,HLKNL,L5Y,NZ,5.B,L4Y,CE,944.B,NONE,NONE,NONE,NONE
 diff --git a/src/colbuilder/data/sequence/modeller/top_heav_mod.lib b/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
-index bf5e67e..988ebc7 100644
+index e0e9c97..ccfdc0b 100644
 --- a/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
 +++ b/src/colbuilder/data/sequence/modeller/top_heav_mod.lib
-@@ -494,6 +494,7 @@ IMPR CD  CG  CE  OD
- IC CB   CG    CD   OD    1.4607  114.8100   60.0000  108.1600    1.4252
- IC OD   CG   *CD   CE    1.4252  112.1600 -124.1300  115.9100    1.5324
+@@ -320,6 +320,12 @@ PRES RL4X      1.00000
+ DELETE ATOM NZ 
  
-+
- PRES RL5Y      1.00000
- ATOM OD  O 0.2000
- BOND OD CD
+ PRES RL5X      1.00000
++ATOM OD  O 0.2000
++BOND OD CD
++IMPR CD  CG  CE  OD
++IMPR OD  CD  CE  NZ
++IMPR OD  CD  CG  CB
++IC CE   CG   CD   OD    1.3463  117.9300  180.0000  120.5600    1.2299
+ 
+ PRES RLY2      1.00000
+ DELETE ATOM CG
 diff --git a/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb b/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
-index 6ff6e97..4e3bdd1 100644
+index 7fc59fd..95d96a6 100644
 --- a/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
 +++ b/src/colbuilder/data/topology/amber99sb-star-ildnp.ff/aminoacids.hdb
-@@ -171,14 +171,14 @@ LX5     6
- 2       6       HG      CG      CB      CD
- 2       6       HD      CD      CG      CE
- 1       6       HE1     CE      CD      NZ
--L4Y	7
--1	1	H	N	-C	CA	
--1	5	HA	CA	N	CB	C	
--2	6	HB	CB	CA	CG	
--2	6	HG	CG	CB	CD	
--1	6	HD1	CD	CG	CE
--1       2       HOD     OD      CD      CE
--2	6	HE	CE	CD	CB	
-+L4Y    7
-+1   1   H     N    -C    CA
-+1   5   HA    CA    N    CB    C
-+2   6   HB    CB    CA    CG
-+2   6   HG    CG    CB    CD
-+1   6   HD1   CD    CE    OD
-+1   2   HOD   OD    CD    CE
-+2   6   HE    CE    CD    CB
- L5Y	6
- 1	1	H	N	-C	CA	
+@@ -176,7 +176,7 @@ L4Y	7
  1	5	HA	CA	N	CB	C	
+ 2	6	HB	CB	CA	CG	
+ 2	6	HG	CG	CB	CD	
+-1	6	HD1	CD	CG	CE
++1	5	HD1	CD	CG	CE  OD
+ 1       2       HOD     OD      CD      CE
+ 2	6	HE	CE	CD	CB	
+ L5Y	6

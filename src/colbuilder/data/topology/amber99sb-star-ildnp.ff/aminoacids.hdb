@@ -176,7 +176,7 @@ L4Y	7
 1	5	HA	CA	N	CB	C	
 2	6	HB	CB	CA	CG	
 2	6	HG	CG	CB	CD	
-1	6	HD1	CD	CG	CE
+1	5	HD1	CD	CG	CE  OD
 1       2       HOD     OD      CD      CE
 2	6	HE	CE	CD	CB	
 L5Y	6

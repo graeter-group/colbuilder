@@ -19,14 +19,14 @@ species: "rattus_norvegicus"      # Species for collagen sequence
 fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
 crosslink: true             # enable crosslinking in the model
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
-n_term_type:  "HLKNL" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
-c_term_type: "HLKNL" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
-n_term_combination: "9.C - 946.A" # "6.B - 9.C - 946.A"    # N-terminal residue combination
-c_term_combination: "1046.C - 103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
+n_term_type: "DPD" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "DPD" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "5.B - 9.C - 946.A" # "6.B - 9.C - 946.A"  # N-terminal residue combination
+c_term_combination: "1046.C - 1046.A -103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
 
 # Geometry Parameters
-pdb_file: null # "rattusnorvegicus_N_NONE_C_NONE.pdb"               # Input PDB file (set to null if sequence_generator is true)
-contact_distance: 20         # Distance threshold for contacts (Å)
+pdb_file: null # "rattusnorvegicus_N_PYD_C_PYD.pdb"               # Input PDB file (set to null if sequence_generator is true)
+contact_distance: 35         # Distance threshold for contacts (Å)
 fibril_length: 40.0          # Length of the generated fibril (nm)
 crystalcontacts_file: null   # File with crystal contacts 
 connect_file: null           # File with connection information
