@@ -76,42 +76,50 @@ class Amber:
         return groups
     
     def merge_connected_models(self, model_group: List[int]) -> Optional[Tuple[str, str]]:
-        """Merge PDB files for a group of connected models."""
         if not model_group or not self.system:
             return None
-            
+
         first_model = self.system.get_model(model_id=float(model_group[0]))
         if not first_model or not first_model.type:
             return None
-            
+
         model_type = first_model.type
         os.makedirs(model_type, exist_ok=True)
-        
+
         group_id = "_".join(str(int(mid)) for mid in sorted(model_group))
         output_file = os.path.join(model_type, f"{group_id}.merge.pdb")
-        
-        with open(output_file, 'w') as f_out:
-            for model_id in model_group:
-                model = self.system.get_model(model_id=float(model_id))
-                if not model or not model.connect:
-                    continue
-                    
-                for connection_id in model.connect:
-                    caps_file = os.path.join(model_type, f"{int(connection_id)}.caps.pdb")
-                    if os.path.exists(caps_file):
-                        with open(caps_file, 'r') as f_in:
-                            for line in f_in:
-                                if line.startswith(self.pdb_line_types):
-                                    f_out.write(line)
-                    else:
-                        LOG.warning(f"Caps file not found: {caps_file}")
+
+        def write_caps(path, out):
+            if os.path.exists(path):
+                with open(path, "r") as f_in:
+                    for line in f_in:
+                        if line.startswith(self.pdb_line_types):
+                            out.write(line)
+            else:
+                LOG.warning(f"Caps file not found: {path}")
+
+        with open(output_file, "w") as f_out:
+            # Always include each model’s own caps
+            for mid in model_group:
+                caps = os.path.join(model_type, f"{int(mid)}.caps.pdb")
+                write_caps(caps, f_out)
+
+            # Optionally also include connection partners’ caps (if different from self)
+            for mid in model_group:
+                model = self.system.get_model(model_id=float(mid))
+                if model and model.connect:
+                    for cid in model.connect:
+                        if int(cid) not in model_group:
+                            caps = os.path.join(model_type, f"{int(cid)}.caps.pdb")
+                            write_caps(caps, f_out)
+
             f_out.write("END\n")
-        
+
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             return (model_type, group_id)
-        else:
-            LOG.error(f"Failed to create merged PDB for group {model_group}")
-            return None
+        LOG.error(f"Failed to create merged PDB for group {model_group}")
+        return None
+
 
     def find_crosslink_pairs(self, merged_pdb_file: str, distance_cutoff: float = 5.0) -> List[Tuple[Crosslink, Crosslink]]:
         """Find crosslink pairs that should be bonded based on distance and type."""
