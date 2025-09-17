@@ -224,6 +224,10 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
             for itp_file in Path().glob("col_[0-9]*.itp"):
                 file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
             
+            for posre_file in Path().glob("posre_*.itp"):
+                file_manager.copy_to_directory(posre_file, dest_dir=output_topology_dir)
+
+            
             ff_dir_name = "amber99sb-star-ildnp.ff"
             ff_source_dir = Path() / ff_dir_name  
                 

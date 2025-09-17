@@ -621,6 +621,91 @@ class Amber:
                         return j
         return len(lines)
 
+    def ensure_posre_include(self, itp_path, group_id):
+        """
+        Normalize POSRES include placement:
+        - Remove any existing POSRES block or lone #include anywhere (and the preceding comment).
+        - Insert a clean POSRES block just before the first [ atoms ] header,
+        or right after [ moleculetype ] if [ atoms ] is absent.
+        """
+        from pathlib import Path
+        itp_path = Path(itp_path)
+        posre_name = f"posre_{group_id}.itp"
+        posre_path = itp_path.parent / posre_name
+
+        # Ensure a posre file exists; normalize from generic if needed
+        generic = itp_path.parent / "posre.itp"
+        if not posre_path.exists() and generic.exists():
+            try:
+                shutil.copy2(generic, posre_path)
+            except Exception as e:
+                LOG.warning(f"Failed to normalize generic posre.itp -> {posre_name}: {e}")
+        if not posre_path.exists():
+            LOG.warning(f"Position restraint file not found for {group_id}: expected {posre_name}")
+            return
+
+        lines = itp_path.read_text().splitlines()
+
+        # --- 1) Strip existing POSRES blocks/includes *and* their leading comment, anywhere ---
+        new_lines = []
+        skip_block = False
+        for ln in lines:
+            s = ln.strip()
+            # Start of guarded POSRES block
+            if s.startswith("#ifdef") and "POSRES" in s:
+                # If previous line was a comment about posres, drop it too
+                if new_lines and new_lines[-1].strip().startswith(";") and (
+                    "posre" in new_lines[-1].lower() or "position restraint" in new_lines[-1].lower()
+                ):
+                    new_lines.pop()
+                    if new_lines and not new_lines[-1].strip():
+                        new_lines.pop()
+                skip_block = True
+                continue
+            if skip_block:
+                if s.startswith("#endif"):
+                    skip_block = False
+                continue
+            # Lone #include to posre*.itp
+            if s.startswith("#include") and "posre" in s:
+                if new_lines and new_lines[-1].strip().startswith(";") and (
+                    "posre" in new_lines[-1].lower() or "position restraint" in new_lines[-1].lower()
+                ):
+                    new_lines.pop()
+                    if new_lines and not new_lines[-1].strip():
+                        new_lines.pop()
+                continue
+            new_lines.append(ln)
+        lines = new_lines
+
+        # --- 2) Find insertion point (before [ atoms ] or after [ moleculetype ]) ---
+        def is_header(line, name):
+            s = line.strip().lower().replace(" ", "")
+            return s == f"[{name}]"
+
+        insert_idx = None
+        moleculetype_idx = None
+        for i, ln in enumerate(lines):
+            if is_header(ln, "moleculetype") and moleculetype_idx is None:
+                moleculetype_idx = i
+            if is_header(ln, "atoms"):
+                insert_idx = i
+                break
+        if insert_idx is None:
+            insert_idx = (moleculetype_idx + 1) if moleculetype_idx is not None else 0
+
+        block = [
+            "; Include Position restraint file",
+            "#ifdef POSRES",
+            f'#include "{posre_name}"',
+            "#endif",
+            ""
+        ]
+        lines[insert_idx:insert_idx] = block
+
+        itp_path.write_text("\n".join(lines) + "\n")
+
+
     def write_itp(self, itp_file: Union[str, Path], molecule_name: str, merged_pdb_file: Optional[str] = None) -> None:
         """Process and write Include Topology (ITP) file with crosslink bonds."""
         itp_file = Path(itp_file)
@@ -797,9 +882,13 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                     )
 
                 molecule_name = f"col_{group_id}"
-                amber.write_itp(itp_file=working_dir / f'col_{group_id}.top', 
-                               molecule_name=molecule_name, 
-                               merged_pdb_file=str(merge_pdb_path))
+                amber.write_itp(
+                    itp_file=working_dir / f'col_{group_id}.top',
+                    molecule_name=f'col_{group_id}',
+                    merged_pdb_file=str(merge_pdb_path)
+                )
+                amber.ensure_posre_include(working_dir / f'col_{group_id}.itp', group_id)
+
                 processed_groups.append((model_type, group_id))
                 LOG.debug(f"    Successfully processed connected group {group} as {molecule_name}")
 
