@@ -624,9 +624,8 @@ class Amber:
     def ensure_posre_include(self, itp_path, group_id):
         """
         Normalize POSRES include placement:
-        - Remove any existing POSRES block or lone #include anywhere (and the preceding comment).
-        - Insert a clean POSRES block just before the first [ atoms ] header,
-        or right after [ moleculetype ] if [ atoms ] is absent.
+        - Remove existing POSRES blocks or lone #include lines (and their leading comment).
+        - Append a clean POSRES block at the END of the .itp (valid: after [atoms] and any other sections).
         """
         from pathlib import Path
         itp_path = Path(itp_path)
@@ -646,14 +645,12 @@ class Amber:
 
         lines = itp_path.read_text().splitlines()
 
-        # --- 1) Strip existing POSRES blocks/includes *and* their leading comment, anywhere ---
+        # 1) Strip existing POSRES includes/blocks + any leading comment line
         new_lines = []
         skip_block = False
         for ln in lines:
             s = ln.strip()
-            # Start of guarded POSRES block
             if s.startswith("#ifdef") and "POSRES" in s:
-                # If previous line was a comment about posres, drop it too
                 if new_lines and new_lines[-1].strip().startswith(";") and (
                     "posre" in new_lines[-1].lower() or "position restraint" in new_lines[-1].lower()
                 ):
@@ -666,7 +663,6 @@ class Amber:
                 if s.startswith("#endif"):
                     skip_block = False
                 continue
-            # Lone #include to posre*.itp
             if s.startswith("#include") and "posre" in s:
                 if new_lines and new_lines[-1].strip().startswith(";") and (
                     "posre" in new_lines[-1].lower() or "position restraint" in new_lines[-1].lower()
@@ -678,30 +674,16 @@ class Amber:
             new_lines.append(ln)
         lines = new_lines
 
-        # --- 2) Find insertion point (before [ atoms ] or after [ moleculetype ]) ---
-        def is_header(line, name):
-            s = line.strip().lower().replace(" ", "")
-            return s == f"[{name}]"
-
-        insert_idx = None
-        moleculetype_idx = None
-        for i, ln in enumerate(lines):
-            if is_header(ln, "moleculetype") and moleculetype_idx is None:
-                moleculetype_idx = i
-            if is_header(ln, "atoms"):
-                insert_idx = i
-                break
-        if insert_idx is None:
-            insert_idx = (moleculetype_idx + 1) if moleculetype_idx is not None else 0
-
+        # 2) Append clean POSRES block at EOF
         block = [
+            "",
             "; Include Position restraint file",
             "#ifdef POSRES",
             f'#include "{posre_name}"',
             "#endif",
             ""
         ]
-        lines[insert_idx:insert_idx] = block
+        lines.extend(block)
 
         itp_path.write_text("\n".join(lines) + "\n")
 
