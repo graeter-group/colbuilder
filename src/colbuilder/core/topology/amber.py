@@ -139,16 +139,21 @@ class Amber:
 
         return pairs
 
-    def find_atom_indices_for_crosslinks(self, itp_file: str, crosslink_pairs: List[Tuple[Crosslink, Crosslink]], merged_pdb_file: str) -> List[Tuple[int, int]]:
-        """Find atom indices in the topology file for crosslink pairs."""
-        atom_indices = []
-        
+    def find_atom_indices_for_crosslinks(
+        self,
+        itp_file: str,
+        crosslink_pairs: List[Tuple[Crosslink, Crosslink]],
+        merged_pdb_file: str,
+    ) -> List[Tuple[Tuple[Crosslink, Crosslink], Tuple[int, int]]]:
+        """Map crosslink markers to atom indices, skipping invalid same-side T pairs."""
+        mapped: List[Tuple[Tuple[Crosslink, Crosslink], Tuple[int, int]]] = []
+
+        # Parse atoms table
         with open(itp_file, 'r') as f:
             lines = f.readlines()
-        
+
         atoms_section = False
         atom_data = []
-        
         for line in lines:
             if line.strip().startswith('[ atoms ]'):
                 atoms_section = True
@@ -162,69 +167,107 @@ class Amber:
                         'index': int(parts[0]),
                         'atom_name': parts[4],
                         'residue_nr': int(parts[2]),
-                        'residue_name': parts[3]
+                        'residue_name': parts[3],
                     })
-        
+
+        atom_by_index = {a['index']: a for a in atom_data}
+
+        # Coordinates from companion .gro (Å)
         gro_file = itp_file.replace('.itp', '.gro')
-        gro_coords = {}
-        
+        gro_coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
             with open(gro_file, 'r') as f:
                 gro_lines = f.readlines()
-                for line in gro_lines[2:-1]:
-                    if len(line) >= 44:
-                        try:
-                            atom_idx = int(line[15:20].strip())
-                            x = float(line[20:28]) * 10
-                            y = float(line[28:36]) * 10
-                            z = float(line[36:44]) * 10
-                            gro_coords[atom_idx] = np.array([x, y, z])
-                        except (ValueError, IndexError):
-                            continue
-        
+            for line in gro_lines[2:-1]:
+                if len(line) >= 44:
+                    try:
+                        atom_idx = int(line[15:20].strip())
+                        x = float(line[20:28]) * 10
+                        y = float(line[28:36]) * 10
+                        z = float(line[36:44]) * 10
+                        gro_coords[atom_idx] = np.array([x, y, z])
+                    except (ValueError, IndexError):
+                        continue
+
         for cl1, cl2 in crosslink_pairs:
             best_atom1_idx = None
             best_atom2_idx = None
             best_dist1 = float('inf')
             best_dist2 = float('inf')
-            
+
             for atom in atom_data:
                 atom_idx = atom['index']
-                
-                if (atom['residue_name'] == cl1.resname and 
-                    self._is_crosslink_atom(atom['atom_name'], cl1.resname, cl1.type)):
-                    
-                    if atom_idx in gro_coords:
-                        dist = np.linalg.norm(gro_coords[atom_idx] - cl1.position)
-                        if dist < best_dist1 and dist < 5.0:
-                            best_dist1 = dist
-                            best_atom1_idx = atom_idx
-                
-                if (atom['residue_name'] == cl2.resname and 
-                    self._is_crosslink_atom(atom['atom_name'], cl2.resname, cl2.type)):
-                    
-                    if atom_idx in gro_coords:
-                        dist = np.linalg.norm(gro_coords[atom_idx] - cl2.position)
-                        if dist < best_dist2 and dist < 5.0:
-                            best_dist2 = dist
-                            best_atom2_idx = atom_idx
-            
-            if best_atom1_idx and best_atom2_idx:
-                atom_indices.append((best_atom1_idx, best_atom2_idx))
-            else:
-                LOG.warning(f"Could not find atoms for crosslink pair: {cl1.resname}{cl1.resid} - {cl2.resname}{cl2.resid}")
-        
-        return atom_indices
 
-    def _is_crosslink_atom(self, atom_name: str, resname: str, crosslink_type: str) -> bool:
-        """Check if this atom is the target bonding atom for the crosslink type."""
+                if (atom['residue_name'] == cl1.resname and
+                    self._is_crosslink_atom(atom['atom_name'], cl1.resname, cl1.type)):
+                    if atom_idx in gro_coords:
+                        d = np.linalg.norm(gro_coords[atom_idx] - cl1.position)
+                        if d < best_dist1 and d < 5.0:
+                            best_dist1 = d
+                            best_atom1_idx = atom_idx
+
+                if (atom['residue_name'] == cl2.resname and
+                    self._is_crosslink_atom(atom['atom_name'], cl2.resname, cl2.type)):
+                    if atom_idx in gro_coords:
+                        d = np.linalg.norm(gro_coords[atom_idx] - cl2.position)
+                        if d < best_dist2 and d < 5.0:
+                            best_dist2 = d
+                            best_atom2_idx = atom_idx
+
+            # Reject invalid / same-side T–T selections (blocks LY2–LY3 and LYX–LYX)
+            if best_atom1_idx and best_atom2_idx:
+                a1 = atom_by_index.get(best_atom1_idx)
+                a2 = atom_by_index.get(best_atom2_idx)
+                if cl1.type == "T" and cl2.type == "T" and a1 and a2:
+                    a1_isA = self._is_crosslink_atom(a1['atom_name'], a1['residue_name'], "T", "A")
+                    a1_isB = self._is_crosslink_atom(a1['atom_name'], a1['residue_name'], "T", "B")
+                    a2_isA = self._is_crosslink_atom(a2['atom_name'], a2['residue_name'], "T", "A")
+                    a2_isB = self._is_crosslink_atom(a2['atom_name'], a2['residue_name'], "T", "B")
+                    if (a1_isA and a2_isA) or (a1_isB and a2_isB):
+                        LOG.debug(
+                            f"Skipping same-side T pair "
+                            f"{a1['residue_name']}{a1['residue_nr']}–{a2['residue_name']}{a2['residue_nr']} "
+                            f"({a1['atom_name']}-{a2['atom_name']})"
+                        )
+                        continue
+
+                mapped.append(((cl1, cl2), (best_atom1_idx, best_atom2_idx)))
+            else:
+                LOG.warning(
+                    f"Could not find atoms for crosslink pair: "
+                    f"{cl1.resname}{cl1.resid} - {cl2.resname}{cl2.resid}"
+                )
+
+        return mapped
+
+    def _is_crosslink_atom(
+        self,
+        atom_name: str,
+        resname: str,
+        crosslink_type: str,
+        want_side: Optional[str] = None,  # NEW: None, "A", or "B"
+    ) -> bool:
+        """
+        Check if this atom is the target bonding atom for the crosslink type.
+        For T-type crosslinks we distinguish sides to block same-side bonds:
+        - Side "A": aldehyde side (e.g., LYX carbonyl C13/C12)
+        - Side "B": amine side (e.g., LY3 CG or LY2 CB)
+        If want_side is provided, only accept atoms from that side.
+        """
         if crosslink_type == "T":
-            if resname in ("LYX", "LXY", "LYY", "LXX") and atom_name in ("C13", "C12"):
-                return True
-            elif resname in ("LY3", "LX3", "L3Y", "L2Y", "L3X", "L2X") and atom_name == "CG":
-                return True
-            elif resname in ("LY2", "LX2") and atom_name == "CB":
-                return True
+            # Side A (aldehyde) — LYX-like
+            is_A = (resname in ("LYX", "LXY", "LYY", "LXX") and atom_name in ("C13", "C12"))
+            # Side B (amine) — LY3/LY2-like
+            is_B = (
+                (resname in ("LY3", "LX3", "L3Y", "L2Y", "L3X", "L2X") and atom_name == "CG")
+                or (resname in ("LY2", "LX2") and atom_name == "CB")
+            )
+            if want_side == "A":
+                return is_A
+            if want_side == "B":
+                return is_B
+            return is_A or is_B
+
         elif crosslink_type == "D":
             if resname in ("L4Y", "L4X", "LY4", "LX4") and atom_name == "CE":
                 return True
@@ -234,8 +277,9 @@ class Amber:
                 return True
             elif resname in ("AGS", "APD") and atom_name == "NZ":
                 return True
-        
+
         return False
+
 
     def parse_topology_sections(self, itp_file: str) -> Dict[str, List[List[int]]]:
         """Parse existing topology to get bonds, angles, and dihedrals."""
@@ -355,7 +399,12 @@ class Amber:
                 return True
         return False
 
-    def add_crosslink_topology_to_itp(self, itp_file: str, crosslink_pairs: List[Tuple[Crosslink, Crosslink]], merged_pdb_file: str) -> None:
+    def add_crosslink_topology_to_itp(
+        self,
+        itp_file: str,
+        crosslink_pairs: List[Tuple[Crosslink, Crosslink]],
+        merged_pdb_file: str
+    ) -> None:
         """Add complete crosslink topology (bonds, angles, dihedrals) to an existing ITP file."""
         if not crosslink_pairs:
             return
@@ -363,43 +412,40 @@ class Amber:
         LOG.debug(f"        Adding crosslink topology for {len(crosslink_pairs)} crosslink pairs to {itp_file}")
 
         try:
-            atom_indices = self.find_atom_indices_for_crosslinks(itp_file, crosslink_pairs, merged_pdb_file)
-            
-            if not atom_indices:
+            mapped_pairs = self.find_atom_indices_for_crosslinks(itp_file, crosslink_pairs, merged_pdb_file)
+            if not mapped_pairs:
                 LOG.warning(f"No atom indices found for crosslink topology in {itp_file}")
                 return
-            
-            valid_bonds = set()
-            valid_bond_data = []
-            
-            for (cl1, cl2), (atom1_idx, atom2_idx) in zip(crosslink_pairs, atom_indices):
+
+            valid_bonds: Set[Tuple[int, int]] = set()
+            valid_bond_data: List[Dict] = []
+
+            for (cl1, cl2), (atom1_idx, atom2_idx) in mapped_pairs:
                 if atom1_idx == atom2_idx:
                     continue
-                
-                bond_key = tuple(sorted([atom1_idx, atom2_idx]))
-                
+                bond_key = tuple(sorted((atom1_idx, atom2_idx)))
                 if bond_key not in valid_bonds:
                     valid_bonds.add(bond_key)
                     valid_bond_data.append({
                         'atoms': bond_key,
                         'cl1': cl1,
                         'cl2': cl2,
-                        'original_indices': (atom1_idx, atom2_idx)
+                        'original_indices': (atom1_idx, atom2_idx),
                     })
-            
+
             if not valid_bond_data:
                 LOG.warning(f"No valid crosslink topology to add to {itp_file}")
                 return
-            
+
             self._add_crosslink_bonds(itp_file, valid_bond_data)
-            
+
             try:
                 self._add_crosslink_angles_and_dihedrals(itp_file, valid_bond_data)
             except Exception as e:
                 LOG.warning(f"Failed to add angles/dihedrals, but bonds were added successfully: {str(e)}")
-            
+
             LOG.debug(f"    Successfully added crosslink topology to {itp_file}")
-            
+
         except Exception as e:
             LOG.error(f"Failed to add crosslink topology to {itp_file}: {str(e)}")
 
@@ -466,36 +512,153 @@ class Amber:
         
         with open(itp_file, 'w') as f:
             f.writelines(lines)
+            
+    def _filter_angles_by_bonds(
+        self,
+        angles: List[Tuple[int, int, int]],
+        bond_set: Set[Tuple[int, int]],
+    ) -> List[Tuple[int, int, int]]:
+        """Keep i–j–k only if (i–j) and (j–k) are real bonds."""
+        def as_bond(a, b): return (a, b) if a < b else (b, a)
+        out = []
+        for i, j, k in angles:
+            if as_bond(i, j) in bond_set and as_bond(j, k) in bond_set:
+                out.append((i, j, k))
+        return out
+
+    def _filter_dihedrals_by_bonds(
+        self,
+        dihs: List[Tuple[int, int, int, int]],
+        bond_set: Set[Tuple[int, int]],
+    ) -> List[Tuple[int, int, int, int]]:
+        """Keep i–j–k–l only if (i–j), (j–k) and (k–l) are real bonds."""
+        def as_bond(a, b): return (a, b) if a < b else (b, a)
+        out = []
+        for i, j, k, l in dihs:
+            if (as_bond(i, j) in bond_set and
+                as_bond(j, k) in bond_set and
+                as_bond(k, l) in bond_set):
+                out.append((i, j, k, l))
+        return out
 
     def _add_crosslink_angles_and_dihedrals(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
-        """Add angles and dihedrals for crosslink bonds."""
+        """Add angles/dihedrals around crosslink bonds, restricted to real, minimal heavy-atom terms."""
         try:
+            # 1) Parse existing topology
             existing_topology = self.parse_topology_sections(itp_file)
-            
-            all_bonds = existing_topology['bonds'].copy()
-            crosslink_bonds = [bond_data['atoms'] for bond_data in valid_bond_data]
-            all_bonds.extend(crosslink_bonds)
-            
-            connectivity = self.build_connectivity_graph(all_bonds)
-            
-            crosslink_angles = self.generate_crosslink_angles(crosslink_bonds, connectivity)
-            crosslink_dihedrals = self.generate_crosslink_dihedrals(crosslink_bonds, connectivity)
 
-            if crosslink_angles or crosslink_dihedrals:
-                with open(itp_file, 'r') as f:
-                    lines = f.readlines()
-                
-                if crosslink_angles:
-                    lines = self._add_angles_to_lines(lines, crosslink_angles)
-                
-                if crosslink_dihedrals:
-                    lines = self._add_dihedrals_to_lines(lines, crosslink_dihedrals)
-                
-                with open(itp_file, 'w') as f:
-                    f.writelines(lines)
-            
+            all_bonds = existing_topology['bonds'].copy()
+            crosslink_bonds = [tuple(bd['atoms']) for bd in valid_bond_data]
+            all_bonds.extend(crosslink_bonds)
+
+            # Build bond set & connectivity
+            as_bond = lambda a, b: (a, b) if a < b else (b, a)
+            bond_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in all_bonds}
+            xlink_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in crosslink_bonds}
+
+            connectivity = self.build_connectivity_graph(all_bonds)
+
+            # 2) Propose raw sequences around crosslink edges
+            proposed_angles = self.generate_crosslink_angles(crosslink_bonds, connectivity)
+            proposed_dihedrals = self.generate_crosslink_dihedrals(crosslink_bonds, connectivity)
+
+            # 3) Keep ONLY sequences that are truly sequential along bonds
+            angles_seq = self._filter_angles_by_bonds(proposed_angles, bond_set)
+            diheds_seq = self._filter_dihedrals_by_bonds(proposed_dihedrals, bond_set)
+
+            # 4) Load atom info once (name, resid, resname) to filter hydrogens and residue pairing
+            atom_info: Dict[int, Dict[str, Any]] = {}
+            with open(itp_file, "r") as f:
+                lines = f.readlines()
+            atoms_section = False
+            for line in lines:
+                s = line.strip()
+                if s.startswith("[ atoms ]"):
+                    atoms_section = True
+                    continue
+                if atoms_section and s.startswith("["):
+                    break
+                if atoms_section and s and not s.startswith(";"):
+                    parts = s.split()
+                    if len(parts) >= 8:
+                        idx = int(parts[0])
+                        atom_info[idx] = {
+                            "name": parts[4],
+                            "resid": int(parts[2]),
+                            "resname": parts[3],
+                        }
+
+            def is_H(i: int) -> bool:
+                return atom_info.get(i, {}).get("name", "").startswith("H")
+
+            def same_res(i: int, j: int) -> bool:
+                ai, aj = atom_info.get(i), atom_info.get(j)
+                return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
+
+            # 5) Strict crosslink-centered filters
+            # Angles: only keep if the middle pair is the crosslink bond and the outer atom
+            # is in the same residue as its adjacent crosslink atom (and heavy).
+            filtered_angles: List[Tuple[int, int, int]] = []
+            for i, j, k in angles_seq:
+                jk_is_xlink = as_bond(j, k) in xlink_set
+                ij_is_xlink = as_bond(i, j) in xlink_set
+                if jk_is_xlink:
+                    # angle (i, j=atom1, k=atom2): i must belong to j's residue; i,k must be heavy
+                    if not is_H(i) and not is_H(k) and same_res(i, j):
+                        filtered_angles.append((i, j, k))
+                elif ij_is_xlink:
+                    # angle (i=atom1, j=atom2, k): k must belong to j's residue; i,k heavy
+                    if not is_H(i) and not is_H(k) and same_res(k, j):
+                        filtered_angles.append((i, j, k))
+                # else: angle doesn't center on crosslink bond (shouldn't happen from our generator)
+
+            # Dihedrals: must be (i, j, k, l) with (j,k) the crosslink bond,
+            # i in j's residue, l in k's residue, all heavy for robustness.
+            filtered_diheds: List[Tuple[int, int, int, int]] = []
+            for i, j, k, l in diheds_seq:
+                if as_bond(j, k) not in xlink_set:
+                    continue
+                if is_H(i) or is_H(j) or is_H(k) or is_H(l):
+                    continue
+                if not (same_res(i, j) and same_res(k, l)):
+                    continue
+                filtered_diheds.append((i, j, k, l))
+
+            # 6) Drop duplicates and anything already present
+            existing_angles = set(tuple(a) for a in existing_topology["angles"])
+            existing_diheds = set(tuple(d) for d in existing_topology["dihedrals"])
+
+            def unique_new(seq, existing):
+                out = []
+                seen = set()
+                for t in seq:
+                    if t in existing or t in seen:
+                        continue
+                    seen.add(t)
+                    out.append(t)
+                return out
+
+            crosslink_angles = unique_new(filtered_angles, existing_angles)
+            crosslink_dihedrals = unique_new(filtered_diheds, existing_diheds)
+
+            if not (crosslink_angles or crosslink_dihedrals):
+                return
+
+            # 7) Append to file
+            with open(itp_file, 'r') as f:
+                lines = f.readlines()
+
+            if crosslink_angles:
+                lines = self._add_angles_to_lines(lines, crosslink_angles)
+            if crosslink_dihedrals:
+                lines = self._add_dihedrals_to_lines(lines, crosslink_dihedrals)
+
+            with open(itp_file, 'w') as f:
+                f.writelines(lines)
+
         except Exception as e:
             LOG.warning(f"Could not add angles/dihedrals: {str(e)}")
+
 
     def _add_angles_to_lines(self, lines: List[str], crosslink_angles: List[Tuple[int, int, int]]) -> List[str]:
         """Add crosslink angles using standard GROMACS format."""
@@ -548,68 +711,67 @@ class Amber:
         return lines
 
     def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
-        """Add crosslink dihedrals using standard GROMACS format with proper type assignment."""
+        """Add crosslink dihedrals; if type 4 is selected, append fixed params 105.4 0.75 1."""
         if not crosslink_dihedrals:
             return lines
-        
+
+        # Write a temp copy so _dihedral_involves_backbone() can read atom names
         temp_itp_file = "temp_for_backbone_check.itp"
         with open(temp_itp_file, 'w') as f:
             f.writelines(lines)
-            
+
+        # Find (or create) the [ dihedrals ] section and compute insertion point
         dihedrals_section_start = -1
         dihedrals_section_end = -1
-        
         for i, line in enumerate(lines):
             if line.strip().startswith('[ dihedrals ]'):
                 dihedrals_section_start = i
             elif dihedrals_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ dihedrals ]'):
                 dihedrals_section_end = i
                 break
-        
+
         if dihedrals_section_start >= 0:
             if dihedrals_section_end >= 0:
                 last_content_line = dihedrals_section_end - 1
-                while (last_content_line > dihedrals_section_start and 
-                       (not lines[last_content_line].strip() or 
+                while (last_content_line > dihedrals_section_start and
+                    (not lines[last_content_line].strip() or
                         lines[last_content_line].strip().startswith(';'))):
                     last_content_line -= 1
                 insert_pos = last_content_line + 1
             else:
                 insert_pos = len(lines)
         else:
+            # create section after [ angles ] (or at EOF if not found)
             insert_pos = self._find_section_end(lines, '[ angles ]')
-            if insert_pos >= 0:
-                lines.insert(insert_pos, '\n[ dihedrals ]\n')
-                lines.insert(insert_pos + 1, ';   ai    aj    ak    al funct\n')
-                insert_pos += 2
-        
-        if insert_pos >= 0:
-            dihedral_entries = []
-            dihedral_entries.append("; Crosslink dihedrals\n")
-            
-            for atom1, atom2, atom3, atom4 in crosslink_dihedrals:
-                if self._dihedral_involves_backbone(temp_itp_file, (atom1, atom2, atom3, atom4)):
-                    dihedral_type = 4
-                else:
-                    dihedral_type = 9
-                
-                dihedral_entry = f"{atom1} {atom2} {atom3} {atom4}     {dihedral_type}\n"
-                dihedral_entries.append(dihedral_entry)
-            
-            for entry in reversed(dihedral_entries):
-                lines.insert(insert_pos, entry)
-            
-            final_pos = insert_pos + len(dihedral_entries)
-            if (final_pos < len(lines) and 
-                lines[final_pos].strip().startswith('[') and 
-                (final_pos == 0 or lines[final_pos - 1].strip())):
-                lines.insert(final_pos, '\n')
-        
+            lines.insert(insert_pos, '\n[ dihedrals ]\n')
+            lines.insert(insert_pos + 1, ';   ai    aj    ak    al funct\n')
+            insert_pos += 2
+
+        # Build entries (type 4 gets explicit params)
+        dihedral_entries = []
+        dihedral_entries.append("; Crosslink dihedrals\n")
+        for a, b, c, d in crosslink_dihedrals:
+            dihedral_type = 4 if self._dihedral_involves_backbone(temp_itp_file, (a, b, c, d)) else 9
+            if dihedral_type == 4:
+                # Add the fixed parameters for type 4
+                dihedral_entries.append(f"{a} {b} {c} {d}     4    105.4       0.75       1\n")
+            else:
+                dihedral_entries.append(f"{a} {b} {c} {d}     9\n")
+
+        # Insert and keep spacing sane
+        for entry in reversed(dihedral_entries):
+            lines.insert(insert_pos, entry)
+        final_pos = insert_pos + len(dihedral_entries)
+        if (final_pos < len(lines) and
+            lines[final_pos].strip().startswith('[') and
+            (final_pos == 0 or lines[final_pos - 1].strip())):
+            lines.insert(final_pos, '\n')
+
         try:
             os.remove(temp_itp_file)
-        except:
+        except Exception:
             pass
-        
+
         return lines
 
     def _find_section_end(self, lines: List[str], section_header: str) -> int:
