@@ -172,7 +172,6 @@ class Amber:
 
         atom_by_index = {a['index']: a for a in atom_data}
 
-        # Coordinates from companion .gro (Å)
         gro_file = itp_file.replace('.itp', '.gro')
         gro_coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
@@ -544,29 +543,24 @@ class Amber:
     def _add_crosslink_angles_and_dihedrals(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
         """Add angles/dihedrals around crosslink bonds, restricted to real, minimal heavy-atom terms."""
         try:
-            # 1) Parse existing topology
             existing_topology = self.parse_topology_sections(itp_file)
 
             all_bonds = existing_topology['bonds'].copy()
             crosslink_bonds = [tuple(bd['atoms']) for bd in valid_bond_data]
             all_bonds.extend(crosslink_bonds)
 
-            # Build bond set & connectivity
             as_bond = lambda a, b: (a, b) if a < b else (b, a)
             bond_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in all_bonds}
             xlink_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in crosslink_bonds}
 
             connectivity = self.build_connectivity_graph(all_bonds)
 
-            # 2) Propose raw sequences around crosslink edges
             proposed_angles = self.generate_crosslink_angles(crosslink_bonds, connectivity)
             proposed_dihedrals = self.generate_crosslink_dihedrals(crosslink_bonds, connectivity)
 
-            # 3) Keep ONLY sequences that are truly sequential along bonds
             angles_seq = self._filter_angles_by_bonds(proposed_angles, bond_set)
             diheds_seq = self._filter_dihedrals_by_bonds(proposed_dihedrals, bond_set)
 
-            # 4) Load atom info once (name, resid, resname) to filter hydrogens and residue pairing
             atom_info: Dict[int, Dict[str, Any]] = {}
             with open(itp_file, "r") as f:
                 lines = f.readlines()
@@ -595,7 +589,6 @@ class Amber:
                 ai, aj = atom_info.get(i), atom_info.get(j)
                 return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
 
-            # 5) Strict crosslink-centered filters
             # Angles: only keep if the middle pair is the crosslink bond and the outer atom
             # is in the same residue as its adjacent crosslink atom (and heavy).
             filtered_angles: List[Tuple[int, int, int]] = []
@@ -644,7 +637,6 @@ class Amber:
             if not (crosslink_angles or crosslink_dihedrals):
                 return
 
-            # 7) Append to file
             with open(itp_file, 'r') as f:
                 lines = f.readlines()
 
@@ -715,12 +707,10 @@ class Amber:
         if not crosslink_dihedrals:
             return lines
 
-        # Write a temp copy so _dihedral_involves_backbone() can read atom names
         temp_itp_file = "temp_for_backbone_check.itp"
         with open(temp_itp_file, 'w') as f:
             f.writelines(lines)
 
-        # Find (or create) the [ dihedrals ] section and compute insertion point
         dihedrals_section_start = -1
         dihedrals_section_end = -1
         for i, line in enumerate(lines):
@@ -741,24 +731,20 @@ class Amber:
             else:
                 insert_pos = len(lines)
         else:
-            # create section after [ angles ] (or at EOF if not found)
             insert_pos = self._find_section_end(lines, '[ angles ]')
             lines.insert(insert_pos, '\n[ dihedrals ]\n')
             lines.insert(insert_pos + 1, ';   ai    aj    ak    al funct\n')
             insert_pos += 2
 
-        # Build entries (type 4 gets explicit params)
         dihedral_entries = []
         dihedral_entries.append("; Crosslink dihedrals\n")
         for a, b, c, d in crosslink_dihedrals:
             dihedral_type = 4 if self._dihedral_involves_backbone(temp_itp_file, (a, b, c, d)) else 9
             if dihedral_type == 4:
-                # Add the fixed parameters for type 4
                 dihedral_entries.append(f"{a} {b} {c} {d}     4    105.4       0.75       1\n")
             else:
                 dihedral_entries.append(f"{a} {b} {c} {d}     9\n")
 
-        # Insert and keep spacing sane
         for entry in reversed(dihedral_entries):
             lines.insert(insert_pos, entry)
         final_pos = insert_pos + len(dihedral_entries)
@@ -794,7 +780,6 @@ class Amber:
         posre_name = f"posre_{group_id}.itp"
         posre_path = itp_path.parent / posre_name
 
-        # Ensure a posre file exists; normalize from generic if needed
         generic = itp_path.parent / "posre.itp"
         if not posre_path.exists() and generic.exists():
             try:
@@ -807,7 +792,6 @@ class Amber:
 
         lines = itp_path.read_text().splitlines()
 
-        # 1) Strip existing POSRES includes/blocks + any leading comment line
         new_lines = []
         skip_block = False
         for ln in lines:
@@ -836,7 +820,6 @@ class Amber:
             new_lines.append(ln)
         lines = new_lines
 
-        # 2) Append clean POSRES block at EOF
         block = [
             "",
             "; Include Position restraint file",
