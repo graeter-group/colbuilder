@@ -276,6 +276,10 @@ class Amber:
                 return True
             elif resname in ("AGS", "APD") and atom_name == "NZ":
                 return True
+            elif resname in ("LZD") and atom_name == "CE":
+                return True   
+            elif resname in ("LZS") and atom_name == "NZ1":
+                return True   
 
         return False
 
