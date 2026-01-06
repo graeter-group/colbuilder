@@ -22,7 +22,7 @@
   - [📊 Mode Summary Table](#-mode-summary-table)
   - [🔁 Valid Mode Combinations](#-valid-mode-combinations)
   - [✅ Valid Workflows](#-valid-workflows)
-  - [🔧 Mode 4 (Mixing Crosslinks): Run Separately via Script](#-mode-4-mixing-crosslinks-run-separately-via-script)
+  - [🔧 Mode 4 (Mixing Crosslinks + Topology)](#-mode-4-mixing-crosslinks--topology)
 - [📖 Usage Guide](#-usage-guide)
   - [Basic Usage](#basic-usage)
   - [Configuration Options](#configuration-options)
@@ -201,13 +201,13 @@ These mode combinations can be run **in a single configuration file**:
 
 ---
 
-### 🔧 Mode 4 (Mixing Crosslinks)
+### 🔧 Mode 4 (Mixing Crosslinks + Topology)
 
 Mixing crosslinks (**Mode 4**) requires a dedicated config that lists the input
 PDBs produced by sequence generation. You can also enable topology generation
 in the same run.
 
-[example](docs/examples/)
+[example](docs/examples/non-enzymatic/example3-mix)
 
 ```bash
 # Example bash script for mixing crosslinks
