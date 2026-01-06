@@ -216,7 +216,8 @@ colbuilder --config_file triple_helix_B.yaml
 colbuilder --config_file mix_geometry.yaml   # sets mix_bool: true and includes both PDBs
 ```
 
-You can also chain this with replace_bool (Mode 5) or topology_generator (Mode 3).
+You can also chain this with topology_generator (Mode 3). See the mixing example in
+[docs/examples/non-enzymatic/example3-mix](docs/examples/non-enzymatic/example3-mix).
 
 ## 📖 Usage Guide
 
