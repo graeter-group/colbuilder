@@ -153,6 +153,7 @@ Pre-defined collagen sequences for various species: homo_sapiens, pan_troglodyte
   - Residue combinations
   - Crosslink types (HLKNL, LKNL, PYD, DPD, etc.)
   - Atom positions for forming crosslinks
+  - Translation/shift information used for crosslink optimization (e.g., D0-D5, D2-D1)
 
 - `template.fasta`: Template sequence file for *Rattus norvegicus* (rat) collagen type I. Used as a reference in the homology modeling process.
 
@@ -170,6 +171,8 @@ During sequence generation, ColBuilder uses:
 - MODELLER libraries in `modeller/` to handle special residues and crosslinks
 
 This process creates a collagen triple helix with appropriate crosslinks for the selected species.
+When adding non-enzymatic crosslinks via a mutated PDB workflow, the shift listed in
+`crosslinks.csv` should be used for `crosslink_copies`.
 
 ### 2. Geometry Generation Stage
 

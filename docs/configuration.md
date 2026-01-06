@@ -42,11 +42,17 @@ species: "homo_sapiens"
 
 # Sequence Settings
 fasta_file: null
+mutated_pdb: null
 crosslink: true
 n_term_type: "HLKNL"
 c_term_type: "HLKNL"
 n_term_combination: "9.C - 947.A"
 c_term_combination: "1047.C - 104.C"
+additional_1_type: null
+additional_1_combination: null
+additional_2_type: null
+additional_2_combination: null
+crosslink_copies: ["D0", "D5"]
 
 # Geometry Parameters
 pdb_file: null
@@ -117,11 +123,17 @@ These parameters control the sequence generation stage (homology modeling).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `fasta_file` | string, null | null | Path to custom FASTA file (if null, generated based on species) |
+| `mutated_pdb` | string, null | null | Use a pre-mutated PDB as input for additional crosslinks |
 | `crosslink` | boolean | true | Enable/disable crosslinking in the model |
 | `n_term_type` | string | "HLKNL" | N-terminal crosslink type |
 | `c_term_type` | string | "HLKNL" | C-terminal crosslink type |
 | `n_term_combination` | string | depends on species | N-terminal residue combination for crosslinks |
 | `c_term_combination` | string | depends on species | C-terminal residue combination for crosslinks |
+| `additional_1_type` | string, null | null | Optional non-enzymatic crosslink (AGE) |
+| `additional_1_combination` | string, null | null | Residue combination for the first additional crosslink |
+| `additional_2_type` | string, null | null | Optional second non-enzymatic crosslink |
+| `additional_2_combination` | string, null | null | Residue combination for the second additional crosslink |
+| `crosslink_copies` | list | ["D0", "D5"] | Translation pair for crosslink optimization |
 
 **Available Crosslink Types**:
 - **DPD**: Deoxypyridinoline (trivalent crosslink)
@@ -132,8 +144,10 @@ These parameters control the sequence generation stage (homology modeling).
 - **PYD**: Pyridinoline (trivalent)
 - **PYL**: Pyrrole (trivalent)
 - **deHHLNL**: Dehydro-hydroxylysino-norleucine (divalent)
-- **deHLNL**: Dehydro-lysino-norleucine Mein Standort
-- **Glucosepane**: Advanced glycation end-product crosslink (C-terminal only, specific species)
+- **deHLNL**: Dehydro-lysino-norleucine (divalent)
+- **Glucosepane**: Advanced glycation end-product crosslink (specific species)
+- **Pentosidine**: Advanced glycation end-product crosslink (specific species)
+- **MOLD**: Non-enzymatic, LYS-LYS derived crosslink
 
 **Residue Combination Examples for Homo Sapiens with HLKNL**:
 - **N-terminal combinations**: "5.B - 944.B", "9.C - 944.B", "9.C - 947.A", "947.A - 5.B"
@@ -144,6 +158,9 @@ These parameters control the sequence generation stage (homology modeling).
 - The `crosslink` parameter must be set to `true` for crosslinking to be applied.
 - The residue combinations specify which residues are involved in crosslinking and must match valid combinations for the chosen species. A complete list of the species and combinations currently available can be found at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv).
 - Residue combinations follow the format: `[Residue Number].[Chain] - [Residue Number].[Chain]` or `[Residue Number].[Chain] - [Residue Number].[Chain] - [Residue Number].[Chain]` for trivalent crosslinks.
+- When adding non-enzymatic crosslinks via `mutated_pdb`, use the crosslink-specific
+  shift listed in `crosslinks.csv` for `crosslink_copies`. Enzymatic crosslinks
+  use D0-D5 by default unless specified otherwise.
 
 ## Geometry Generation Parameters
 
@@ -175,7 +192,10 @@ These parameters control advanced features for creating mixed crosslinked microf
 | `files_mix` | list of strings | | Required if mix_bool is true, paths to PDB files with different crosslink types |
 | `replace_bool` | boolean | false | Enable crosslink replacement (with lysines) |
 | `ratio_replace` | integer | 30 | Percentage of crosslinks to replace |
+| `ratio_replace_scope` | string | "non_enzymatic" | Scope for replacement: enzymatic, non_enzymatic, all |
 | `replace_file` | string, null | null | File with crosslinks to be replaced |
+| `manual_replacements` | list of strings | null | Manual replacement directives |
+| `auto_fix_unpaired` | boolean | false | Auto-detect unpaired enzymatic crosslinks and replace |
 
 **Notes**:
 - The `mix_bool` feature allows creation of heterogeneous crosslinked microfibrils, which more closely resemble natural collagen.
@@ -184,6 +204,7 @@ These parameters control advanced features for creating mixed crosslinked microf
 - The `replace_bool` feature simulates partial crosslinking by replacing some crosslinks with unmodified lysine residues.
 - The `ratio_replace` parameter controls what percentage of crosslinks should be replaced.
 - The `replace_file` parameter specifies the path to the PDB file of a previously generated collagen microfibril.
+- Topology generation can be enabled in the same run after mixing.
 
 ## Topology Generation Parameters
 

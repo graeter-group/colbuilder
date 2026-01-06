@@ -35,6 +35,9 @@ ColBuilder implements a three-stage pipeline:
 3. **Topology Generation**: Prepares files for molecular dynamics simulations
 
 Each stage can be run independently or as a complete pipeline, allowing flexibility in your workflow.
+In addition, ColBuilder supports adding non-enzymatic crosslinks on top of a
+pre-mutated triple helix and mixing multiple PDB variants before topology
+generation.
 
 ## Installation
 
@@ -202,7 +205,39 @@ c_term_combination: "1047.C - 104.C"
 colbuilder --config_file config_sequence.yaml
 ```
 
-### 3. Only Geometry Generation
+### 3. Add Non-Enzymatic Crosslinks (Mutated-PDB Workflow)
+
+This workflow starts from a pre-mutated triple-helix PDB (typically produced
+by a standard enzymatic sequence generation step) and adds one or more
+non-enzymatic crosslinks (AGEs).
+
+```yaml
+# config_non_enzymatic.yaml
+sequence_generator: true
+geometry_generator: false
+topology_generator: false
+species: "rattus_norvegicus"
+mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1046.C - 1046.A - 103.C"
+additional_1_type: "Glucosepane"
+additional_1_combination: "523.A - 286.C"
+crosslink_copies: ["D2", "D1"]
+```
+
+```bash
+colbuilder --config_file config_non_enzymatic.yaml
+```
+
+This produces a new triple-helix PDB with the additional non-enzymatic
+crosslink(s), which can then be used for geometry generation. In this second
+sequence-generation step, set `crosslink_copies` to the required shift listed in
+`src/colbuilder/data/sequence/crosslinks.csv`. Enzymatic crosslinks use D0-D5 by default.
+
+### 4. Only Geometry Generation
 
 This workflow generates the microfibril geometry from an existing PDB:
 
@@ -219,6 +254,28 @@ contact_distance: 20
 
 ```bash
 colbuilder --config_file config_geometry.yaml
+```
+
+### 5. Mix PDB Variants and Generate Topology
+
+Mixing can be used to combine multiple crosslink configurations into a single
+microfibril. Topology generation can follow directly after mixing.
+
+```yaml
+# config_mix_topology.yaml
+sequence_generator: false
+geometry_generator: false
+mix_bool: true
+topology_generator: true
+ratio_mix: "A:80 B:20"
+files_mix:
+ - "variant_A.pdb"
+ - "variant_B.pdb"
+force_field: "amber99"
+```
+
+```bash
+colbuilder --config_file config_mix_topology.yaml
 ```
 
 ## Configuration Options
@@ -238,11 +295,19 @@ working_directory: "./"     # Working directory for input and output files
 sequence_generator: true    # Enable sequence generation
 species: "homo_sapiens"     # Species name
 fasta_file: null            # Custom FASTA file (if null, uses built-in species data)
+mutated_pdb: null           # Use a pre-mutated PDB as input for additional crosslinks
 crosslink: true             # Enable crosslinking
 n_term_type: "HLKNL"        # N-terminal crosslink type
 c_term_type: "HLKNL"        # C-terminal crosslink type
 n_term_combination: "9.C - 947.A"  # N-terminal residue combination
 c_term_combination: "1047.C - 104.C" # C-terminal residue combination
+additional_1_type: null     # Optional non-enzymatic crosslink (e.g., Glucosepane)
+additional_1_combination: null
+additional_2_type: null     # Optional second non-enzymatic crosslink
+additional_2_combination: null
+crosslink_copies: ["D0", "D5"]  # Translation pair for crosslink optimization
+# Non-enzymatic additions should use the shift listed in crosslinks.csv for that crosslink.
+# Enzymatic crosslinks default to D0-D5 unless specified otherwise.
 ```
 
 ### Geometry Generation Options
@@ -266,6 +331,9 @@ files_mix:                  # Required if mix_bool is true
  - "human-D.pdb"            # PDB file with type D crosslinks
  - "human-T.pdb"            # PDB file with type T crosslinks
 ```
+
+When mixing is enabled, topology generation can also be enabled in the same
+run by setting `topology_generator: true`.
 
 ### Replacement Options
 
@@ -338,7 +406,9 @@ Crosslinks definition for custom_species must be added to the file in src/colbui
 
 ### Crosslink Types
 
-ColBuilder supports various crosslink types found in collagen:
+ColBuilder supports various crosslink types found in collagen. The complete,
+species-specific list is maintained in
+`src/colbuilder/data/sequence/crosslinks.csv`; common examples include:
 
 - **HLKNL**: Hydroxylysino-5-ketonorleucine (divalent crosslink)
 - **LKNL**: Lysino-5-ketonorleucine (divalent)
@@ -350,6 +420,8 @@ ColBuilder supports various crosslink types found in collagen:
 - **deHLNL**: Dehydro-lysino-norleucine (divalent)
 - **NOCROSS**: No crosslinking
 - **Glucosepane**: Advanced glycation end-product crosslink (specific species)
+- **Pentosidine**: Advanced glycation end-product crosslink (specific species)
+- **MOLD**: Non-enzymatic, LYS-LYS derived crosslink
 
 Each crosslink type can be positioned in a few combination of selected Lysine residues, depending on the species being modeled. All available crosslinks and respective combinations for each species are listed at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
 
@@ -385,7 +457,8 @@ files_mix:
  - "human-T.pdb"            # triple helix PDB with type T crosslinks
 ```
 
-This feature allows modeling of collagen structures with a mixture of crosslink types.
+This feature allows modeling of collagen structures with a mixture of crosslink
+types and can be chained directly into topology generation.
 
 ### Replacing Crosslinks
 

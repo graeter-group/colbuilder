@@ -49,7 +49,7 @@ print(f"PDB file saved to: {pdb_output}")
 # Distributed under the terms of the Apache License 2.0
 
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 from colorama import Fore, Style
 from colbuilder.core.utils.config import ColbuilderConfig
 from .sequence_generator import SequenceGenerator
@@ -61,7 +61,7 @@ LOG = setup_logger(__name__)
 
 # In colbuilder/core/sequence/main_sequence.py
 
-async def build_sequence(config: ColbuilderConfig) -> Tuple[Path, Path]:
+async def build_sequence(config: ColbuilderConfig) -> Tuple[Optional[Path], Path]:
     """
     Build collagen sequence with structure generation and optional crosslink optimization.
     
@@ -69,7 +69,7 @@ async def build_sequence(config: ColbuilderConfig) -> Tuple[Path, Path]:
         config: Configuration object containing all sequence generation parameters
         
     Returns:
-        Tuple[Path, Path]: Paths to the MSA file and final PDB structure
+        Tuple[Optional[Path], Path]: MSA path (None for mutated PDB workflow) and final PDB structure
     """
     try:
         # Log sequence generation parameters
@@ -89,8 +89,11 @@ async def build_sequence(config: ColbuilderConfig) -> Tuple[Path, Path]:
         final_msa, final_pdb = await generator.generate()
         
         # Log results
-        LOG.info(f"Sequence generation completed successfully")
-        LOG.info(f"  MSA output: {final_msa}")
+        LOG.info("Sequence generation completed successfully")
+        if final_msa is None:
+            LOG.info("  MSA output: None (mutated PDB workflow)")
+        else:
+            LOG.info(f"  MSA output: {final_msa}")
         LOG.info(f"  PDB output: {final_pdb}")
         
         # If crosslinks were optimized, log the optimization results

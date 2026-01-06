@@ -254,11 +254,23 @@ class ColbuilderConfig(BaseModel):
     replace_bool: bool = Field(
         default=False, description="Generate a microfibril with less crosslinks"
     )
+    auto_fix_unpaired: bool = Field(
+        default=False,
+        description="Automatically detect unpaired enzymatic crosslinks and replace them",
+    )
+    ratio_replace_scope: Literal["enzymatic", "non_enzymatic", "all"] = Field(
+        default="non_enzymatic",
+        description="Scope of residues considered for ratio-based replacement",
+    )
     ratio_replace: Optional[float] = Field(
         None, description="Ratio of crosslinks to be replaced"
     )
     replace_file: Optional[Path] = Field(
         None, description="File with crosslinks to be replaced"
+    )
+    manual_replacements: Optional[List[str]] = Field(
+        default=None,
+        description="Manual replacement directives (<pdb> <RES> <resid> <chain>)",
     )
 
     # Topology generation mode
@@ -629,6 +641,24 @@ class ColbuilderConfig(BaseModel):
         """Set ratio mix property."""
         self._ratio_mix = self._convert_ratio_mix(value)
 
+    @field_validator("manual_replacements", mode="before")
+    def validate_manual_replacements(
+        cls, value: Optional[Union[str, List[str], Tuple[str, ...]]]
+    ) -> Optional[List[str]]:
+        """Normalize manual replacement directives."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = [line.strip() for line in value.splitlines() if line.strip()]
+            return cleaned or None
+        if isinstance(value, (list, tuple)):
+            cleaned = [str(v).strip() for v in value if str(v).strip()]
+            return cleaned or None
+        raise ConfigurationError(
+            f"Invalid manual_replacements type: {type(value).__name__}",
+            error_code="CFG_ERR_006",
+        )
+
     def set_mode(self):
         """Set operation mode based on configuration flags."""
         self.mode = OperationMode.NONE
@@ -641,6 +671,8 @@ class ColbuilderConfig(BaseModel):
         if self.mix_bool:
             self.mode |= OperationMode.MIX
         if self.replace_bool:
+            self.mode |= OperationMode.REPLACE
+        if self.auto_fix_unpaired:
             self.mode |= OperationMode.REPLACE
 
     def validate_paths(self):
@@ -771,9 +803,21 @@ class ColbuilderConfig(BaseModel):
     def validate_replace_config(self) -> "ColbuilderConfig":
         """Validate replacement configuration."""
         if self.replace_bool:
-            if self.ratio_replace is None and self.replace_file is None:
+            has_manual_replacements = bool(self.manual_replacements)
+            if self.geometry_generator:
+                if self.ratio_replace is None and not has_manual_replacements:
+                    raise ConfigurationError(
+                        "Either ratio_replace or manual_replacements must be specified when replace_bool is True with geometry generation",
+                        error_code="CFG_ERR_006",
+                    )
+            elif self.ratio_replace is None and self.replace_file is None and not has_manual_replacements:
                 raise ConfigurationError(
-                    "Either ratio_replace or replace_file must be specified when replace_bool is True",
+                    "Either ratio_replace, replace_file, or manual_replacements must be specified when replace_bool is True",
+                    error_code="CFG_ERR_006",
+                )
+            if self.ratio_replace_scope not in {"enzymatic", "non_enzymatic", "all"}:
+                raise ConfigurationError(
+                    "ratio_replace_scope must be one of: enzymatic, non_enzymatic, all",
                     error_code="CFG_ERR_006",
                 )
             if self.ratio_replace is not None:

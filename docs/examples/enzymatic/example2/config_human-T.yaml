@@ -1,0 +1,10 @@
+species: "homo_sapiens"
+sequence_generator: true
+geometry_generator: false 
+working_directory: "./"  
+crosslink: true              # Enable crosslinking in the model
+n_term_type: "PYD"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "PYD"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1047.C - 1047.A - 104.C" 
+

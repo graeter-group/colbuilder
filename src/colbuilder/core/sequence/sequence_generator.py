@@ -145,12 +145,12 @@ class SequenceGenerator:
 
             self._temp_dir = None
 
-    async def generate(self) -> Tuple[Path, Path]:
+    async def generate(self) -> Tuple[Optional[Path], Path]:
         """
         Generate collagen structure from sequence or apply additional mutations.
         
         Returns:
-            Tuple[Path, Path]: Paths to final MSA and PDB files
+            Tuple[Optional[Path], Path]: MSA path (None for mutated PDB workflow) and final PDB
             
         Raises:
             SequenceGenerationError: If generation fails
@@ -164,12 +164,12 @@ class SequenceGenerator:
         else:
             return await self._process_from_sequence()
 
-    async def _process_mutated_pdb(self) -> Path:
+    async def _process_mutated_pdb(self) -> Tuple[Optional[Path], Path]:
         """
         Process a pre-mutated PDB file with additional crosslinks.
         
         Returns:
-            Tuple[Path, Path]: Paths to final MSA and PDB files
+            Tuple[Optional[Path], Path]: MSA path (None for mutated PDB workflow) and final PDB
             
         Raises:
             SequenceGenerationError: If processing fails
@@ -226,7 +226,7 @@ class SequenceGenerator:
                 final_output = await self._finalize_output_mutated(temp_pdb, file_prefix)
                 final_pdb = self.file_manager.copy_to_output(final_output)
                 
-                return final_pdb
+                return None, final_pdb
                 
             except Exception as e:
                 LOG.error(f"Error processing mutated PDB: {str(e)}", exc_info=True)

@@ -1,0 +1,27 @@
+species: "rattus_norvegicus"
+sequence_generator: true
+geometry_generator: false
+topology_generator: false
+working_directory: "./"
+
+# Input from stage 1 (divalent enzymatic HLKNL)
+mutated_pdb: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"
+
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 944.B"
+c_term_combination: "1046.C - 103.C"
+
+# Add one non-enzymatic crosslink (AGE)
+additional_1_type: "Glucosepane"
+additional_1_combination: "523.A - 286.C"
+additional_2_type: null
+additional_2_combination: null
+
+# Custom shift/copies used during this AGE addition
+crosslink_copies: ["D2", "D1"]
+
+# Geometry not run here; this stage just writes a new PDB
+contact_distance: 25
+fibril_length: 68
