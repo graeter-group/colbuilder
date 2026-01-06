@@ -205,9 +205,7 @@ These mode combinations can be run **in a single configuration file**:
 
 Mixing crosslinks (**Mode 4**) requires a dedicated config that lists the input
 PDBs produced by sequence generation. You can also enable topology generation
-in the same run.
-
-[example](docs/examples/non-enzymatic/example3-mix)
+in the same run (Mode 3). See the mixing example in [example](docs/examples/non-enzymatic/example3-mix)
 
 ```bash
 # Example bash script for mixing crosslinks
@@ -215,9 +213,6 @@ colbuilder --config_file triple_helix_A.yaml
 colbuilder --config_file triple_helix_B.yaml
 colbuilder --config_file mix_geometry.yaml   # sets mix_bool: true and includes both PDBs
 ```
-
-You can also chain this with topology_generator (Mode 3). See the mixing example in
-[docs/examples/non-enzymatic/example3-mix](docs/examples/non-enzymatic/example3-mix).
 
 ## 📖 Usage Guide
 
