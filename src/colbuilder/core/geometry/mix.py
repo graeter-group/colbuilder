@@ -57,6 +57,60 @@ class Mix:
         self.system = system
         self.connect_mix: Dict[float, str] = connect_mix or {}
     
+    def _build_components(self, model_ids: List[float]) -> List[List[float]]:
+        """
+        Build connected components from the system connectivity. Models with no
+        connectivity information are treated as single-node components.
+        """
+        components: List[List[float]] = []
+        visited = set()
+
+        for model_id in model_ids:
+            if model_id in visited:
+                continue
+            stack = [model_id]
+            comp: List[float] = []
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                comp.append(current)
+                try:
+                    neighbors = self.system.get_model(model_id=current).connect or []
+                except Exception:
+                    neighbors = []
+                for neigh in neighbors:
+                    if neigh not in visited:
+                        stack.append(neigh)
+            components.append(sorted(comp))
+        components.sort(key=lambda c: (-len(c), c[0]))
+        return components
+
+    def _compute_targets(self, total_models: int) -> Dict[str, int]:
+        """
+        Compute deterministic model counts per type from the requested ratios.
+        Fractions are distributed starting from the largest remainders to keep
+        the final sum equal to ``total_models``.
+        """
+        total_ratio = float(sum(self.ratio_mix.values())) or 1.0
+        raw = {
+            t: (self.ratio_mix[t] / total_ratio) * total_models for t in self.ratio_mix
+        }
+
+        targets = {t: int(np.floor(v)) for t, v in raw.items()}
+        remainder = total_models - sum(targets.values())
+        if remainder > 0:
+            # Assign leftover models to the types with the largest fractional part
+            fractions = sorted(
+                ((t, raw[t] - targets[t]) for t in self.ratio_mix),
+                key=lambda x: (-x[1], -self.ratio_mix[x[0]]),
+            )
+            for i in range(remainder):
+                t, _ = fractions[i % len(fractions)]
+                targets[t] += 1
+        return targets
+
     def add_mix(self, ratio_mix: Optional[Dict[str, int]] = None, system: Optional[Any] = None) -> Any:
         """
         Add or update the mix ratio and system.
@@ -93,107 +147,55 @@ class Mix:
             LOG.debug(f"Converted ratio_mix from string: {self.ratio_mix}")
 
         total_models = self.system.get_size()
-        
         model_ids = list(self.system.get_models())
-        
-        total_ratio = sum(self.ratio_mix.values())
-        type_counts = {}
-        remaining = total_models
-        
-        for type_name, ratio in sorted(self.ratio_mix.items(), key=lambda x: x[1], reverse=True):
-            count = max(1, int((ratio / total_ratio) * total_models))
-            type_counts[type_name] = count
-            remaining -= count
-        
-        if remaining > 0:
-            for type_name in sorted(type_counts.keys(), key=lambda x: self.ratio_mix[x], reverse=True):
-                type_counts[type_name] += 1
-                remaining -= 1
-                if remaining == 0:
+
+        # Build targets from ratios and keep connected components together
+        target_counts = self._compute_targets(total_models)
+        components = self._build_components(model_ids)
+
+        # Deterministic assignment: largest components go to the type with the
+        # highest remaining need. If all needs are met, fall back to the top-ratio type.
+        remaining = target_counts.copy()
+        fallback_type = max(self.ratio_mix, key=self.ratio_mix.get)
+        assigned_types: Dict[float, str] = {}
+
+        type_order = sorted(self.ratio_mix, key=self.ratio_mix.get, reverse=True)
+        type_idx = 0
+
+        for comp in components:
+            # Round-robin across types with remaining quota to avoid starving small ratios
+            chosen = None
+            for _ in range(len(type_order)):
+                candidate = type_order[type_idx % len(type_order)]
+                type_idx += 1
+                if remaining.get(candidate, 0) > 0:
+                    chosen = candidate
                     break
-        
-        connected_components = []
-        visited = set()
-        
-        for model_id in model_ids:
-            if model_id in visited:
-                continue
-                
-            component = set()
-            queue = [model_id]
-            
-            while queue:
-                current_id = queue.pop(0)
-                if current_id in component:
-                    continue
-                    
-                component.add(current_id)
-                visited.add(current_id)
-                
-                current_model = self.system.get_model(model_id=current_id)
-                if hasattr(current_model, 'connect') and current_model.connect:
-                    for connect_id in current_model.connect:
-                        if connect_id not in component and connect_id in model_ids:
-                            queue.append(connect_id)
-            
-            if component:
-                connected_components.append(component)
-        
-        connected_components.sort(key=len, reverse=True)
-        
-        type_assignments = {t: 0 for t in type_counts.keys()}
-        assigned_types = {}
-        
-        for component in connected_components:
-            available_types = [t for t in type_counts.keys() if type_assignments[t] < type_counts[t]]
-            
-            if not available_types:
-                chosen_type = max(self.ratio_mix.keys(), key=lambda t: self.ratio_mix[t])
-            else:
-                percentages = {
-                    t: type_assignments[t] / type_counts[t]
-                    for t in available_types
-                }
-                
-                chosen_type = min(percentages.keys(), key=lambda t: percentages[t])
-            
-            for model_id in component:
-                assigned_types[model_id] = chosen_type
-            
-            type_assignments[chosen_type] += len(component)
-            
+
+            type_choice = chosen or fallback_type
+
+            for mid in comp:
+                assigned_types[mid] = type_choice
+
+            remaining[type_choice] = remaining.get(type_choice, 0) - len(comp)
+
         # Apply the assigned types to each model
         for model_id in model_ids:
-            if model_id in assigned_types:
-                model = self.system.get_model(model_id=model_id)
-                model_type = assigned_types[model_id]
-                
-                model.type = model_type
-                model.crosslink_type = model_type
-                
-                LOG.debug(f"Assigned type {model.type} to model {model_id}")
-                
-                # Set the type for connected models too
-                if hasattr(model, 'connect') and model.connect:
-                    for connect_id in model.connect:
-                        try:
-                            connected_model = self.system.get_model(model_id=connect_id)
-                            connected_model.type = model_type
-                            connected_model.crosslink_type = model_type
-                        except Exception as e:
-                            LOG.warning(f"  - Could not set type for connected model {connect_id}: {e}")
-            else:
-                LOG.warning(f"Model {model_id} was not assigned a type")
-        
+            model = self.system.get_model(model_id=model_id)
+            model_type = assigned_types.get(model_id, fallback_type)
+            model.type = model_type
+            model.crosslink_type = model_type
+            LOG.debug(f"Assigned type {model.type} to model {model_id}")
+
         # Log the final type distribution
-        actual_distribution = {}
+        actual_distribution: Dict[str, int] = {}
         for model_id in model_ids:
             model = self.system.get_model(model_id=model_id)
             if hasattr(model, 'type'):
                 actual_distribution[model.type] = actual_distribution.get(model.type, 0) + 1
-        
-        LOG.info(f"     Final type distribution: {actual_distribution}")
-        
+
+        LOG.info(f"     Final type distribution: {actual_distribution} (targets: {target_counts})")
+
         return self.system
 
     def get_mix(self, ratio_mix: Optional[List[int]] = None) -> str:

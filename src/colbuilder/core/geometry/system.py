@@ -273,10 +273,12 @@ class System:
         
         model_types = set()
         model_type_count = {}
-        for model in self.system.values():
+        models_by_type: Dict[str, List[float]] = {}
+        for model_id, model in self.system.items():
             if hasattr(model, 'type') and model.type:
                 model_types.add(model.type)
                 model_type_count[model.type] = model_type_count.get(model.type, 0) + 1
+                models_by_type.setdefault(model.type, []).append(model_id)
 
         LOG.debug(f"Model type counts: {model_type_count}")
         
@@ -301,18 +303,6 @@ class System:
                     caps_by_type[model_type].append(connect_id)
                 except (ValueError, IndexError):
                     continue
-        
-        has_connections = False
-        models_with_connections = 0
-        models_by_type_with_connections = {}
-        for model_id, model in self.system.items():
-            if getattr(model, 'connect', None): 
-                has_connections = True
-                models_with_connections += 1
-                model_type = getattr(model, 'type', 'unknown')
-                models_by_type_with_connections[model_type] = models_by_type_with_connections.get(model_type, 0) + 1
-        
-        LOG.debug(f"Models with connections: {models_with_connections} out of {len(self.system)}")
         
         try:
             crystal_header = None
@@ -339,52 +329,22 @@ class System:
                         model_type = getattr(model, 'type', 'unknown')
                         written_by_type[model_type] = written_by_type.get(model_type, 0) + 1
                 
-                if has_connections:
-                    for model_id, model in self.system.items():
-                        if not model.connect:
+                # Write one caps file per model id, respecting the assigned type.
+                for model_type, ids in models_by_type.items():
+                    for model_id in sorted(ids):
+                        key = (model_type, float(model_id))
+                        if key in written_caps_files:
                             continue
-                        
-                        model_type = getattr(model, 'type', 'unknown')
-                        for connect_id in model.connect:
-                            connect_float = float(connect_id)
-                            key = (model_type, connect_float)
-                            
-                            if key in written_caps_files:
-                                continue
-                                
-                            caps_file = caps_by_model.get(key)
-                            
-                            if not caps_file:
-                                LOG.warning(f"No caps file found for model {model_id} type {model_type} connect {connect_id}")
-                                continue
-                            
-                            self._write_caps_file_content(f, caps_file)
-                            written_connections += 1
-                            written_by_type[model_type] = written_by_type.get(model_type, 0) + 1
-                            written_caps_files.add(key)
-                else:
-                    for model_type in model_types:
-                        models_of_type = [model for model in self.system.values() 
-                                        if hasattr(model, 'type') and model.type == model_type]
-                        
-                        if not models_of_type:
+                        caps_file = caps_by_model.get(key)
+                        if not caps_file:
+                            LOG.warning(
+                                f"No caps file found for model {model_id} type {model_type}"
+                            )
                             continue
-                            
-                        caps_ids = set(caps_by_type.get(model_type, []))
-                        
-                        for connect_id in caps_ids:
-                            key = (model_type, connect_id)
-                            
-                            if key in written_caps_files:
-                                continue
-                                
-                            caps_file = caps_by_model.get(key)
-                            if caps_file:
-                                LOG.debug(f"Writing caps file {caps_file} for type {model_type}")
-                                self._write_caps_file_content(f, caps_file)
-                                written_connections += 1
-                                written_by_type[model_type] = written_by_type.get(model_type, 0) + 1
-                                written_caps_files.add(key)
+                        self._write_caps_file_content(f, caps_file)
+                        written_connections += 1
+                        written_by_type[model_type] = written_by_type.get(model_type, 0) + 1
+                        written_caps_files.add(key)
                 
                 f.write("END\n")
             

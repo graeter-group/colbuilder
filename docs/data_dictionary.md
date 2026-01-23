@@ -43,6 +43,12 @@ The most commonly used parameters for ColBuilder configuration:
 | c_term_type | C-terminal crosslink type | "HLKNL" | If crosslink=true |
 | n_term_combination | string | N-terminal residue combination | "9.C - 947.A" | If crosslink=true |
 | c_term_combination | string | C-terminal residue combination | "1047.C - 104.C" | If crosslink=true |
+| mutated_pdb | Pre-mutated PDB for additional crosslinks | "rattusnorvegicus_N_PYD_C_PYD.pdb" | Optional |
+| additional_1_type | First non-enzymatic crosslink | "Glucosepane" | Optional |
+| additional_1_combination | First non-enzymatic combination | "523.A - 286.C" | If additional_1_type |
+| additional_2_type | Second non-enzymatic crosslink | "Pentosidine" | Optional |
+| additional_2_combination | Second non-enzymatic combination | "523.A - 286.C" | If additional_2_type |
+| crosslink_copies | Translation pair for optimization | ["D0", "D5"] | Optional |
 | fibril_length | Length of microfibril (nm) | 60.0 | For geometry |
 | contact_distance | Contact distance (Å) | 20 | For geometry |
 | force_field | Force field for topology | "amber99" | For topology |
@@ -66,6 +72,12 @@ The most commonly used parameters for ColBuilder configuration:
 | species | string | Species name for sequence and crosslinks | One of supported species* or custom name | Required |
 | fasta_file | Path | Path to input FASTA file | Valid FASTA file path or null | Auto-generated based on species |
 | crosslink | boolean | Enable crosslinking in the model | true/false | false |
+| mutated_pdb | Path | Input PDB for additional crosslinks | Valid PDB file path or null | None |
+| additional_1_type | string | First non-enzymatic crosslink type | e.g., "Glucosepane" | None |
+| additional_1_combination | string | Residue combination for additional_1 | Valid combination | None |
+| additional_2_type | string | Second non-enzymatic crosslink type | e.g., "Pentosidine" | None |
+| additional_2_combination | string | Residue combination for additional_2 | Valid combination | None |
+| crosslink_copies | list | Translation pair for crosslink optimization | ["D0", "D5"] | ["D0", "D5"] |
 
 *Supported species: homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii, mus_musculus, rattus_norvegicus, bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana, danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus, pelodiscus_sinensis
 
@@ -73,12 +85,17 @@ The most commonly used parameters for ColBuilder configuration:
 
 | Parameter | Type | Description | Valid Values | Example |
 |-----------|------|-------------|--------------|---------|
-| n_term_type | string | N-terminal crosslink type | "DPD", "DPL", "HLKNL", "LKNL", "NOCROSS", "PYD", "PYL", "deHHLNL", "deHLNL" | "HLKNL" |
+| n_term_type | string | N-terminal crosslink type | "DPD", "DPL", "HLKNL", "LKNL", "NOCROSS", "PYD", "PYL", "deHHLNL", "deHLNL", "MOLD" | "HLKNL" |
 | c_term_type | string | C-terminal crosslink type | Same as n_term_type | "HLKNL" |
 | n_term_combination | string | N-terminal residue combination | Format: "ResNum.Chain - ResNum.Chain" | "9.C - 947.A" |
 | c_term_combination | string | C-terminal residue combination | Format: "ResNum.Chain - ResNum.Chain" | "1047.C - 104.C" |
 
 *Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
+
+**Shift Note**:
+- For the additional non-enzymatic step (`mutated_pdb`), set `crosslink_copies`
+  to the shift listed in `crosslinks.csv` for the selected crosslink/position.
+  Enzymatic crosslinks default to D0-D5 unless specified otherwise.
 
 **Validation Rules**:
 - For human (homo_sapiens) HLKNL crosslinks, valid N-terminal combinations include: "5.B - 944.B", "9.C - 944.B", "9.C - 947.A", "947.A - 5.B"
@@ -111,7 +128,10 @@ The most commonly used parameters for ColBuilder configuration:
 | files_mix | List of Paths | PDB files with different crosslink types | Valid PDB file paths | [] |
 | replace_bool | boolean | Replace crosslinks with lysines | true/false | false |
 | ratio_replace | float | Percentage of crosslinks to replace | 0-100 | None |
+| ratio_replace_scope | string | Scope for replacement | "enzymatic", "non_enzymatic", "all" | "non_enzymatic" |
 | replace_file | Path | Input PDB file of fibril with crosslinks to be replaced | Valid file path | None |
+| manual_replacements | List[str] | Manual replacement directives | Valid directives | None |
+| auto_fix_unpaired | boolean | Auto-detect unpaired enzymatic crosslinks | true/false | false |
 
 **Validation Rules**:
 - When mix_bool=true, ratio_mix and files_mix must be provided

@@ -120,6 +120,22 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         type="D",
                     )
                 )
+            elif (
+                line[17:20] == "LZS" and line[12:16].strip() == "NZ1"
+            ) or (line[17:20] == "LZD" and line[12:16].strip().startswith("CE")):
+                crosslinks.append(
+                    Crosslink(
+                        resid=line[22:26].strip(),
+                        resname=line[17:20],
+                        chain=line[21],
+                        position=[
+                            float(line[29:38]),
+                            float(line[38:46]),
+                            float(line[46:56]),
+                        ],
+                        type="D",
+                    )
+                )
             elif (line[17:20] in ("LGX", "LPS") and line[13:15] == "CE") or (
                 line[17:20] in ("AGS", "APD") and line[13:15] == "NZ"
             ):

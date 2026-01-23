@@ -1,0 +1,10 @@
+species: "rattus_norvegicus"
+sequence_generator: true
+geometry_generator: false 
+working_directory: "./"  
+crosslink: true              # Enable crosslinking in the model
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 944.B"
+c_term_combination: "1046.C - 103.C"
+

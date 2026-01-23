@@ -1,0 +1,76 @@
+  # ================================================================================
+  # ColBuilder Configuration File
+  # ================================================================================
+  # This configuration file controls the ColBuilder pipeline for generating collagen
+  # structures. The pipeline consists of three main modules that can be run
+  # independently or in combination:
+  #
+  # 1. SEQUENCE GENERATOR: Creates collagen triple helix structures from sequences
+  # 2. GEOMETRY GENERATOR: Builds collagen microfibrils from triple helices
+  # 3. TOPOLOGY GENERATOR: Generates force field topologies for simulations
+  #
+  # IMPORTANT: When using additional crosslinks with a pre-mutated PDB,
+  # e.g. to add AGE crosslinks:
+  # - Run sequence generation first to apply and optimize additional crosslinks
+  # - Then run geometry generation in a separate execution using the output PDB
+  # - This two-step process is required for the specialized crosslink workflow
+  # ================================================================================
+
+  # Operation Mode
+  mode: null
+  config_file: null
+  sequence_generator: false    # Generate triple helix structure from sequence
+  geometry_generator: true    # Build microfibril from triple helix
+  topology_generator: true   # Generate simulation topology files
+  debug: false                 # Keep intermediate files for debugging
+  working_directory: "./"      # Directory for output files
+
+  # ================================================================================
+  # SEQUENCE GENERATION SETTINGS
+  # ================================================================================
+  species: "rattus_norvegicus"  # Available options: see docs
+  mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+  fasta_file: null  # Path to custom FASTA file, or null to use species sequence
+
+  # ================================================================================
+  # CROSSLINK CONFIGURATION
+  # ================================================================================
+  crosslink: true  # Enable crosslink application and optimization
+
+  # Terminal crosslinks (applied during standard sequence generation)
+  n_term_type: "PYD"              # N-terminal crosslink type
+  c_term_type: "PYD"              # C-terminal crosslink type                                                                                                                                     
+  n_term_combination: "9.C - 5.B - 944.B" 
+  c_term_combination: "1046.C - 1046.A - 103.C"
+
+  # Additional crosslinks (for mutated PDB workflow)
+  additional_1_type: "Glucosepane"
+  additional_2_type: null
+  additional_1_combination: "523.A - 286.C"
+  additional_2_combination: null
+
+  # Crosslink optimization settings
+  crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D2-D1
+
+  # ================================================================================
+  # GEOMETRY GENERATION SETTINGS
+  # ================================================================================
+  pdb_file: "rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
+  contact_distance: 25
+  fibril_length: 67
+  crystalcontacts_file: null
+  connect_file: null
+  crystalcontacts_optimize: false
+
+  # ================================================================================
+  # REPLACEMENT OPTIONS
+  # ================================================================================
+  replace_bool: true     # 2a run: metti true per attivare il ratio/manual replace
+  ratio_replace: 30        # es. 30 per sostituire il 30% dei marker selezionati
+  ratio_replace_scope: "all"  # enzymatic | non_enzymatic | all
+
+  # ================================================================================
+  # TOPOLOGY GENERATION SETTINGS
+  # ================================================================================
+  force_field: "amber99"
+  topology_debug: true

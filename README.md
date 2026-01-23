@@ -22,7 +22,7 @@
   - [📊 Mode Summary Table](#-mode-summary-table)
   - [🔁 Valid Mode Combinations](#-valid-mode-combinations)
   - [✅ Valid Workflows](#-valid-workflows)
-  - [🔧 Mode 4 (Mixing Crosslinks): Run Separately via Script](#-mode-4-mixing-crosslinks-run-separately-via-script)
+  - [🔧 Mode 4 (Mixing Crosslinks + Topology)](#-mode-4-mixing-crosslinks--topology)
 - [📖 Usage Guide](#-usage-guide)
   - [Basic Usage](#basic-usage)
   - [Configuration Options](#configuration-options)
@@ -45,6 +45,8 @@
 - **Custom microfibril generation**: Create collagen microfibrils from individual molecules or amino acid sequences with precise control over structural parameters
 - **Highly configurable**: Adjust collagen sequence, fibril geometry, crosslink types and density to match your custom conditions
 - **Simulation-ready output**: Generate atomistic and coarse-grained topology files compatible with major molecular dynamics packages
+- **Non-enzymatic crosslinks**: Add AGE crosslinks on top of a pre-mutated triple helix using the mutated-PDB workflow
+- **Mixing + topology**: Mix multiple crosslink configurations and generate topology in the same run
 - **Reproducible research**: Standardized approach to collagen modeling to ensure consistency across studies
 
 ## 🚀 Installation
@@ -167,7 +169,7 @@ Understanding this distinction is crucial for organizing your workflow correctly
 | 1 | `sequence_generator` | Generate a collagen triple helix molecule via homology modeling | `species` or custom FASTA | Triple helix PDB | Yes: with 2, 3, 5 |
 | 2 | `geometry_generator` | Assemble a collagen fibril from a single triple helix | PDB from Mode 1 or custom PDB | Fibril PDB | Yes: with 1, 3, 5 |
 | 3 | `topology_generator` | Generate topology files for GROMACS simulations | Fibril PDB (from Mode 2, 4, or 5) | `.top`, `.itp`, `.gro` | Yes: with 2, 4, 5 |
-| 4 | `mix_bool` | Generate a fibril by mixing two crosslink types | Two triple helix PDBs from Mode 1 | Mixed fibril PDB | No, requires separate script |
+| 4 | `mix_bool` | Generate a fibril by mixing multiple crosslink types | Multiple triple helix PDBs | Mixed fibril PDB | Yes: with 3 |
 | 5 | `replace_bool` | Replace crosslinks in an existing fibril | Fibril PDB from Mode 2 or 4 | Modified fibril PDB | Yes: with 2, 3 |
 
 ---
@@ -189,20 +191,21 @@ replace_bool: true               # (optional)
 These mode combinations can be run **in a single configuration file**:
 
 - ✅ `1 + 2`
-- ✅ `1 + 2 + 3` - [example](docs/examples/)
+- ✅ `1 + 2 + 3` - [example](docs/examples/enzymatic)
 - ✅ `2 + 3` *(starting from a custom triple helix PDB)*
 - ✅ `1 + 2 + 5 + 3`
 - ✅ `1 + 2 + 5`
-- ✅ `2 + 5` - [example](docs/examples/)
+- ✅ `2 + 5` - [example](docs/examples/enzymatic)
 - ✅ `2 + 5 + 3`
+- ✅ `4 + 3` *(mixing with topology generation)* - [example](docs/examples/non-enzymatic)
 
 ---
 
-### 🔧 Mode 4 (Mixing Crosslinks): Run Separately via Script
+### 🔧 Mode 4 (Mixing Crosslinks + Topology)
 
-Mixing crosslinks (**Mode 4**) currently requires a separate workflow using two config files for triple helix generation and one for fibril construction:
-
-[example](docs/examples/)
+Mixing crosslinks (**Mode 4**) requires a dedicated config that lists the input
+PDBs produced by sequence generation. You can also enable topology generation
+in the same run (Mode 3). See the mixing example in [example](docs/examples/non-enzymatic/example3-mix)
 
 ```bash
 # Example bash script for mixing crosslinks
@@ -210,8 +213,6 @@ colbuilder --config_file triple_helix_A.yaml
 colbuilder --config_file triple_helix_B.yaml
 colbuilder --config_file mix_geometry.yaml   # sets mix_bool: true and includes both PDBs
 ```
-
-You can also chain this with replace_bool (Mode 5) or topology_generator (Mode 3) in the third config.
 
 ## 📖 Usage Guide
 
@@ -247,12 +248,19 @@ species: "homo_sapiens"      # Species for collagen sequence
 
 # Sequence Settings
 fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
+mutated_pdb: null            # Use a pre-mutated PDB as input for additional crosslinks
 crosslink: true              # Enable crosslinking in the model
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
-n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
-c_term_type: "HLKNL"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_type: "HLKNL"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "MOLD", "NONE") 
+c_term_type: "HLKNL"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "MOLD", "NONE")
 n_term_combination: "9.C - 947.A"    # N-terminal residue combination
 c_term_combination: "1047.C - 104.C" # C-terminal residue combination
+additional_1_type: null      # Optional non-enzymatic crosslink (e.g., Glucosepane)
+additional_1_combination: null
+additional_2_type: null      # Optional second non-enzymatic crosslink
+additional_2_combination: null
+crosslink_copies: ["D0", "D5"] # Translation pair for crosslink optimization
+# For non-enzymatic additions, use the shift listed in crosslinks.csv for that crosslink.
 
 # Geometry Parameters
 pdb_file: null               # Input PDB file (set to null if sequence_generator is true)
@@ -272,6 +280,9 @@ files_mix:                   # Required if mix_bool is true
 # Replacement Options (for fewer crosslinks)
 replace_bool: false          # Enable crosslink replacement
 ratio_replace: 30            # Percentage of crosslinks to replace
+ratio_replace_scope: "all"   # enzymatic | non_enzymatic | all
+manual_replacements: null    # Optional manual replacement directives
+auto_fix_unpaired: false     # Auto-detect unpaired enzymatic crosslinks
 replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
 
 # Topology Options
@@ -317,6 +328,31 @@ contact_distance: 15
 ```bash
 colbuilder --config_file config_bovine_crosslinked.yaml
 ```
+
+#### Adding Non-Enzymatic Crosslinks (Mutated-PDB Workflow)
+
+```yaml
+# config_non_enzymatic.yaml
+species: "rattus_norvegicus"
+sequence_generator: true
+geometry_generator: false
+mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1046.C - 1046.A - 103.C"
+additional_1_type: "Glucosepane"
+additional_1_combination: "523.A - 286.C"
+crosslink_copies: ["D2", "D1"]
+```
+
+```bash
+colbuilder --config_file config_non_enzymatic.yaml
+```
+
+For non-enzymatic additions, set `crosslink_copies` to the shift listed in
+`src/colbuilder/data/sequence/crosslinks.csv` for the selected crosslink.
 
 #### Creating a Mixed Crosslinked (80% Divalent + 20% Trivalent) Human Collagen Microfibril from Collagen Molecules
 

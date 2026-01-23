@@ -189,7 +189,7 @@ def display_title() -> None:
 
 
 @timeit
-async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Path, Path]:
+async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Optional[Path], Path]:
     """
     Generate coordinates for collagen molecule from sequence information.
 
@@ -200,7 +200,7 @@ async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Path, Path]
         config: Configuration settings
 
     Returns:
-        Tuple containing paths to MSA and final PDB files
+        Tuple containing the MSA path (None for mutated PDB workflow) and the final PDB path
 
     Raises:
         SequenceGenerationError: If sequence generation fails
@@ -311,43 +311,137 @@ async def run_topology_generation(
     existing_system: Optional[System] = None,
     file_manager: Optional[FileManager] = None,
 ) -> Tuple[Path, Path]:
+    from colbuilder.core.geometry.model import Model
+    from colbuilder.core.geometry.system import System
+    from colbuilder.core.geometry.geometry_replacer import CrosslinkReplacer
+
     try:
         if file_manager is None:
             file_manager = FileManager(config)
 
-        geometry_dir = Path(".tmp") / "geometry_gen"
-        if not geometry_dir.exists():
-            geometry_dir = Path.cwd() / ".tmp" / "geometry_gen"
+        if config.replace_bool and getattr(config, "auto_fix_unpaired", False):
+            cap_candidates = [Path(".tmp") / "replace_manual", Path.cwd() / ".tmp" / "replace_manual"]
+        elif config.replace_bool and not getattr(config, "auto_fix_unpaired", False):
+            cap_candidates = [Path(".tmp") / "geometry_gen", Path.cwd() / ".tmp" / "geometry_gen"]
+        elif (not config.replace_bool) and getattr(config, "auto_fix_unpaired", False):
+            cap_candidates = [Path(".tmp") / "replace_manual", Path.cwd() / ".tmp" / "replace_manual"]
+        elif getattr(config, "mix_bool", False):
+            cap_candidates = [Path(".tmp") / "mixing_crosslinks", Path.cwd() / ".tmp" / "mixing_crosslinks"]
+        else:  # default: use geometry_gen
+            cap_candidates = [Path(".tmp") / "geometry_gen", Path.cwd() / ".tmp" / "geometry_gen"]
 
-        if geometry_dir.exists():
-            LOG.debug(f"Found geometry directory: {geometry_dir}")
+        geometry_dir = next((p for p in cap_candidates if p.exists()), None)
+
+        if geometry_dir:
+            LOG.debug(f"Found caps directory: {geometry_dir}")
             cap_files = list(geometry_dir.glob("**/*.caps.pdb"))
-            LOG.debug(f"Found {len(cap_files)} cap files in geometry directory")
+            LOG.debug(f"Found {len(cap_files)} cap files in caps directory")
         else:
-            LOG.warning(f"Geometry directory not found: {geometry_dir}")
+            LOG.warning("No geometry or replacement directory with caps files was found.")
+            cap_files = []
 
-        # Use existing system if provided
-        if existing_system:
-            LOG.info(
-                f"{Fore.BLUE}Using existing system from geometry generation{Style.RESET_ALL}"
-            )
-            system = existing_system
+        # For mixed systems, rebuild caps/connect from the final mixed PDB so topology
+        # can rely on a DT folder generated the same way as ratio_replace direct mode.
+        rebuilt_from_mix: Optional[System] = None
+        if config.mix_bool and system_path and Path(system_path).exists():
+            try:
+                mixing_dir = file_manager.ensure_mixing_dir()
+                prep_dir = mixing_dir / "topology_caps"
+                if prep_dir.exists():
+                    shutil.rmtree(prep_dir)
+                prep_dir.mkdir(parents=True, exist_ok=True)
 
-            model_count = len(list(system.get_models()))
-
-            for model_id in system.get_models():
-                model = system.get_model(model_id=model_id)
-                if model:
-                    LOG.debug(
-                        f"Model {model_id} - Type: {model.type if hasattr(model, 'type') else 'Unknown'}"
+                replacer = CrosslinkReplacer()
+                replacer._split_pdb_into_models(Path(system_path), prep_dir)
+                rebuilt_from_mix = replacer._categorize_caps_and_build_system(
+                    base_dir=mixing_dir,
+                    source_dir=prep_dir,
+                    reference_pdb=Path(system_path),
+                )
+                if rebuilt_from_mix:
+                    replacer._recompute_connectivity_from_caps(
+                        rebuilt_from_mix, mixing_dir
                     )
-        else:
-            LOG.info("Creating new system from PDB file")
-            from colbuilder.core.geometry.crystal import Crystal
-            from colbuilder.core.geometry.system import System
+                    geometry_dir = mixing_dir
+                    cap_files = list(geometry_dir.glob("**/*.caps.pdb"))
+                    LOG.info(
+                        f"Prepared mixed caps for topology under {geometry_dir} using final PDB."
+                    )
+            except Exception as e:
+                LOG.warning(
+                    "Failed to prepare mixed caps/connectivity for topology: %s", e
+                )
+                # Fallback: still prefer mixing directory if it exists
+                if file_manager.mixing_dir.exists():
+                    geometry_dir = file_manager.mixing_dir
 
-            crystal = Crystal(pdb=str(system_path))
-            system = System(crystal=crystal)
+        # Use existing system if provided and populated; otherwise rebuild a minimal one from caps/connect
+        system = rebuilt_from_mix or existing_system
+        if system and not list(system.get_models()):
+            LOG.debug("Existing system provided but empty; will rebuild from caps.")
+            system = None
+
+        if not system:
+            LOG.info("Reconstructing minimal system from caps/connect files for topology.")
+            system = System()
+
+            allowed_types = {"D", "T", "NC", "DT", "TD"}
+            connect_map: Dict[float, List[float]] = {}
+
+            connect_file = None
+            if geometry_dir:
+                # Prefer parent connect file when caps sit in a subdirectory (DT/D/T/NC/etc.)
+                candidates: List[Path] = []
+                if "mixing_crosslinks" in str(geometry_dir):
+                    root = geometry_dir if geometry_dir.name not in {"DT", "D", "T"} else geometry_dir.parent
+                    candidates.append(root / "connect_from_colbuilder.txt")
+                if geometry_dir.name in {"DT", "D", "T", "NC", "TD", "DY"}:
+                    candidates.append(geometry_dir.parent / "connect_from_colbuilder.txt")
+                candidates.append(geometry_dir / "connect_from_colbuilder.txt")
+                for cand in candidates:
+                    if cand.exists():
+                        connect_file = cand
+                        break
+
+            if connect_file and connect_file.exists():
+                try:
+                    for line in connect_file.read_text().splitlines():
+                        if ";" not in line:
+                            continue
+                        lhs, _rhs = line.split(";", 1)
+                        tokens = [t.strip() for t in lhs.split() if t.strip()]
+                        if not tokens:
+                            continue
+                        try:
+                            anchor = float(tokens[0].replace(".caps.pdb", ""))
+                        except ValueError:
+                            continue
+                        conn_ids: List[float] = []
+                        for tok in tokens:
+                            try:
+                                conn_ids.append(float(tok.replace(".caps.pdb", "")))
+                            except ValueError:
+                                continue
+                        if conn_ids:
+                            connect_map[anchor] = conn_ids
+                except Exception as e:
+                    LOG.warning(f"Could not parse connect_from_colbuilder.txt: {e}")
+
+            for cap in cap_files:
+                try:
+                    mid = float(cap.stem.split(".")[0])
+                except ValueError:
+                    continue
+                model = Model(id=mid, transformation=[0.0, 0.0, 0.0], pdb_file=str(cap))
+                parent_type = cap.parent.name
+                if parent_type in allowed_types:
+                    model.type = parent_type
+                model.connect = connect_map.get(mid, [mid])
+                system.add_model(model)
+
+            system.get_models()
+            if not system.get_models():
+                LOG.warning("No models reconstructed from caps; topology cannot proceed.")
 
         # Run topology generation with the system and file manager
         await build_topology(system, config, file_manager)
@@ -409,6 +503,7 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                 await geometry_service._handle_direct_replacement()
             )
             results["geometry_pdb"] = pdb_path
+            results["geometry_system"] = current_system
             LOG.info(f"Direct replacement completed, output PDB: {pdb_path}")
 
         # Mix-only mode (no geometry generation)
