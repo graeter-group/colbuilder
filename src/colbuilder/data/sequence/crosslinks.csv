@@ -3412,7 +3412,6 @@ rattus_norvegicus,ARG_LYS,N,1006.A - 767.B,Glucosepane,AGS,NZ,1006.A,LGX,CE,767.
 rattus_norvegicus,ARG_LYS,N,1006.A - 772.A,Glucosepane,AGS,NZ,1006.A,LGX,CE,772.A,NONE,NONE,NONE,NONE,#D3-D4
 rattus_norvegicus,ARG_LYS,N,1008.A - 66.C,Glucosepane,AGS,NZ,1008.A,LGX,CE,66.C,NONE,NONE,NONE,NONE,#D0-D5
 rattus_norvegicus,ARG_LYS,N,1008.A - 767.B,Glucosepane,AGS,NZ,1008.A,LGX,CE,767.B,NONE,NONE,NONE,NONE,#D2-D3
-rattus_norvegicus,ARG_LYS,C,1046.A - 101.B,Glucosepane,LGX,CE,1046.A,AGS,NZ,101.B,NONE,NONE,NONE,NONE,#D0-D5               
 rattus_norvegicus,ARG_LYS,N,101.B - 1046.A,Glucosepane,AGS,NZ,101.B,LGX,CE,1046.A,NONE,NONE,NONE,NONE,#D0-D5
 rattus_norvegicus,ARG_LYS,N,101.B - 1046.C,Glucosepane,AGS,NZ,101.B,LGX,CE,1046.C,NONE,NONE,NONE,NONE,#D0-D5
 rattus_norvegicus,ARG_LYS,N,1055.C - 110.B,Glucosepane,AGS,NZ,1055.C,LGX,CE,110.B,NONE,NONE,NONE,NONE,#D0-D5

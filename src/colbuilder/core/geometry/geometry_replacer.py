@@ -186,25 +186,21 @@ class CrosslinkReplacer:
 
             source_dir = geometry_gen_dir
             if getattr(config, "auto_fix_unpaired", False) and getattr(config, "manual_replacements", None):
-                try:
-                    await self._apply_manual_replacements_to_dir(
-                        source_dir=geometry_gen_dir,
-                        dest_dir=replace_manual_dir,
-                        manual_list=[
-                            str(instr).strip()
-                            for instr in config.manual_replacements
-                            if str(instr).strip()
-                        ],
-                        working_dir_root=working_dir_root,
-                        config=config,
-                        system=system,
-                    )
-                    if getattr(config, "_replacement_verbose", True):
-                        LOG.section("Running crosslinks replacement")
-                    source_dir = replace_manual_dir
-                except Exception as e:
-                    LOG.warning("Auto-fix unpaired replacement failed: %s", e)
-                    source_dir = geometry_gen_dir
+                await self._apply_manual_replacements_to_dir(
+                    source_dir=geometry_gen_dir,
+                    dest_dir=replace_manual_dir,
+                    manual_list=[
+                        str(instr).strip()
+                        for instr in config.manual_replacements
+                        if str(instr).strip()
+                    ],
+                    working_dir_root=working_dir_root,
+                    config=config,
+                    system=system,
+                )
+                if getattr(config, "_replacement_verbose", True):
+                    LOG.section("Running crosslinks replacement")
+                source_dir = replace_manual_dir
             elif not geometry_gen_dir.exists() and replace_manual_dir.exists():
                 source_dir = replace_manual_dir
 
@@ -364,8 +360,10 @@ class CrosslinkReplacer:
             )
             
             if not success:
-                LOG.error("Chimera execution failed.")
-                return system
+                raise GeometryGenerationError(
+                    message="Chimera execution failed.",
+                    error_code="GEO_ERR_004",
+                )
 
             LOG.debug("Chimera replacements executed.")
 
@@ -1126,8 +1124,10 @@ class CrosslinkReplacer:
         )
 
         if not success:
-            LOG.warning("Chimera execution failed for auto-fix manual replacements.")
-            return False
+            raise GeometryGenerationError(
+                message="Chimera execution failed for auto-fix manual replacements.",
+                error_code="GEO_ERR_004",
+            )
 
         return True
 

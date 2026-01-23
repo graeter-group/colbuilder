@@ -215,21 +215,14 @@ class CrosslinkMixer:
             entries, _ = fixer.run()
             if entries:
                 LOG.info("Auto-fixing %d unpaired markers under %s", len(entries), geom_dir)
-                if self._apply_chimera_swaps(entries, geom_dir, config=config):
-                    LOG.debug("Chimera swapaa applied for unpaired markers in %s", geom_dir)
-                else:
-                    LOG.debug("Falling back to text replacement for unpaired markers in %s", geom_dir)
-                    self._apply_manual_replacements(
-                        entries=entries, temp_dir=base_dir, scope_dir=geom_dir
-                    )
+                if not self._apply_chimera_swaps(entries, geom_dir, config=config):
+                    raise RuntimeError(f"Chimera swapaa failed for unpaired markers in {geom_dir}")
+                LOG.debug("Chimera swapaa applied for unpaired markers in %s", geom_dir)
             else:
                 LOG.info("No unpaired markers found in %s", geom_dir)
         except Exception as e:
-            LOG.warning("Auto-fix for unpaired markers in %s failed: %s", geom_dir, e)
-            try:
-                self._apply_manual_replacements(entries=entries if "entries" in locals() else [], temp_dir=base_dir, scope_dir=geom_dir)
-            except Exception:
-                pass
+            LOG.error("Auto-fix for unpaired markers in %s failed: %s", geom_dir, e)
+            raise
 
     def _apply_chimera_swaps(
         self, entries: List[str], system_dir: Path, config: Optional[ColbuilderConfig] = None
@@ -590,9 +583,10 @@ class CrosslinkMixer:
                 if entries:
                     LOG.info("Removing %d unpaired markers in mixed caps", len(entries))
                     if not self._apply_chimera_swaps(entries, temp_dir, config=config):
-                        self._apply_manual_replacements(entries, temp_dir)
+                        raise RuntimeError("Chimera swapaa failed for unpaired markers in mixed caps")
             except Exception as e:
-                LOG.warning("Auto-fix for unpaired markers failed: %s", e)
+                LOG.error("Auto-fix for unpaired markers failed: %s", e)
+                raise
 
             temp_pdb = temp_dir / f"{config.output or 'collagen_fibril'}.pdb"
 
@@ -613,40 +607,3 @@ class CrosslinkMixer:
 
         finally:
             os.chdir(original_dir)
-
-    def _apply_manual_replacements(self, entries: List[str], temp_dir: Path, scope_dir: Optional[Path] = None) -> None:
-        """
-        Apply simple residue mutations in caps files based on manual replacement lines.
-        Lines are of the form: "<pdb> <NEW_RES> <RESID> <CHAIN>".
-        """
-        for line in entries:
-            parts = line.split()
-            if len(parts) < 4 or not parts[0].endswith(".caps.pdb"):
-                continue
-            pdb_name, new_res, resid, chain = parts[0], parts[1], parts[2], parts[3]
-            target_caps = None
-            search_dirs = [scope_dir] if scope_dir else [d for d in temp_dir.iterdir() if d.is_dir()]
-            for sub in search_dirs:
-                cand = sub / pdb_name
-                if cand.exists():
-                    target_caps = cand
-                    break
-            if not target_caps:
-                continue
-
-            try:
-                lines = target_caps.read_text().splitlines()
-                out_lines = []
-                for l in lines:
-                    if not l.startswith(("ATOM", "HETATM")):
-                        out_lines.append(l)
-                        continue
-                    rname = l[17:20]
-                    rchain = l[21].strip() or "A"
-                    rresid = l[22:26].strip()
-                    if rchain == chain and rresid == resid:
-                        l = f"{l[:17]}{new_res:>3}{l[20:]}"
-                    out_lines.append(l)
-                target_caps.write_text("\n".join(out_lines) + "\n")
-            except Exception:
-                continue
