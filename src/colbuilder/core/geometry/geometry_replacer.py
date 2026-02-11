@@ -1211,7 +1211,7 @@ class CrosslinkReplacer:
 
             cmd = f'chimera --nogui --silent --script "{swapaa_script} {base_file_str} {system_type_path}"'
 
-            LOG.debug(f"    Running command: {cmd}")
+            LOG.debug(f"        Running command: {cmd}")
 
             result = subprocess.run(
                 cmd,

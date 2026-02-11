@@ -363,7 +363,6 @@ class SequenceGenerator:
                         output_pdb = await self._apply_crosslinks(
                             output_pdb, file_prefix
                         )
-                        LOG.debug(f"Crosslinks applied - Output: {output_pdb}")
 
                 final_output = await self._finalize_output(output_pdb, file_prefix)
 

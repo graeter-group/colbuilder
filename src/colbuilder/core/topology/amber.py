@@ -11,7 +11,6 @@ import shutil
 from pathlib import Path
 import asyncio
 import numpy as np
-from colorama import Fore, Style
 from typing import List, Any, Optional, Dict, Union, Tuple, Set
 
 from colbuilder.core.geometry.system import System
@@ -75,7 +74,16 @@ class Amber:
         
         return groups
     
-    def merge_connected_models(self, model_group: List[int]) -> Optional[Tuple[str, str]]:
+    def merge_connected_models(
+        self, 
+        model_group: List[int]
+    ) -> Optional[Tuple[str, str, List[Tuple[Crosslink, Crosslink]]]]:
+        """
+        Merge connected models and detect crosslink pairs from individual model files.
+        
+        Returns:
+            Tuple of (model_type, group_id, crosslink_pairs) or None
+        """
         if not model_group or not self.system:
             return None
 
@@ -88,6 +96,37 @@ class Amber:
 
         group_id = "_".join(str(int(mid)) for mid in sorted(model_group))
         output_file = os.path.join(model_type, f"{group_id}.merge.pdb")
+        
+        # DETECT CROSSLINKS FROM INDIVIDUAL MODEL FILES BEFORE MERGING
+        crosslink_pairs = []
+        if len(model_group) > 1:
+            all_crosslinks = []
+            
+            for mid in model_group:
+                caps_file = os.path.join(model_type, f"{int(mid)}.caps.pdb")
+                if os.path.exists(caps_file):
+                    try:
+                        cls = read_crosslink(caps_file)
+                        for cl in cls:
+                            cl.model_id = int(mid) # tag
+                            all_crosslinks.append(cl)
+                        LOG.debug(f"Found {len(cls)} crosslinks in model {int(mid)}")
+                    except Exception as e:
+                        LOG.warning(f"Could not read crosslinks from {caps_file}: {e}")
+            
+            for i, cl1 in enumerate(all_crosslinks):
+                for cl2 in all_crosslinks[i+1:]:
+                    if cl1.model_id != cl2.model_id:
+                        distance = np.linalg.norm(cl1.position - cl2.position)
+                        if distance < 5.0 and self._are_compatible_crosslinks(cl1, cl2):
+                            crosslink_pairs.append((cl1, cl2))
+                            LOG.debug(
+                                f"  Crosslink pair: model {cl1.model_id} ({cl1.resname}) - "
+                                f"model {cl2.model_id} ({cl2.resname}), distance: {distance:.2f} Å"
+                            )
+            
+            if crosslink_pairs:
+                LOG.info(f"Found {len(crosslink_pairs)} crosslink pairs for group {group_id}")
 
         def write_caps(path, out):
             if os.path.exists(path):
@@ -96,15 +135,13 @@ class Amber:
                         if line.startswith(self.pdb_line_types):
                             out.write(line)
             else:
-                LOG.warning(f"Caps file not found: {path}")
+                LOG.debug(f"Caps file not found: {path}")
 
         with open(output_file, "w") as f_out:
-            # Always include each model’s own caps
             for mid in model_group:
                 caps = os.path.join(model_type, f"{int(mid)}.caps.pdb")
                 write_caps(caps, f_out)
 
-            # Optionally also include connection partners’ caps (if different from self)
             for mid in model_group:
                 model = self.system.get_model(model_id=float(mid))
                 if model and model.connect:
@@ -116,28 +153,43 @@ class Amber:
             f_out.write("END\n")
 
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            return (model_type, group_id)
+            return (model_type, group_id, crosslink_pairs)
+        
         LOG.error(f"Failed to create merged PDB for group {model_group}")
         return None
 
-
-    def find_crosslink_pairs(self, merged_pdb_file: str, distance_cutoff: float = 5.0) -> List[Tuple[Crosslink, Crosslink]]:
-        """Find crosslink pairs that should be bonded based on distance and type."""
-        crosslinks = read_crosslink(merged_pdb_file)
-        pairs = []
+    def _are_compatible_crosslinks(self, cl1: Crosslink, cl2: Crosslink) -> bool:
+        """
+        Check if two crosslinks are compatible for bonding.
         
-        for i, cl1 in enumerate(crosslinks):
-            for j, cl2 in enumerate(crosslinks[i+1:], i+1):
-                if (cl1.resname == cl2.resname and cl1.resid == cl2.resid and cl1.chain == cl2.chain):
-                    continue
-                
-                if cl1.type == cl2.type:
-                    distance = np.linalg.norm(cl1.position - cl2.position)
-                    if distance <= distance_cutoff:
-                        pairs.append((cl1, cl2))
-                        LOG.debug(f"        Found crosslink pair: {cl1.resname}{cl1.resid}{cl1.chain} - {cl2.resname}{cl2.resid}{cl2.chain} (distance: {distance:.2f} Å, type: {cl1.type}-{cl2.type})")
-
-        return pairs
+        Args:
+            cl1: First crosslink
+            cl2: Second crosslink
+            
+        Returns:
+            True if crosslinks can form a bond
+        """
+        # Divalent crosslinks (D-type)
+        divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS'}
+        divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD'}
+        
+        # Trivalent crosslinks (T-type)
+        trivalent_aldehyde = {'LYX', 'LXY', 'LYY', 'LXX'}
+        trivalent_amine = {'LY2', 'LX2', 'LY3', 'LX3', 'L3Y', 'L2Y', 'L3X', 'L2X'}
+        
+        # Divalent pairs: aldehyde + amine
+        if cl1.resname in divalent_aldehyde and cl2.resname in divalent_amine:
+            return True
+        if cl1.resname in divalent_amine and cl2.resname in divalent_aldehyde:
+            return True
+        
+        # Trivalent pairs: aldehyde + amine
+        if cl1.resname in trivalent_aldehyde and cl2.resname in trivalent_amine:
+            return True
+        if cl1.resname in trivalent_amine and cl2.resname in trivalent_aldehyde:
+            return True
+        
+        return False
 
     def find_atom_indices_for_crosslinks(
         self,
@@ -148,7 +200,6 @@ class Amber:
         """Map crosslink markers to atom indices, skipping invalid same-side T pairs."""
         mapped: List[Tuple[Tuple[Crosslink, Crosslink], Tuple[int, int]]] = []
 
-        # Parse atoms table
         with open(itp_file, 'r') as f:
             lines = f.readlines()
 
@@ -172,6 +223,7 @@ class Amber:
 
         atom_by_index = {a['index']: a for a in atom_data}
 
+        # Read coordinates from GRO file
         gro_file = itp_file.replace('.itp', '.gro')
         gro_coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
@@ -181,13 +233,14 @@ class Amber:
                 if len(line) >= 44:
                     try:
                         atom_idx = int(line[15:20].strip())
-                        x = float(line[20:28]) * 10
+                        x = float(line[20:28]) * 10  # nm to Å
                         y = float(line[28:36]) * 10
                         z = float(line[36:44]) * 10
                         gro_coords[atom_idx] = np.array([x, y, z])
                     except (ValueError, IndexError):
                         continue
 
+        # Map each crosslink pair to atom indices
         for cl1, cl2 in crosslink_pairs:
             best_atom1_idx = None
             best_atom2_idx = None
@@ -197,6 +250,7 @@ class Amber:
             for atom in atom_data:
                 atom_idx = atom['index']
 
+                # Check if this atom matches cl1
                 if (atom['residue_name'] == cl1.resname and
                     self._is_crosslink_atom(atom['atom_name'], cl1.resname, cl1.type)):
                     if atom_idx in gro_coords:
@@ -205,6 +259,7 @@ class Amber:
                             best_dist1 = d
                             best_atom1_idx = atom_idx
 
+                # Check if this atom matches cl2
                 if (atom['residue_name'] == cl2.resname and
                     self._is_crosslink_atom(atom['atom_name'], cl2.resname, cl2.type)):
                     if atom_idx in gro_coords:
@@ -213,7 +268,7 @@ class Amber:
                             best_dist2 = d
                             best_atom2_idx = atom_idx
 
-            # Reject invalid / same-side T–T selections (blocks LY2–LY3 and LYX–LYX)
+            # Reject invalid same-side T–T selections
             if best_atom1_idx and best_atom2_idx:
                 a1 = atom_by_index.get(best_atom1_idx)
                 a2 = atom_by_index.get(best_atom2_idx)
@@ -225,8 +280,7 @@ class Amber:
                     if (a1_isA and a2_isA) or (a1_isB and a2_isB):
                         LOG.debug(
                             f"Skipping same-side T pair "
-                            f"{a1['residue_name']}{a1['residue_nr']}–{a2['residue_name']}{a2['residue_nr']} "
-                            f"({a1['atom_name']}-{a2['atom_name']})"
+                            f"{a1['residue_name']}{a1['residue_nr']}–{a2['residue_name']}{a2['residue_nr']}"
                         )
                         continue
 
@@ -244,19 +298,16 @@ class Amber:
         atom_name: str,
         resname: str,
         crosslink_type: str,
-        want_side: Optional[str] = None,  # NEW: None, "A", or "B"
+        want_side: Optional[str] = None,
     ) -> bool:
         """
         Check if this atom is the target bonding atom for the crosslink type.
         For T-type crosslinks we distinguish sides to block same-side bonds:
         - Side "A": aldehyde side (e.g., LYX carbonyl C13/C12)
         - Side "B": amine side (e.g., LY3 CG or LY2 CB)
-        If want_side is provided, only accept atoms from that side.
         """
         if crosslink_type == "T":
-            # Side A (aldehyde) — LYX-like
             is_A = (resname in ("LYX", "LXY", "LYY", "LXX") and atom_name in ("C13", "C12"))
-            # Side B (amine) — LY3/LY2-like
             is_B = (
                 (resname in ("LY3", "LX3", "L3Y", "L2Y", "L3X", "L2X") and atom_name == "CG")
                 or (resname in ("LY2", "LX2") and atom_name == "CB")
@@ -278,7 +329,6 @@ class Amber:
                 return True
 
         return False
-
 
     def parse_topology_sections(self, itp_file: str) -> Dict[str, List[List[int]]]:
         """Parse existing topology to get bonds, angles, and dihedrals."""
@@ -541,7 +591,7 @@ class Amber:
         return out
 
     def _add_crosslink_angles_and_dihedrals(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
-        """Add angles/dihedrals around crosslink bonds, restricted to real, minimal heavy-atom terms."""
+        """Add angles/dihedrals around crosslink bonds."""
         try:
             existing_topology = self.parse_topology_sections(itp_file)
 
@@ -589,24 +639,17 @@ class Amber:
                 ai, aj = atom_info.get(i), atom_info.get(j)
                 return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
 
-            # Angles: only keep if the middle pair is the crosslink bond and the outer atom
-            # is in the same residue as its adjacent crosslink atom (and heavy).
             filtered_angles: List[Tuple[int, int, int]] = []
             for i, j, k in angles_seq:
                 jk_is_xlink = as_bond(j, k) in xlink_set
                 ij_is_xlink = as_bond(i, j) in xlink_set
                 if jk_is_xlink:
-                    # angle (i, j=atom1, k=atom2): i must belong to j's residue; i,k must be heavy
                     if not is_H(i) and not is_H(k) and same_res(i, j):
                         filtered_angles.append((i, j, k))
                 elif ij_is_xlink:
-                    # angle (i=atom1, j=atom2, k): k must belong to j's residue; i,k heavy
                     if not is_H(i) and not is_H(k) and same_res(k, j):
                         filtered_angles.append((i, j, k))
-                # else: angle doesn't center on crosslink bond (shouldn't happen from our generator)
 
-            # Dihedrals: must be (i, j, k, l) with (j,k) the crosslink bond,
-            # i in j's residue, l in k's residue, all heavy for robustness.
             filtered_diheds: List[Tuple[int, int, int, int]] = []
             for i, j, k, l in diheds_seq:
                 if as_bond(j, k) not in xlink_set:
@@ -617,7 +660,7 @@ class Amber:
                     continue
                 filtered_diheds.append((i, j, k, l))
 
-            # 6) Drop duplicates and anything already present
+            # Remove duplicates
             existing_angles = set(tuple(a) for a in existing_topology["angles"])
             existing_diheds = set(tuple(d) for d in existing_topology["dihedrals"])
 
@@ -650,7 +693,6 @@ class Amber:
 
         except Exception as e:
             LOG.warning(f"Could not add angles/dihedrals: {str(e)}")
-
 
     def _add_angles_to_lines(self, lines: List[str], crosslink_angles: List[Tuple[int, int, int]]) -> List[str]:
         """Add crosslink angles using standard GROMACS format."""
@@ -703,7 +745,7 @@ class Amber:
         return lines
 
     def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
-        """Add crosslink dihedrals; if type 4 is selected, append fixed params 105.4 0.75 1."""
+        """Add crosslink dihedrals."""
         if not crosslink_dihedrals:
             return lines
 
@@ -770,11 +812,7 @@ class Amber:
         return len(lines)
 
     def ensure_posre_include(self, itp_path, group_id):
-        """
-        Normalize POSRES include placement:
-        - Remove existing POSRES blocks or lone #include lines (and their leading comment).
-        - Append a clean POSRES block at the END of the .itp (valid: after [atoms] and any other sections).
-        """
+        """Normalize POSRES include placement."""
         from pathlib import Path
         itp_path = Path(itp_path)
         posre_name = f"posre_{group_id}.itp"
@@ -832,8 +870,13 @@ class Amber:
 
         itp_path.write_text("\n".join(lines) + "\n")
 
-
-    def write_itp(self, itp_file: Union[str, Path], molecule_name: str, merged_pdb_file: Optional[str] = None) -> None:
+    def write_itp(
+        self, 
+        itp_file: Union[str, Path], 
+        molecule_name: str, 
+        merged_pdb_file: Optional[str] = None,
+        crosslink_pairs: Optional[List[Tuple[Crosslink, Crosslink]]] = None
+    ) -> None:
         """Process and write Include Topology (ITP) file with crosslink bonds."""
         itp_file = Path(itp_file)
         
@@ -859,13 +902,9 @@ class Amber:
                     f.write(f'{molecule_name}  3\n')
                     write = True
         
-        if merged_pdb_file and os.path.exists(merged_pdb_file):
-            try:
-                crosslink_pairs = self.find_crosslink_pairs(merged_pdb_file)
-                if crosslink_pairs:
-                    self.add_crosslink_topology_to_itp(str(output_file), crosslink_pairs, merged_pdb_file)
-            except Exception as e:
-                LOG.warning(f"Failed to add crosslink topology: {str(e)}")
+        if crosslink_pairs and merged_pdb_file:
+            LOG.info(f"Adding {len(crosslink_pairs)} crosslink pairs to {output_file.name}")
+            self.add_crosslink_topology_to_itp(str(output_file), crosslink_pairs, merged_pdb_file)
 
     def write_topology(self, topology_file: str, processed_groups: List[Tuple[str, str]]) -> None:
         """Generate AMBER99-ILDNP-STAR force field topology file for connected model groups."""
@@ -919,6 +958,7 @@ class Amber:
             f.write(last_box_line)
 
         LOG.info(f"GRO file written with {len(all_atom_lines)} atoms from {len(processed_groups)} groups")
+
 
 @timeit
 async def build_amber99(system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None) -> Amber:
@@ -978,7 +1018,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                     LOG.warning(f"Skipping group {group} - merge failed")
                     continue
                 
-                model_type, group_id = merge_result
+                model_type, group_id, crosslink_pairs = merge_result
                 merge_pdb_path = working_dir / model_type / f"{group_id}.merge.pdb"
                 
                 if not merge_pdb_path.exists() or not os.path.getsize(merge_pdb_path):
@@ -1012,7 +1052,8 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 amber.write_itp(
                     itp_file=working_dir / f'col_{group_id}.top',
                     molecule_name=f'col_{group_id}',
-                    merged_pdb_file=str(merge_pdb_path)
+                    merged_pdb_file=str(merge_pdb_path),
+                    crosslink_pairs=crosslink_pairs
                 )
                 amber.ensure_posre_include(working_dir / f'col_{group_id}.itp', group_id)
 

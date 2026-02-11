@@ -103,7 +103,7 @@ class Chimera(object):
 
         chimera_command = ["chimera", "--nogui", "--silent", "--script", script_path]
 
-        LOG.debug(f"    Running command: {' '.join(chimera_command)}")
+        LOG.debug(f"     Running command: {' '.join(chimera_command)}")
 
         result = subprocess.run(
             " ".join(chimera_command),
@@ -121,7 +121,7 @@ class Chimera(object):
 
         expected_file = f"{crystalcontacts_str}_id.txt"
         if os.path.exists(expected_file):
-            LOG.debug(f"    File created successfully: {expected_file}")
+            LOG.debug(f"        File created successfully: {expected_file}")
             with open(expected_file, "r") as f:
                 pass
         else:

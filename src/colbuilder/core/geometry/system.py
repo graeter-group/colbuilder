@@ -277,8 +277,6 @@ class System:
             if hasattr(model, 'type') and model.type:
                 model_types.add(model.type)
                 model_type_count[model.type] = model_type_count.get(model.type, 0) + 1
-
-        LOG.debug(f"Model type counts: {model_type_count}")
         
         type_dirs = {}
         for model_type in model_types:
@@ -311,8 +309,6 @@ class System:
                 models_with_connections += 1
                 model_type = getattr(model, 'type', 'unknown')
                 models_by_type_with_connections[model_type] = models_by_type_with_connections.get(model_type, 0) + 1
-        
-        LOG.debug(f"Models with connections: {models_with_connections} out of {len(self.system)}")
         
         try:
             crystal_header = None

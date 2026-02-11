@@ -123,7 +123,7 @@ def run_command(cmd: str, error_msg: str) -> None:
         subprocess.CalledProcessError: If command fails.
     """
     try:
-        LOG.debug(f"    Running command: {cmd}")
+        LOG.debug(f"        Running command: {cmd}")
         result = subprocess.run(
             cmd, 
             shell=True, 

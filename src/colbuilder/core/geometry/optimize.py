@@ -157,10 +157,9 @@ class Optimizer:
         Returns:
             Any: The updated system.
         """
-        LOG.debug("Updating system connections")
+        LOG.debug("     Updating system connections")
         contact_connect = connect.get_contact_connect(system=system)
         
-        # Update each model's connections
         for model_id, connected_models in contact_connect.items():
             try:
                 system.get_model(model_id=model_id).add_connect(
@@ -277,7 +276,7 @@ class Optimizer:
         system = system or self.system
         
         incomplete_models = self._find_models_with_incomplete_crosslinks(system)
-        LOG.debug(f"Found {len(incomplete_models)} models with incomplete crosslinks")
+        LOG.debug(f"    Found {len(incomplete_models)} models with incomplete crosslinks")
         
         if not incomplete_models:
             return system
@@ -290,10 +289,10 @@ class Optimizer:
             for crosslink in unpaired_crosslinks:
                 
                 if self._create_complementary_model(crosslink, model, system, connect):
-                    LOG.debug(f"Successfully added complementary model for crosslink in model {model_id}")
+                    LOG.debug(f"        Successfully added complementary model for crosslink in model {model_id}")
                     models_fixed += 1
                     
-        LOG.debug(f"Fixed {models_fixed} crosslinks in targeted optimization pass")
+        LOG.debug(f"    Fixed {models_fixed} crosslinks in targeted optimization pass")
         return system
         
     def _find_models_with_incomplete_crosslinks(self, system: Any) -> List[float]:
@@ -431,7 +430,7 @@ class Optimizer:
                 )
                 
                 if connect.get_connect(ref_model=source_model, model=temp_model):
-                    LOG.debug(f"Found complementary position at unit cell {candidate}")
+                    # LOG.debug(f"Found complementary position at unit cell {candidate}")
                     
                     pr_candidate = [-x for x in candidate]
                     pr_transformation = system.crystal.get_t_matrix(s_matrix=pr_candidate)

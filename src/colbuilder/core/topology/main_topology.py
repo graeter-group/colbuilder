@@ -52,7 +52,6 @@ def cleanup_temporary_files(ff_name: str, temp_patterns: Set[str], search_dirs: 
         List of specific directories to search in. If None, searches in current directory
     """
     try:
-        # Use current directory if no search dirs specified
         dirs_to_search = search_dirs if search_dirs else [Path()]
         
         for search_dir in dirs_to_search:
@@ -75,7 +74,7 @@ def cleanup_temporary_files(ff_name: str, temp_patterns: Set[str], search_dirs: 
                         else:
                             os.remove(matched_path)
         
-        # Handle force field directory cleanup
+        # force field directory cleanup
         for search_dir in dirs_to_search:
             copied_ff_dir = search_dir / ff_name
             if copied_ff_dir.exists():

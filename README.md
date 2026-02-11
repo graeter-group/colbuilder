@@ -162,11 +162,12 @@ Understanding this distinction is crucial for organizing your workflow correctly
 
 ### 📊 Mode Summary Table
 
-| # | Mode                   | Purpose                                                                 | Input(s)                                                       | Output                             | Can Run With Other Modes?   |
+|| # | Mode                   | Purpose                                                                 | Input(s)                                                       | Output                             | Can Run With Other Modes?   |
 |---|------------------------|-------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------|------------------------------|
 | 1 | `sequence_generator` | Generate a collagen triple helix molecule via homology modeling | `species` or custom FASTA | Triple helix PDB | Yes: with 2, 3, 5 |
 | 2 | `geometry_generator` | Assemble a collagen fibril from a single triple helix | PDB from Mode 1 or custom PDB | Fibril PDB | Yes: with 1, 3, 5 |
 | 3 | `topology_generator` | Generate topology files for GROMACS simulations | Fibril PDB (from Mode 2, 4, or 5) | `.top`, `.itp`, `.gro` | Yes: with 2, 4, 5 |
+| 3* | `topology_generator` (topology-only) | Generate topology files from an existing fibril PDB without geometry generation | Pre-existing fibril PDB with crosslinks | `.top`, `.itp`, `.gro` | No, standalone mode |
 | 4 | `mix_bool` | Generate a fibril by mixing two crosslink types | Two triple helix PDBs from Mode 1 | Mixed fibril PDB | No, requires separate script |
 | 5 | `replace_bool` | Replace crosslinks in an existing fibril | Fibril PDB from Mode 2 or 4 | Modified fibril PDB | Yes: with 2, 3 |
 
@@ -195,6 +196,7 @@ These mode combinations can be run **in a single configuration file**:
 - ✅ `1 + 2 + 5`
 - ✅ `2 + 5` - [example](docs/examples/)
 - ✅ `2 + 5 + 3`
+- ✅ `3` *(topology-only mode: starting from an existing fibril PDB)*
 
 ---
 
@@ -276,6 +278,12 @@ replace_file: null           # File with crosslinks to be replaced (set to null 
 
 # Topology Options
 force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
+topology_debug: false        # Enable detailed topology generation logging
+# Topology-Only Mode
+# When topology_generator: true AND both sequence_generator: false and geometry_generator: false
+# ColBuilder operates in topology-only mode, reading an existing fibril PDB and generating
+# topology files without running geometry generation steps. The crosslink parameters must
+# match the crosslinks present in the input PDB file.
 ```
 
 For a complete list of configuration options, see the [detailed documentation](https://github.com/graeter-group/colbuilder/tree/main/docs).
@@ -355,6 +363,35 @@ force_field: "martini3"
 ```bash
 colbuilder --config_file config_topology.yaml
 ```
+
+#### Generating Topology Files from an Existing Fibril (Topology-Only Mode)
+
+If you already have a complete fibril PDB file (e.g., from a previous ColBuilder run or from another source) and only need to generate topology files for simulation:
+```yaml
+# config_topology_only.yaml
+species: "homo_sapiens"
+sequence_generator: false
+geometry_generator: false
+topology_generator: true
+pdb_file: "path/to/existing_fibril.pdb"
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "6.B - 9.C - 946.A"
+c_term_combination: "1046.C - 1046.A - 103.C"
+force_field: "amber99"
+```
+
+```bash
+colbuilder --config_file config_topology_only.yaml
+```
+
+**Important notes for topology-only mode:**
+- The input PDB must be a complete fibril (not a single triple helix)
+- Crosslink information must match what's present in the PDB file
+- The tool will automatically detect model connectivity from crosslink positions
+- Works with fibrils containing divalent (D), trivalent (T), or mixed (M) crosslinks
+- Supports both Amber99 and Martini3 force fields
 
 ## 📚 Documentation
 

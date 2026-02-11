@@ -28,7 +28,6 @@ from colorama import init, Fore, Style
 
 LOG = setup_logger(__name__)
 
-# Standard temporary files and directories created during processing
 STANDARD_TEMP_FILES = {"replace.txt"}
 STANDARD_TEMP_DIRS = {}
 
@@ -53,7 +52,6 @@ def cleanup_temp_files(
         files_to_clean.update(STANDARD_TEMP_FILES)
         dirs_to_clean.update(STANDARD_TEMP_DIRS)
 
-    # Clean up directories
     for dir_path in dirs_to_clean:
         if os.path.exists(dir_path) and os.path.isdir(dir_path):
             try:
@@ -64,7 +62,6 @@ def cleanup_temp_files(
                     f"Failed to remove temporary directory {dir_path}: {str(e)}"
                 )
 
-    # Clean up files
     for file_path in files_to_clean:
         if os.path.exists(file_path) and os.path.isfile(file_path):
             try:
@@ -102,7 +99,6 @@ class GeometryService:
         self.original_dir = Path.cwd()
         self.temp_dir = None
 
-        # Set file manager on all services
         self.crystal_service.set_file_manager(self.file_manager)
 
     def _track_temp_resources(
@@ -143,7 +139,7 @@ class GeometryService:
         5. Writing the final mixed system to a PDB file
 
         Returns:
-            Tuple[Path, Path]: The mixing directory path and output PDB file path
+            Tuple[Optional[System], Optional[Path]]: The mixed system object and output PDB file path
 
         Raises:
             GeometryGenerationError: If mixing fails, input validation fails, or output generation fails
@@ -211,14 +207,32 @@ class GeometryService:
                 system, self.config, mixing_dir
             )
 
-            # return mixing_dir, output_pdb
+            # Verify the system has models
+            if system:
+                model_count = len(list(system.get_models()))
+                LOG.info(f"Mixed system contains {model_count} models")
+                
+                type_counts = {}
+                for model_id in system.get_models():
+                    model = system.get_model(model_id=model_id)
+                    if hasattr(model, 'type'):
+                        model_type = model.type
+                        type_counts[model_type] = type_counts.get(model_type, 0) + 1
+                LOG.info(f"Type distribution: {type_counts}")
+            else:
+                LOG.warning("System object is None after mixing")
+
+            # Copy to final output location
             if output_pdb and output_pdb.exists():
                 final_pdb: Path = self.file_manager.get_output_path(
                     self.config.output, ".pdb"
                 )
 
                 self.file_manager.copy_to_output(output_pdb, dest_name=final_pdb.name)
-                return mixing_dir, final_pdb
+                LOG.info(f"Final mixed PDB copied to: {final_pdb}")
+                
+                # Return both the system object and the PDB path
+                return system, final_pdb
             else:
                 raise GeometryGenerationError(
                     message="Mixing operation did not produce an output file",
@@ -453,7 +467,6 @@ class GeometryService:
 
                         if output_pdb_path.exists():
                             try:
-                                # Analyze post-replacement residue counts
                                 post_replacement_counts = {}
                                 with open(output_pdb_path, "r") as f:
                                     for line in f:
@@ -530,8 +543,6 @@ class GeometryService:
                         error_code="GEO_ERR_012",
                     )
 
-            # If we reach this point, something unusual happened - we have a system but no PDB was written
-            # This is a fallback to ensure we always have a PDB file
             if system:
                 output_prefix = temp_config.output or temp_config.species
                 output_pdb_path = geometry_dir / f"{output_prefix}.pdb"
@@ -575,7 +586,6 @@ class GeometryService:
                 and self.config.debug
             ):
                 LOG.info(f"Debug mode enabled, preserving temporary directories")
-                # Create marker files as needed
                 for debug_dir in [
                     self.temp_dir,
                     self.file_manager.replacement_dir,
@@ -709,20 +719,16 @@ async def build_geometry_anywhere(
         os.chdir(geometry_dir)
 
         try:
-            # Copy the PDB file to the geometry directory
             pdb_path: Path = file_manager.copy_to_directory(
                 config.pdb_file, dest_dir=geometry_dir
             )
             config.pdb_file = pdb_path
 
-            # Set up the crystal builder with the file manager
             crystal_builder: CrystalBuilder = CrystalBuilder(file_manager)
 
-            # Build the geometry
             system: System = await crystal_builder.build(config)
             LOG.info("Crystal structure built successfully")
 
-            # Verify output file
             output_pdb_path: Path = file_manager.get_output_path(config.output, ".pdb")
             if not output_pdb_path.exists():
                 raise GeometryGenerationError(
@@ -764,7 +770,6 @@ async def mix_geometry(system: System, config: ColbuilderConfig) -> System:
         Mixed system
     """
     mixer = CrosslinkMixer()
-    # Create a clean mixing directory
     mixing_dir = Path(config.working_directory) / ".tmp" / "mixing_crosslinks"
     mixing_dir.mkdir(parents=True, exist_ok=True)
 
@@ -791,7 +796,6 @@ async def replace_geometry(
     original_dir = Path.cwd()
 
     try:
-        # Create a clean replacement directory
         replace_dir = Path(config.working_directory) / ".tmp" / "replace_crosslinks"
         replace_dir.mkdir(parents=True, exist_ok=True)
         file_manager.temp_dirs.add(replace_dir)

@@ -291,14 +291,14 @@ class Martini:
             return [], "none", "none"
 
         try:
-            # 1) Rename terminal ALA -> CLA (bookkeeping only; never pass 'CLA' as a CLI mod)
+            # 1) Rename terminal ALA -> CLA
             chain_length = self.get_chain_length(pdb)  # e.g. {"A": " 178", "B": "...", "C": "..."}
             for i in range(len(pdb)):
                 line = pdb[i]
                 if not line.startswith(("ATOM  ", "HETATM")):
                     continue
                 if line[17:20] == "ALA":
-                    tag = line[21:26]  # e.g., "A 178"
+                    tag = line[21:26]  # e.g. "A 178"
                     if tag in {f"A{chain_length['A']}", f"B{chain_length['B']}", f"C{chain_length['C']}"}:
                         pdb[i] = line[:17] + "CLA " + line[21:]
 
@@ -328,7 +328,7 @@ class Martini:
             special_first = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX"}
             special_last  = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "NME"}
 
-            # N-terminus: be conservative (ACE often causes issues on GLN etc. in some FF)
+            # N-terminus: conservative (ACE often causes issues on GLN etc. in some FF)
             nter_flag = "none" if (not firsts or (firsts & special_first)) else "none"
 
             # C-terminus: allow NME only if all chains end on standard residues (not special, not NME)
@@ -726,7 +726,7 @@ async def build_martini3(
                 model_status[model_id] = "no_model"
                 continue
 
-            # === NEW: build connect_ids fallback ===
+            # build connect_ids fallback
             sys_connect = getattr(model, "connect", None)
             if sys_connect:
                 connect_ids = list(sys_connect)
@@ -734,7 +734,6 @@ async def build_martini3(
                 connect_ids = [model_id]  # self-connection
                 LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
 
-            # (Optional guard: skip if we truly have nothing—unlikely now)
             if not connect_ids:
                 LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
                 model_status[model_id] = "no_connections"

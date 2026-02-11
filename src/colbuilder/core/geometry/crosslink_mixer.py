@@ -384,7 +384,7 @@ class CrosslinkMixer:
                 chimera = Chimera(config, str(pdb_path))
 
                 LOG.info(f" - System {key}:")
-                LOG.info(f"     Generating system from {pdb_file}")
+                LOG.info(f"    Generating system from {pdb_file}")
 
                 crystalcontacts_file = (
                     system.crystalcontacts.crystalcontacts_file
