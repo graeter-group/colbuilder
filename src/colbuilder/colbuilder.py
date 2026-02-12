@@ -40,6 +40,7 @@ from datetime import datetime
 
 init()
 
+# Package version
 VERSION = "0.0.0"
 
 from colbuilder.core.utils.logger import setup_logger
@@ -184,7 +185,7 @@ def display_title() -> None:
 
 
 @timeit
-async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Path, Path]:
+async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Optional[Path], Path]:
     """
     Generate coordinates for collagen molecule from sequence information.
 
@@ -195,7 +196,7 @@ async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Path, Path]
         config: Configuration settings
 
     Returns:
-        Tuple containing paths to MSA and final PDB files
+        Tuple containing the MSA path (None for mutated PDB workflow) and the final PDB path
 
     Raises:
         SequenceGenerationError: If sequence generation fails
@@ -300,6 +301,7 @@ async def run_geometry_generation(
 
 
 @timeit
+#TODO: double check this!!
 async def run_topology_generation(
     config: ColbuilderConfig,
     system_path: Path,
@@ -475,9 +477,6 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
     """
     Run the complete Colbuilder pipeline based on configuration.
     
-    This is the main orchestration function that coordinates all pipeline steps
-    including sequence generation, geometry generation, and topology generation.
-    
     Args:
         config: Configuration settings
         
@@ -505,6 +504,7 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
             results["sequence_msa"] = sequence_msa
             results["sequence_pdb"] = sequence_pdb
 
+            # Update PDB file for next steps if needed
             if sequence_pdb and not config.pdb_file:
                 config.pdb_file = sequence_pdb
                 LOG.info(
@@ -580,6 +580,7 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
             LOG.info(f"Created system with {len(model_ids)} models of type {structure_type}")
             results["geometry_system"] = current_system
 
+        # Handle direct replacement without geometry generation
         elif config.replace_bool and not config.geometry_generator:
             LOG.section("Running direct replacement without geometry generation")
             from colbuilder.core.geometry.main_geometry import GeometryService
@@ -797,6 +798,38 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     help="Fasta-input file for collagen triple helix sequence",
 )
 @click.option(
+    "--crosslink_copies",
+    nargs=2,
+    type=click.Choice(["D0", "D1", "D2", "D3", "D4", "D5"]),
+    default=["D0", "D5"],
+    help="Pair of unit cell translations for crosslink optimization (default: D0 D5)"
+)
+@click.option(
+    "--mutated_pdb",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Pre-mutated PDB file to skip homology modeling and apply additional crosslinks"
+)
+@click.option(
+    "--additional_1_type",
+    type=str,
+    help="First additional crosslink type to apply to mutated PDB"
+)
+@click.option(
+    "--additional_2_type", 
+    type=str,
+    help="Second additional crosslink type to apply to mutated PDB"
+)
+@click.option(
+    "--additional_1_combination",
+    type=str,
+    help="First additional crosslink position (e.g., '9.C - 947.A')"
+)
+@click.option(
+    "--additional_2_combination",
+    type=str,
+    help="Second additional crosslink position (e.g., '1047.C - 104.C')"
+)
+@click.option(
     "-pdb",
     "--pdb_file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -899,6 +932,7 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     is_eager=True,
     help="Show the version and exit.",
 )
+
 @timeit
 def main(**kwargs: Any) -> int:
     """

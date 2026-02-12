@@ -32,6 +32,7 @@ from .connect import Connect
 from .caps import Caps
 from .optimize import Optimizer
 from .chimera import Chimera
+from . import crosslink
 
 LOG = setup_logger(__name__)
 
@@ -160,6 +161,41 @@ class CrystalBuilder:
             system = self.matrixset_system(
                 system=system, crystalcontacts_file=crystalcontacts.crystalcontacts_file
             )
+
+            # Refresh crosslinks from the actually generated per-model PDBs in the geometry directory.
+            geometry_dir = self.file_manager.ensure_geometry_dir()
+            for model_id in system.get_models():
+                model_obj = system.get_model(model_id=model_id)
+                pdb_path = geometry_dir / f"{int(model_id)}.pdb"
+
+                model_obj.crosslink = []
+                model_obj.pdb_file = str(pdb_path)
+
+                if not pdb_path.exists():
+                    LOG.warning(
+                        f"Cannot refresh crosslinks for model {model_id}: {pdb_path} missing"
+                    )
+                    continue
+
+                try:
+                    cls = crosslink.read_crosslink(pdb_file=pdb_path)
+                    for c in cls:
+                        c.model_id = model_obj.id
+                    model_obj.crosslink = cls
+                except Exception as e:
+                    LOG.warning(
+                        f"Failed to reload crosslinks for model {model_id} from {pdb_path}: {e}"
+                    )
+
+            # Recompute connectivity using refreshed crosslinks
+            connect = Connect(system=system, connect_file=connect.connect_file)
+            system_connect = connect.run_connect(system=system)
+            for mid in system.get_models():
+                model_obj = system.get_model(model_id=mid)
+                if system_connect and mid in system_connect:
+                    model_obj.add_connect(connect_id=mid, connect=system_connect[mid])
+                else:
+                    model_obj.connect = None            
 
             LOG.info(f"Step 5/{self.steps} Writing models' connectivity")
             connect.write_connect(system=system, connect_file=connect.connect_file)

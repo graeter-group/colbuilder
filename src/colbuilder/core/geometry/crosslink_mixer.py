@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 import shutil
 from colorama import Fore, Style
 import os
@@ -14,6 +14,7 @@ from colbuilder.core.geometry.caps import Caps
 from colbuilder.core.geometry.crystalcontacts import CrystalContacts
 from colbuilder.core.geometry.mix import Mix
 from colbuilder.core.geometry.optimize import Optimizer
+from colbuilder.core.geometry.unpaired_crosslinks import UnpairedCrosslinkFinder
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
@@ -78,6 +79,7 @@ class CrosslinkMixer:
         self.fibril_length: Optional[float] = None
         self.contact_distance: Optional[float] = None
         self.crystalcontacts_file: str = "crystalcontacts_from_colbuilder"
+        self.config: Optional[ColbuilderConfig] = None
 
     @staticmethod
     def _ensure_pdb_extension(filename: str) -> str:
@@ -193,6 +195,73 @@ class CrosslinkMixer:
             )
 
         return system, connect
+
+    def _auto_fix_unpaired(
+        self,
+        geom_dir: Path,
+        base_dir: Path,
+        allowed_resnames: Optional[Set[str]] = None,
+        config: Optional[ColbuilderConfig] = None,
+    ) -> None:
+        """
+        Detect and mutate unpaired markers in ``geom_dir`` caps files.
+        """
+        try:
+            fixer = UnpairedCrosslinkFinder(
+                base_dir=base_dir,
+                geom_dir=geom_dir,
+                allowed_resnames=allowed_resnames,
+            )
+            entries, _ = fixer.run()
+            if entries:
+                LOG.info("Auto-fixing %d unpaired markers under %s", len(entries), geom_dir)
+                if not self._apply_chimera_swaps(entries, geom_dir, config=config):
+                    raise RuntimeError(f"Chimera swapaa failed for unpaired markers in {geom_dir}")
+                LOG.debug("Chimera swapaa applied for unpaired markers in %s", geom_dir)
+            else:
+                LOG.info("No unpaired markers found in %s", geom_dir)
+        except Exception as e:
+            LOG.error("Auto-fix for unpaired markers in %s failed: %s", geom_dir, e)
+            raise
+
+    def _apply_chimera_swaps(
+        self, entries: List[str], system_dir: Path, config: Optional[ColbuilderConfig] = None
+    ) -> bool:
+        """
+        Use Chimera swapaa to rebuild sidechains for unpaired markers.
+
+        Returns True on success, False otherwise.
+        """
+        try:
+            cfg = config or self.config
+            if cfg is None:
+                return False
+
+            replace_file = system_dir / "replace_unpaired.txt"
+            lines: List[str] = []
+            for line in entries:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                pdb_name, _, resid, chain = parts[:4]
+                orig_res = parts[1].upper()
+                target_res = "ARG" if orig_res in {"AGS", "APD"} else "LYS"
+                lines.append(f"{pdb_name} {target_res} {resid} {chain}")
+
+            if not lines:
+                return False
+
+            replace_file.write_text("\n".join(lines) + "\n")
+
+            chim = Chimera(cfg, pdb=str(system_dir))
+            result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
+            if result.returncode != 0:
+                LOG.error("Chimera swapaa failed for %s: %s", system_dir, result.stderr.decode() if hasattr(result, "stderr") else result.stderr)
+                return False
+            return True
+        except Exception as e:
+            LOG.warning("Chimera swapaa application failed: %s", e)
+            return False    
 
     def _cap_system(
         self, system: System, crosslink_type: str, temp_dir: Optional[Path] = None
@@ -359,6 +428,8 @@ class CrosslinkMixer:
 
             system_size = system.get_size()
 
+            AGE_RESN = {"AGS", "LGX", "APD", "LPS"}
+
             if hasattr(system, "crystalcontacts") and system.crystalcontacts:
                 LOG.debug(
                     f"Crystalcontacts file: {system.crystalcontacts.crystalcontacts_file}"
@@ -416,6 +487,14 @@ class CrosslinkMixer:
                 type_dir = temp_dir / str(key)
                 type_dir.mkdir(parents=True, exist_ok=True)
 
+                # Copy opt_id file into this type dir for downstream unpaired detection
+                opt_id_src = self.path_wd / "crystalcontacts_from_colbuilder_opt_id.txt"
+                if opt_id_src.exists():
+                    try:
+                        shutil.copy2(opt_id_src, type_dir / opt_id_src.name)
+                    except Exception:
+                        pass
+
                 for model_id in system.get_models():
                     model_id_int = int(float(model_id))
                     source_pdb = Path(f"{model_id_int}.pdb")
@@ -435,6 +514,40 @@ class CrosslinkMixer:
 
                 LOG.info("     Adding caps")
                 self._cap_system(system, key, temp_dir)
+
+                # Write connect file for this type (per-type auto-fix handled after mixing)
+                Connect(system=system).write_connect(
+                    system=system, connect_file=type_dir / "connect_from_colbuilder"
+                )
+
+                # Auto-fix unpaired crosslinks per-type before mixing
+                self._auto_fix_unpaired(
+                    geom_dir=type_dir,
+                    base_dir=type_dir,
+                    allowed_resnames=None,
+                    config=config,
+                )
+
+            # After fixing per-type caps, compute average AGE markers per model for each type
+            per_type_age_avg: Dict[str, float] = {}
+            for key in mix_pdb.keys():
+                type_dir = temp_dir / str(key)
+                caps_files = list(type_dir.glob("*.caps.pdb"))
+                if not caps_files:
+                    per_type_age_avg[key] = 1.0
+                    continue
+                marker_count = 0
+                for cf in caps_files:
+                    try:
+                        with cf.open("r") as fh:
+                            for line in fh:
+                                if not line.startswith(("ATOM", "HETATM")):
+                                    continue
+                                if line[17:20].strip() in AGE_RESN:
+                                    marker_count += 1
+                    except Exception:
+                        continue
+                per_type_age_avg[key] = marker_count / float(len(caps_files) or 1) or 1.0
 
             LOG.info("Step 2/2 Mixing systems")
 
@@ -458,6 +571,22 @@ class CrosslinkMixer:
                 system=system, connect_file=connect_file_path
             )
 
+            # Auto-fix unpaired AGE markers in the mixed caps before final output
+            try:
+                fixer = UnpairedCrosslinkFinder(
+                    base_dir=self.path_wd,
+                    geom_dir=temp_dir,
+                    allowed_resnames=None,
+                )
+                entries, _ = fixer.run()
+                if entries:
+                    LOG.info("Removing %d unpaired markers in mixed caps", len(entries))
+                    if not self._apply_chimera_swaps(entries, temp_dir, config=config):
+                        raise RuntimeError("Chimera swapaa failed for unpaired markers in mixed caps")
+            except Exception as e:
+                LOG.error("Auto-fix for unpaired markers failed: %s", e)
+                raise
+            
             temp_pdb = temp_dir / f"{config.output or 'collagen_fibril'}.pdb"
 
             LOG.debug(f"Writing temporary output PDB to {temp_pdb}")

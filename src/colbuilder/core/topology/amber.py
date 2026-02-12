@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 import asyncio
 import numpy as np
+from colorama import Fore, Style
 from typing import List, Any, Optional, Dict, Union, Tuple, Set
 
 from colbuilder.core.geometry.system import System
@@ -190,7 +191,7 @@ class Amber:
             return True
         
         return False
-
+    
     def find_atom_indices_for_crosslinks(
         self,
         itp_file: str,
@@ -327,6 +328,10 @@ class Amber:
                 return True
             elif resname in ("AGS", "APD") and atom_name == "NZ":
                 return True
+            elif resname in ("LZD") and atom_name == "CE":
+                return True   
+            elif resname in ("LZS") and atom_name == "NZ1":
+                return True  
 
         return False
 
@@ -639,17 +644,24 @@ class Amber:
                 ai, aj = atom_info.get(i), atom_info.get(j)
                 return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
 
+            # Angles: only keep if the middle pair is the crosslink bond and the outer atom
+            # is in the same residue as its adjacent crosslink atom (and heavy).
             filtered_angles: List[Tuple[int, int, int]] = []
             for i, j, k in angles_seq:
                 jk_is_xlink = as_bond(j, k) in xlink_set
                 ij_is_xlink = as_bond(i, j) in xlink_set
                 if jk_is_xlink:
+                    # angle (i, j=atom1, k=atom2): i must belong to j's residue; i,k must be heavy
                     if not is_H(i) and not is_H(k) and same_res(i, j):
                         filtered_angles.append((i, j, k))
                 elif ij_is_xlink:
+                    # angle (i=atom1, j=atom2, k): k must belong to j's residue; i,k heavy
                     if not is_H(i) and not is_H(k) and same_res(k, j):
                         filtered_angles.append((i, j, k))
+                # else: angle doesn't center on crosslink bond (shouldn't happen from our generator)
 
+            # Dihedrals: must be (i, j, k, l) with (j,k) the crosslink bond,
+            # i in j's residue, l in k's residue, all heavy for robustness.
             filtered_diheds: List[Tuple[int, int, int, int]] = []
             for i, j, k, l in diheds_seq:
                 if as_bond(j, k) not in xlink_set:
@@ -745,7 +757,7 @@ class Amber:
         return lines
 
     def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
-        """Add crosslink dihedrals."""
+        """Add crosslink dihedrals; if type 4 is selected, append fixed params 105.4 0.75 1."""
         if not crosslink_dihedrals:
             return lines
 
@@ -901,7 +913,7 @@ class Amber:
                     f.write('[ moleculetype ]\n')
                     f.write(f'{molecule_name}  3\n')
                     write = True
-        
+
         if crosslink_pairs and merged_pdb_file:
             LOG.info(f"Adding {len(crosslink_pairs)} crosslink pairs to {output_file.name}")
             self.add_crosslink_topology_to_itp(str(output_file), crosslink_pairs, merged_pdb_file)

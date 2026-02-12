@@ -57,12 +57,107 @@ class Mix:
         self.system = system
         self.connect_mix: Dict[float, str] = connect_mix or {}
     
+    def _build_components(self, model_ids: List[float]) -> List[List[float]]:
+        """
+        Build connected components from the system connectivity.
+        
+        Models with no connectivity information are treated as single-node components.
+        Uses depth-first search to find all connected models.
+        
+        Args:
+            model_ids: List of all model IDs in the system
+            
+        Returns:
+            List of connected components, where each component is a list of model IDs.
+            Components are sorted by size (largest first), then by first model ID.
+        """
+        components: List[List[float]] = []
+        visited = set()
+
+        for model_id in model_ids:
+            if model_id in visited:
+                continue
+            
+            # Use stack for depth-first search
+            stack = [model_id]
+            comp: List[float] = []
+            
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                    
+                visited.add(current)
+                comp.append(current)
+                
+                # Get neighbors from connectivity
+                try:
+                    neighbors = self.system.get_model(model_id=current).connect or []
+                except Exception:
+                    neighbors = []
+                
+                for neigh in neighbors:
+                    if neigh not in visited:
+                        stack.append(neigh)
+            
+            components.append(sorted(comp))
+        
+        # Sort components: largest first, then by first model ID
+        components.sort(key=lambda c: (-len(c), c[0]))
+        return components
+
+    def _compute_targets(self, total_models: int) -> Dict[str, int]:
+        """
+        Compute deterministic model counts per type from the requested ratios.
+        
+        Distributes models according to the ratio_mix proportions. Fractional
+        models are distributed to types with the largest remainders to ensure
+        the total equals total_models.
+        
+        Args:
+            total_models: Total number of models to distribute
+            
+        Returns:
+            Dictionary mapping each type to its target count of models
+        """
+        total_ratio = float(sum(self.ratio_mix.values())) or 1.0
+        
+        # Calculate raw (fractional) counts for each type
+        raw = {
+            t: (self.ratio_mix[t] / total_ratio) * total_models 
+            for t in self.ratio_mix
+        }
+
+        # Floor all values to get integer base counts
+        targets = {t: int(np.floor(v)) for t, v in raw.items()}
+        
+        # Distribute remaining models based on largest fractional remainders
+        remainder = total_models - sum(targets.values())
+        if remainder > 0:
+            # Sort by fractional part (descending), then by ratio (descending)
+            fractions = sorted(
+                ((t, raw[t] - targets[t]) for t in self.ratio_mix),
+                key=lambda x: (-x[1], -self.ratio_mix[x[0]]),
+            )
+            for i in range(remainder):
+                t, _ = fractions[i % len(fractions)]
+                targets[t] += 1
+                
+        return targets
+
     def add_mix(self, ratio_mix: Optional[Dict[str, int]] = None, system: Optional[Any] = None) -> Any:
         """
         Add or update the mix ratio and system.
         
         This method assigns crosslink types to models in the system according to the ratio mix,
-        while preserving spatial relationships and connections between models.
+        while preserving spatial relationships and connections between models. Connected
+        components are kept together and assigned the same type.
+        
+        The algorithm:
+        1. Computes target counts for each type based on ratios
+        2. Identifies connected components in the system
+        3. Assigns types to components using round-robin to avoid starving small ratios
+        4. Ensures all models in a component get the same type
         
         Args:
             ratio_mix: Optional dictionary of crosslink types and their ratios
@@ -70,6 +165,9 @@ class Mix:
             
         Returns:
             The updated system with crosslink types assigned
+            
+        Raises:
+            ValueError: If both system and ratio_mix are not initialized
         """
         if ratio_mix:
             self.ratio_mix = ratio_mix
@@ -79,6 +177,7 @@ class Mix:
         if not self.system or not self.ratio_mix:
             raise ValueError("Both system and ratio_mix must be initialized")
 
+        # Handle string format for ratio_mix (e.g., "D:80 T:20")
         if isinstance(self.ratio_mix, str):
             ratio_dict = {}
             for part in self.ratio_mix.split():
@@ -93,116 +192,84 @@ class Mix:
             LOG.debug(f"Converted ratio_mix from string: {self.ratio_mix}")
 
         total_models = self.system.get_size()
-        
         model_ids = list(self.system.get_models())
-        
-        total_ratio = sum(self.ratio_mix.values())
-        type_counts = {}
-        remaining = total_models
-        
-        for type_name, ratio in sorted(self.ratio_mix.items(), key=lambda x: x[1], reverse=True):
-            count = max(1, int((ratio / total_ratio) * total_models))
-            type_counts[type_name] = count
-            remaining -= count
-        
-        if remaining > 0:
-            for type_name in sorted(type_counts.keys(), key=lambda x: self.ratio_mix[x], reverse=True):
-                type_counts[type_name] += 1
-                remaining -= 1
-                if remaining == 0:
+
+        # Compute target counts and build connected components
+        target_counts = self._compute_targets(total_models)
+        components = self._build_components(model_ids)
+
+        # Deterministic assignment: assign components to types using round-robin
+        # This ensures small ratios aren't starved by early assignment of large components
+        remaining = target_counts.copy()
+        fallback_type = max(self.ratio_mix, key=self.ratio_mix.get)
+        assigned_types: Dict[float, str] = {}
+
+        # Create ordered list of types for round-robin assignment
+        type_order = sorted(self.ratio_mix, key=self.ratio_mix.get, reverse=True)
+        type_idx = 0
+
+        for comp in components:
+            # Round-robin across types with remaining quota
+            chosen = None
+            for _ in range(len(type_order)):
+                candidate = type_order[type_idx % len(type_order)]
+                type_idx += 1
+                if remaining.get(candidate, 0) > 0:
+                    chosen = candidate
                     break
-        
-        connected_components = []
-        visited = set()
-        
-        for model_id in model_ids:
-            if model_id in visited:
-                continue
-                
-            component = set()
-            queue = [model_id]
-            
-            while queue:
-                current_id = queue.pop(0)
-                if current_id in component:
-                    continue
-                    
-                component.add(current_id)
-                visited.add(current_id)
-                
-                current_model = self.system.get_model(model_id=current_id)
-                if hasattr(current_model, 'connect') and current_model.connect:
-                    for connect_id in current_model.connect:
-                        if connect_id not in component and connect_id in model_ids:
-                            queue.append(connect_id)
-            
-            if component:
-                connected_components.append(component)
-        
-        connected_components.sort(key=len, reverse=True)
-        
-        type_assignments = {t: 0 for t in type_counts.keys()}
-        assigned_types = {}
-        
-        for component in connected_components:
-            available_types = [t for t in type_counts.keys() if type_assignments[t] < type_counts[t]]
-            
-            if not available_types:
-                chosen_type = max(self.ratio_mix.keys(), key=lambda t: self.ratio_mix[t])
-            else:
-                percentages = {
-                    t: type_assignments[t] / type_counts[t]
-                    for t in available_types
-                }
-                
-                chosen_type = min(percentages.keys(), key=lambda t: percentages[t])
-            
-            for model_id in component:
-                assigned_types[model_id] = chosen_type
-            
-            type_assignments[chosen_type] += len(component)
-            
+
+            type_choice = chosen or fallback_type
+
+            # Assign the chosen type to all models in this component
+            for mid in comp:
+                assigned_types[mid] = type_choice
+
+            # Decrement the remaining count for this type
+            remaining[type_choice] = remaining.get(type_choice, 0) - len(comp)
+
         # Apply the assigned types to each model
         for model_id in model_ids:
-            if model_id in assigned_types:
-                model = self.system.get_model(model_id=model_id)
-                model_type = assigned_types[model_id]
-                
-                model.type = model_type
-                model.crosslink_type = model_type
-                
-                LOG.debug(f"Assigned type {model.type} to model {model_id}")
-                
-                # Set the type for connected models too
-                if hasattr(model, 'connect') and model.connect:
-                    for connect_id in model.connect:
-                        try:
-                            connected_model = self.system.get_model(model_id=connect_id)
-                            connected_model.type = model_type
-                            connected_model.crosslink_type = model_type
-                        except Exception as e:
-                            LOG.warning(f"  - Could not set type for connected model {connect_id}: {e}")
-            else:
-                LOG.warning(f"Model {model_id} was not assigned a type")
-        
+            model = self.system.get_model(model_id=model_id)
+            model_type = assigned_types.get(model_id, fallback_type)
+            
+            # Set both type and crosslink_type attributes
+            model.type = model_type
+            model.crosslink_type = model_type
+            
+            LOG.debug(f"Assigned type {model.type} to model {model_id}")
+            
+            # Also set type for connected models to ensure consistency
+            if hasattr(model, 'connect') and model.connect:
+                for connect_id in model.connect:
+                    try:
+                        connected_model = self.system.get_model(model_id=connect_id)
+                        connected_model.type = model_type
+                        connected_model.crosslink_type = model_type
+                    except Exception as e:
+                        LOG.warning(f"Could not set type for connected model {connect_id}: {e}")
+
         # Log the final type distribution
-        actual_distribution = {}
+        actual_distribution: Dict[str, int] = {}
         for model_id in model_ids:
             model = self.system.get_model(model_id=model_id)
             if hasattr(model, 'type'):
                 actual_distribution[model.type] = actual_distribution.get(model.type, 0) + 1
-        
+
+        LOG.info(f"Final type distribution: {actual_distribution} (targets: {target_counts})")
+
         return self.system
 
     def get_mix(self, ratio_mix: Optional[List[int]] = None) -> str:
         """
         Get a random mix based on the provided or stored ratio mix.
 
+        Uses weighted random selection according to the ratio values.
+
         Args:
             ratio_mix (Optional[List[int]]): List of ratios to use for mixing.
 
         Returns:
-            str: Randomly selected component based on the ratios.
+            str: Randomly selected component type based on the ratios.
         """
         if ratio_mix is None:
             ratio_mix = list(self.ratio_mix.values())
@@ -212,6 +279,12 @@ class Mix:
     def get_mix_from_connect_file(self, system: Optional[Any] = None, connect_file: Optional[str] = None) -> Any:
         """
         Update the system and assign types to models based on a connect file.
+
+        The connect file should contain lines in the format:
+        "model_id.caps.pdb ; TYPE"
+        
+        This method reads the file and assigns the specified type to each model
+        and its connected neighbors.
 
         Args:
             system (Optional[Any]): New system object to update.
@@ -235,6 +308,9 @@ class Mix:
         """
         Read and parse the connect file to create a connect mix dictionary.
 
+        The connect file format is:
+        "model_id.caps.pdb ; TYPE"
+        
         Args:
             connect_file (Optional[Union[str, Path]]): Path to the connect file.
 
@@ -251,6 +327,7 @@ class Mix:
         
         connect_file = Path(connect_file)
         
+        # Try to find the file with or without .txt extension
         if connect_file.exists():
             file_to_open = connect_file
         elif connect_file.with_suffix('.txt').exists():
@@ -260,7 +337,11 @@ class Mix:
         
         try:
             with open(file_to_open, 'r') as f:
-                return {float(l.split(';')[0].split(' ')[0].split('.')[0]): l.split(';')[1].strip() for l in f}
+                return {
+                    float(l.split(';')[0].split(' ')[0].split('.')[0]): 
+                    l.split(';')[1].strip() 
+                    for l in f
+                }
         except FileNotFoundError:
             raise FileNotFoundError(f"Connect file not found: {file_to_open}")
         except IsADirectoryError:

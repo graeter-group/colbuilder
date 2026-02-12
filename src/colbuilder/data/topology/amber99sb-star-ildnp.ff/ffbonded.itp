@@ -98,6 +98,17 @@
   CT F          1    0.13800   307105.6 ; 13,(1992),963;CF4; R0=1.332 FOR CHF3
   CC CC         1    0.14290   350030.0 ; AOK_parm.PYL
   CV N*         1    0.13710   367190.0 ; AOK_parm.PYL
+  N2 C          1    0.13901   345010.0 ; GG_parm.Glucosepane
+  N* CQ         1    0.13710   367190.0 ; GG_parm.MOLD
+  N* CC         1    0.13710   367190.0 ; GG_parm.MOLD
+  CC H4         1    0.10830   292960.0 ; GG_parm.MOLD
+  N2 CQ         1    0.13735   364180.0 ; GG_parm.Pentosidine
+  CQ NA         1    0.13802   356310.0 ; GG_parm.Pentosidine
+  CQ NB         1    0.13694   369110.0 ; GG_parm.Pentosidine
+  NA CB         1    0.13802   356310.0 ; GG_parm.Pentosidine
+  NB CM         1    0.13172   439650.0 ; GG_parm.Pentosidine
+  CM CB         1    0.14278   351290.0 ; GG_parm.Pentosidine
+
 
 
 [ constrainttypes ]
@@ -379,6 +390,42 @@ CV  N*  CV           1   109.900    576.890 ; AOK_parm.PYL
 N*  CV  H4           1   119.660    420.240 ; AOK_parm.PYL
 N*  CV  CC           1   109.420    610.110 ; AOK_parm.PYL
 CT  CC  CC           1   115.970    541.070 ; AOK_parm.PYL 
+CT  N2  C            1   120.120    529.690 ; GG_parm.Glucosepane
+H   N2  C            1   115.680    405.010 ; GG_parm.Glucosepane
+N2  C   N*           1   113.640    604.170 ; GG_parm.Glucosepane
+N*  C   N*           1   120.690    606.680 ; GG_parm.Glucosepane
+C   N*  C            1   116.010    571.530 ; GG_parm.Glucosepane
+N*  CT  N3           1   120.710    561.490 ; GG_parm.Glucosepane
+N*  CT  C            1   120.710    561.490 ; GG_parm.Glucosepane
+H2  CT  C            1   111.690    390.790 ; GG_parm.Glucosepane  
+H2  CT  N3           1   109.350    415.050 ; GG_parm.Glucosepane 
+N*  C   CT           1   108.720    564.000 ; GG_parm.Glucosepane 
+CT  N*  CQ           1   125.090    523.500 ; GG_parm.MOLD
+CT  N*  CC           1   125.090    523.500 ; GG_parm.MOLD
+CQ  N*  CC           1   128.010    534.550 ; GG_parm.MOLD
+N*  CQ  H5           1   122.100    416.390 ; GG_parm.MOLD
+N*  CQ  N*           1   129.110    394.890 ; GG_parm.MOLD
+N*  CC  H4           1   119.660    420.240 ; GG_parm.MOLD
+N*  CC  CC           1   109.420    610.110 ; GG_parm.MOLD
+N*  CC  CT           1   122.780    548.100 ; GG_parm.MOLD
+H4  CC  CC           1   129.110    394.890 ; GG_parm.MOLD
+CT  N2  CQ           1   119.720    533.040 ; GG_parm.Pentosidine
+H   N2  CQ           1   115.630    409.200 ; GG_parm.Pentosidine
+N2  CQ  NA           1   117.280    600.820 ; GG_parm.Pentosidine
+N2  CQ  NB           1   117.230    603.330 ; GG_parm.Pentosidine
+NA  CQ  NB           1   121.950    590.780 ; GG_parm.Pentosidine
+CQ  NA  H            1   125.500    391.620 ; GG_parm.Pentosidine
+CQ  NA  CB           1   128.010    531.370 ; GG_parm.Pentosidine
+H   NA  CB           1   125.500    391.620 ; GG_parm.Pentosidine
+CQ  NB  CM           1   105.490    600.820 ; GG_parm.Pentosidine
+NB  CM  CB           1   112.560    599.150 ; GG_parm.Pentosidine
+NB  CM  N*           1   112.220    626.760 ; GG_parm.Pentosidine
+CB  CM  N*           1   117.770    574.040 ; GG_parm.Pentosidine                                                      
+NA  CB  CM           1   117.770    574.040 ; GG_parm.Pentosidine
+NA  CB  CA           1   106.990    614.210 ; GG_parm.Pentosidine
+CM  CB  CA           1   114.190    570.700 ; GG_parm.Pentosidine
+CM  CA  HA           1   121.760    405.850 ; GG_parm.Pentosidine
+
 
 [ dihedraltypes ]
 ;i  j   k  l	 func      phase      kd      pn
@@ -449,6 +496,56 @@ CT  N*  CV  H4       1        0.00     4.60240     2    ; AOK_parm.PYL
 CT  N*	CV  CC	     1      180.00     4.60240     2    ; AOK_parm.PYL
 CV  N*  CV  H4       1      180.00     4.60240     2    ; AOK_parm.PYL
 CV  N*  CV  CC       1        0.00     4.60240	   2   ; AOK_parm.PYL  
+;                                          
+CT  N2  C   N*       9      180.00     4.39320     2    ; GG_parm.Glucosepane
+H   N2  C   N*       9      180.00     4.39320     2    ; GG_parm.Glucosepane 
+C   CT  N*  CT       4      180.00     4.60240     2    ; GG_parm.Glucosepane
+C   N*  N2  N*       4      180.00     4.60240     2    ; GG_parm.Glucosepane
+CT  N*  C   N3       4      180.00     4.60240     2    ; GG_parm.Glucosepane
+;                                          
+CT  N*  CQ  H5       9      180.00     7.11280     2    ; GG_parm.MOLD
+CT  N*  CQ  N*       9      180.00     7.11280     2    ; GG_parm.MOLD
+CC  N*  CQ  H5       9      180.00     7.11280     2    ; GG_parm.MOLD
+CC  N*  CQ  N*       9      180.00     7.11280     2    ; GG_parm.MOLD
+CT  N*  CC  H4       9      180.00     7.11280     2    ; GG_parm.MOLD
+CT  N*  CC  CC       9      180.00     7.11280     2    ; GG_parm.MOLD
+CQ  N*  CC  H4       9      180.00     7.11280     2    ; GG_parm.MOLD
+CQ  N*  CC  CC       9      180.00     7.11280     2    ; GG_parm.MOLD
+N*  CQ  N*  CT       9      180.00     7.11280     2    ; GG_parm.MOLD
+N*  CQ  N*  CC       9      180.00     7.11280     2    ; GG_parm.MOLD
+CT  N*  CC  CT       9      180.00     7.11280     2    ; GG_parm.MOLD
+CQ  N*  CC  CC       9      180.00     7.11280     2    ; GG_parm.MOLD
+CQ  N*  CC  CT       9      180.00     7.11280     2    ; GG_parm.MOLD
+N*  CC  CC  CT       9      180.00    16.73600     2    ; GG_parm.MOLD
+H4  CC  CC  CT       9      180.00    16.73600     2    ; GG_parm.MOLD
+N*  CC  CC  N*       9      180.00     7.11280     2    ; GG_parm.MOLD 
+H4  CC  CC  N*       9      180.00    16.73600     2    ; GG_parm.MOLD
+N*  CC  CT  CQ       4      180.00     4.60240     2    ; GG_parm.MOLD
+CC  CT  N*  CC       4      180.00     4.60240     2    ; GG_parm.MOLD
+;
+CT  N2  CQ  NA       9      180.00     4.39320     2    ; GG_parm.Pentosidine 
+CT  N2  CQ  NB       9      180.00     4.39320     2    ; GG_parm.Pentosidine
+H   N2  CQ  NA       9      180.00     4.39320     2    ; GG_parm.Pentosidine
+H   N2  CQ  NB       9      180.00     4.39320     2    ; GG_parm.Pentosidine
+N2  CQ  NA  H        9      180.00     7.11280     2    ; GG_parm.Pentosidine
+N2  CQ  NA  CB       9      180.00     7.11280     2    ; GG_parm.Pentosidine
+NB  CQ  NA  H        9      180.00     7.11280     2    ; GG_parm.Pentosidine
+NB  CQ  NA  CB       9      180.00     7.11280     2    ; GG_parm.Pentosidine
+N2  CQ  NB  CM       9      180.00    19.87400     2    ; GG_parm.Pentosidine
+NA  CQ  NB  CM       9      180.00    19.87400     2    ; GG_parm.Pentosidine
+NB  CM  CB  NA       9      180.00    16.73600     2    ; GG_parm.Pentosidine
+CQ  NA  CB  CM       9      180.00     7.11280     2    ; GG_parm.Pentosidine
+CQ  NA  CB  CA       9      180.00     7.11280     2    ; GG_parm.Pentosidine 
+H   NA  CB  CM       9      180.00     7.11280     2    ; GG_parm.Pentosidine
+H   NA  CB  CA       9      180.00     7.11280     2    ; GG_parm.Pentosidine
+CQ  NB  CM  CB       9      180.00    19.87400     2    ; GG_parm.Pentosidine
+CQ  NB  CM  N*       9      180.00    19.87400     2    ; GG_parm.Pentosidine
+NB  CM  CB  CA       9      180.00    16.73600     2    ; GG_parm.Pentosidine
+N*  CM  CB  CA       9      180.00    16.73600     2    ; GG_parm.Pentosidine
+N*  CM  CB  NA       9      180.00    16.73600     2    ; GG_parm.Pentosidine                                                                                                                                                                      
+CQ  NA  N2  NB       4      180.00     4.60240     2    ; GG_parm.Pentosidine
+CM  NB  CB  N*       4      180.00     4.60240     2    ; GG_parm.Pentosidine
+CB  CM  NA  CA       4      180.00     4.60240     2    ; GG_parm.Pentosidine
 
 [ dihedraltypes ]
 ;i   j   k   l	   func	
@@ -631,5 +728,4 @@ CV  N*  CV  CC       1        0.00     4.60240	   2   ; AOK_parm.PYL
 
 
  
-
 

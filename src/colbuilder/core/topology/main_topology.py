@@ -167,23 +167,93 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
         
         try:
             os.chdir(topology_dir)
-            geometry_dir = Path(".tmp/geometry_gen")
-            if not geometry_dir.exists():
-                geometry_dir = Path(original_dir) / ".tmp" / "geometry_gen"
             
-            if geometry_dir.exists():
-                cap_files = list(geometry_dir.glob("**/*.caps.pdb"))
+            # Determine which directory to search for cap files based on operation mode
+            if config.replace_bool:
+                cap_dir_candidates = [
+                    Path(".tmp/replace_crosslinks"),
+                    Path(original_dir) / ".tmp" / "replace_crosslinks",
+                ]
+            elif getattr(config, "auto_fix_unpaired", False):
+                cap_dir_candidates = [
+                    Path(".tmp/replace_manual"),
+                    Path(original_dir) / ".tmp" / "replace_manual",
+                ]
+            elif getattr(config, "mix_bool", False):
+                cap_dir_candidates = [
+                    Path(".tmp/mixing_crosslinks"),
+                    Path(original_dir) / ".tmp" / "mixing_crosslinks",
+                ]
+            else:
+                # Standard geometry generation or topology-only mode
+                cap_dir_candidates = [
+                    Path(".tmp/geometry_gen"),
+                    Path(original_dir) / ".tmp" / "geometry_gen",
+                ]
+
+            # Find the first existing directory
+            geometry_dir = next((p for p in cap_dir_candidates if p.exists()), None)
+            
+            if geometry_dir is None:
+                LOG.warning("No caps directory found in expected locations")
+                LOG.debug(f"Searched: {[str(p) for p in cap_dir_candidates]}")
+                # This is not necessarily fatal - caps might be created by extract_and_cap_models_from_pdb
+            
+            # Collect cap files if geometry_dir exists
+            cap_files: List[Path] = []
+            if geometry_dir:
+                # First, check for caps in the root directory
+                caps_here = list(geometry_dir.glob("*.caps.pdb"))
                 
-                if list(system.get_models()):
-                    first_model = system.get_model(model_id=list(system.get_models())[0])
-                    model_type = first_model.type
-                    type_dir = topology_dir / model_type
-                    type_dir.mkdir(exist_ok=True, parents=True)
+                # If no caps in root, look in type-specific subdirectories
+                if not caps_here:
+                    LOG.debug(f"No caps in root of {geometry_dir}, checking subdirectories")
+                    for type_name in ["DT", "D", "T", "M", "NC", "TD"]:
+                        type_subdir = geometry_dir / type_name
+                        if type_subdir.exists():
+                            caps_in_subdir = list(type_subdir.glob("*.caps.pdb"))
+                            if caps_in_subdir:
+                                LOG.debug(f"Found {len(caps_in_subdir)} caps in {type_subdir}")
+                                geometry_dir = type_subdir  # Update geometry_dir to the subdir
+                                caps_here = caps_in_subdir
+                                break
+                
+                cap_files = caps_here
+                LOG.debug(f"Found {len(cap_files)} cap files in {geometry_dir}")
+            else:
+                LOG.debug("No geometry directory found - caps may be in topology_dir already")
+
+            # Copy cap files to appropriate type subdirectories in topology_dir
+            if cap_files:
+                allowed_types = {"D", "T", "NC", "DT", "TD", "M"}
+                
+                # Determine the type for organizing files
+                model_types = {
+                    getattr(system.get_model(mid), "type", None)
+                    for mid in system.get_models()
+                    if system.get_model(mid) is not None
+                }
+                fallback_type = next((t for t in model_types if t), "NC")
+                
+                LOG.debug(f"Model types in system: {model_types}, fallback: {fallback_type}")
+
+                for cap_file in cap_files:
+                    # Determine destination type based on parent directory or fallback
+                    parent_type = cap_file.parent.name
+                    dest_type = parent_type if parent_type in allowed_types else fallback_type
                     
-                    for cap_file in cap_files:
-                        dest_file = type_dir / cap_file.name
-                        shutil.copy(cap_file, dest_file)
+                    # Create destination directory
+                    dest_dir = topology_dir / dest_type
+                    dest_dir.mkdir(exist_ok=True, parents=True)
+                    
+                    # Copy the cap file
+                    dest_file = dest_dir / cap_file.name
+                    shutil.copy2(cap_file, dest_file)
+                    LOG.debug(f"Copied {cap_file.name} to {dest_dir}")
+            else:
+                LOG.debug("No cap files to copy - they may already be in topology_dir")
             
+            # Generate topology based on force field
             force_field = config.force_field
             
             if force_field == 'amber99':
@@ -205,31 +275,38 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     error_code="TOP_ERR_001",
                     context={"force_field": force_field}
                 )
-                
+            
+            # Create output directory and copy all generated files
             output_topology_dir = file_manager.ensure_dir(f"{config.species}_topology_files")
 
+            # Copy coarse-grained PDB files (Martini3)
             for cg_pdb_file in Path().glob("collagen_fibril_CG_*.pdb"):
                 file_manager.copy_to_directory(cg_pdb_file, dest_dir=output_topology_dir)
             
+            # Copy GO sites files (Martini3)
             for go_file in Path().glob("*go-sites.itp"):
                 file_manager.copy_to_directory(go_file, dest_dir=output_topology_dir)
             
+            # Copy topology files
             for top_file in Path().glob(f"collagen_fibril_*.top"):
                 file_manager.copy_to_directory(top_file, dest_dir=output_topology_dir)
             
+            # Copy coordinate files
             for gro_file in Path().glob(f"collagen_fibril_*.gro"):
                 file_manager.copy_to_directory(gro_file, dest_dir=output_topology_dir)
-                
+            
+            # Copy molecule topology files
             for itp_file in Path().glob("col_[0-9]*.itp"):
                 file_manager.copy_to_directory(itp_file, dest_dir=output_topology_dir)
             
+            # Copy position restraint files
             for posre_file in Path().glob("posre_*.itp"):
                 file_manager.copy_to_directory(posre_file, dest_dir=output_topology_dir)
 
-            
+            # Copy force field directory for Amber99
             ff_dir_name = "amber99sb-star-ildnp.ff"
-            ff_source_dir = Path() / ff_dir_name  
-                
+            ff_source_dir = Path() / ff_dir_name
+            
             if ff_source_dir.exists() and ff_source_dir.is_dir():
                 ff_dest_dir = output_topology_dir / ff_dir_name
                 try:
@@ -238,23 +315,31 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 except Exception as e:
                     LOG.warning(f"Failed to copy force field directory '{ff_dir_name}': {str(e)}")
             
-            # Check if force field files exist and inform user
+            # Inform user about force field files
             ff_files_present = (output_topology_dir / ff_dir_name).exists()
             if ff_files_present:
-                LOG.info(f"{Fore.YELLOW}Force field files can be found in the output directory. "
-                        f"Please check and modify these files according to your custom needs and requirements.{Style.RESET_ALL}")
-                    
-            LOG.info(f"{Fore.BLUE}Topology files written at: {output_topology_dir}{Style.RESET_ALL}")
-                
+                LOG.info(f"Force field files can be found in the output directory. "
+                        f"Please check and modify these files according to your custom needs and requirements.")
+            
+            LOG.info(f"Topology files written at: {output_topology_dir}")
+            
             return system
+            
         finally:
+            # Always return to original directory
             os.chdir(original_dir)
+            
+            # Clean up temporary files unless in debug mode
             search_dirs = [topology_dir]
             if output_topology_dir is not None:
                 search_dirs.append(output_topology_dir)
+            
             if not config.topology_debug:
-                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
-                cleanup_temporary_files(config.force_field or "unknown_force_field", TEMP_FILES_TO_CLEAN, search_dirs=search_dirs)
+                cleanup_temporary_files(
+                    config.force_field or "unknown_force_field", 
+                    TEMP_FILES_TO_CLEAN, 
+                    search_dirs=search_dirs
+                )
             
     except TopologyGenerationError:
         raise

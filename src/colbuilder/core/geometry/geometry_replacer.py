@@ -2,7 +2,8 @@
 Colbuilder Crosslink Replacement Module
 
 This module provides a unified approach to replacing crosslinks with standard amino acids
-in a collagen microfibril, supporting both system-based and direct replacement approaches.
+in a collagen microfibril, supporting both system-based and direct replacement approaches,
+including manual replacement lists and ratio-based automated selection.
 """
 
 import os
@@ -17,21 +18,104 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Tuple, cast, Set
 from colorama import init, Fore, Style
 
+# Import safe_load from yaml to parse raw config files
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 from ..utils.exceptions import GeometryGenerationError
 from ..utils.logger import setup_logger
 from ..utils.config import ColbuilderConfig
 from .system import System
 from .crystal import Crystal
+from .connect import Connect
+from .model import Model
 
 LOG = setup_logger(__name__)
+
+# Residue mapping for paired crosslink replacement
+PAIRING_RULES = [
+    (["LGX"], ["AGS"]),  # Glucosylpane
+    (["LPS"], ["APD"]),  # Pentosidine
+    (["LZS"], ["LZD"]),  # MOLD
+    # Enzymatic divalent crosslinks
+    (["L5Y"], ["L4Y"]),  # HLKNL
+    (["L5X"], ["L4Y"]),  # LKNL
+    (["LY5"], ["LY4"]),  # deH-HLNL
+    (["LX5"], ["LX4"]),  # deH-LNL
+]
+
+REPLACEMENT_MAP: Dict[str, str] = {
+    "AGS": "ARG",  # Glucosylpane
+    "APD": "ARG",
+    "LGX": "LYS",
+    "LPS": "LYS",
+    "LZS": "LYS",
+    "LZD": "LYS",
+    "LX3": "LYS",
+    "LX2": "LYS",
+    "LXX": "LYS",
+    "L3Y": "LYS",
+    "L2Y": "LYS",
+    "LXY": "LYS",
+    "L3X": "LYS",
+    "L2X": "LYS",
+    "LYY": "LYS",
+    "L5Y": "LYS",
+    "L4Y": "LYS",
+    "L5X": "LYS",
+    "LY5": "LYS",
+    "LX5": "LYS",
+    "LY4": "LYS",
+    "LX4": "LYS",
+    # Enzymatic C/N-term markers (PYD)
+    "LYX": "LYS",
+    "LY3": "LYS",
+    "LY2": "LYS",
+}
+DEFAULT_REPLACEMENT = "LYS"
+PAIR_DISTANCE_CUTOFF = 5.0
+
+PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "LY5", "LX5", "LY4", "LX4"}
+NON_ENZYMATIC_PAIRED: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD"}
+ENZYMATIC_SINGLETONS: Set[str] = {
+    "LYX",
+    "LY3",
+    "LY2",
+    "LX3",
+    "LX2",
+    "LXX",
+    "L3Y",
+    "L2Y",
+    "LXY",
+    "L3X",
+    "L2X",
+    "LYY",
+    "L5Y",
+    "L4Y",
+    "L5X",
+    "LY5",
+    "LX5",
+    "LY4",
+    "LX4",
+}
+ENZYMATIC_TRIOS = [
+    ("LYX", "LY2", "LY3"),  # PYD
+    ("LX3", "LX2", "LXX"),  # DPD
+    ("L3Y", "L2Y", "LXY"),  # PYL
+    ("L3X", "L2X", "LYY"),  # DPL
+]
+PYD_THRESHOLD = 5.0  # distance cutoff to group enzymatic trios
 
 
 class CrosslinkReplacer:
     """Handles replacement of crosslinks in collagen systems."""
 
     def __init__(self):
-        """Initialize the CrosslinkReplacer."""
         self.file_manager = None
+        # Residues that are considered crosslink markers when parsing raw PDBs
+        self._crosslink_resnames: Set[str] = set(REPLACEMENT_MAP.keys())
 
     async def replace(
         self, system: Optional[System], config: ColbuilderConfig, temp_dir: Path
@@ -49,6 +133,37 @@ class CrosslinkReplacer:
         """
         LOG.debug(f"Starting replacement with temp_dir: {temp_dir}")
 
+        # Detect if this is manual replacement mode
+        if getattr(config, "auto_fix_unpaired", False):
+            LOG.info(f"{Fore.CYAN}Starting MANUAL replacement mode.{Style.RESET_ALL}")
+            
+            if system is None:
+                LOG.warning("System is None. Replacement not supported without system.")
+                return None, None
+
+            await self.replace_in_system(system, config, temp_dir)
+            
+            # Calculate output path
+            working_dir_root = Path(config.working_directory).resolve()
+            # Fix path corruption check
+            str_wd = str(working_dir_root)
+            if ".tmp" in str_wd and "geometry_gen" in str_wd:
+                 working_dir_root = working_dir_root.parent.parent.parent 
+
+            actual_temp_dir = working_dir_root / ".tmp" / "replace_manual"
+            output_pdb = actual_temp_dir / f"{config.output or 'output'}.pdb"
+            
+            LOG.info(f"Writing final PDB structure to: {output_pdb}")
+            
+            system.write_pdb(
+                pdb_out=output_pdb,
+                fibril_length=config.fibril_length,
+                temp_dir=actual_temp_dir,
+            )
+
+            return system, output_pdb
+
+        # Standard replacement mode (ratio-based or direct)
         if system is None:
             LOG.info("Using direct replacement mode")
             return await self.replace_direct(config, temp_dir)
@@ -72,8 +187,8 @@ class CrosslinkReplacer:
         Replace crosslinks in the provided system according to configuration settings.
 
         This is the main entry point for system-based replacement. It analyzes the system,
-        selects crosslinks to replace based on the specified ratio, and performs the
-        replacement using Chimera.
+        selects crosslinks to replace based on the specified ratio or manual list, and 
+        performs the replacement using Chimera.
 
         Args:
             system: System containing the models to be modified
@@ -87,118 +202,320 @@ class CrosslinkReplacer:
             GeometryGenerationError: If replacement fails for any reason
         """
         try:
+            # =================================================================================
+            # PATH SETUP
+            # =================================================================================
+            working_dir_root = Path(config.working_directory).resolve()
+            
+            # Path corruption fix
+            str_wd = str(working_dir_root)
+            if ".tmp" in str_wd and "geometry_gen" in str_wd:
+                LOG.debug("Detected geometry_gen in working directory; using parent as root.")
+                parts = list(working_dir_root.parts)
+                if ".tmp" in parts:
+                    idx = parts.index(".tmp")
+                    working_dir_root = Path(*parts[:idx])
+                LOG.debug(f"Corrected root path: {working_dir_root}")
+
             if temp_dir is None:
-                working_dir = Path(config.working_directory)
-                temp_dir = working_dir / ".tmp" / "replacement"
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                LOG.debug(f"Created temporary directory for replacement: {temp_dir}")
+                # Determine appropriate temp directory based on mode
+                if getattr(config, "auto_fix_unpaired", False):
+                    temp_dir = working_dir_root / ".tmp" / "replace_manual"
+                else:
+                    temp_dir = working_dir_root / ".tmp" / "replace_crosslinks"
+                    
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            LOG.debug(f"Created temporary directory for replacement: {temp_dir}")
 
-            # Direct replacement mode handling - only if system is None
-            if (
-                config.replace_file
-                and os.path.exists(config.replace_file)
-                and system is None
-            ):
-                LOG.info(f"Using external replacement file: {config.replace_file}")
-                with open(config.replace_file, "r") as f:
-                    first_line = f.readline().strip()
-                    if first_line.startswith(("ATOM", "CRYST1", "HETATM")):
-                        system, _ = await self.replace_direct(config, temp_dir)
-                        return system
+            # Clean stale manual replacements file if present
+            stale_manual = temp_dir / "manual_replacements.txt"
+            if stale_manual.exists():
+                try:
+                    stale_manual.unlink()
+                except Exception:
+                    pass
 
-                if system is None:
-                    raise GeometryGenerationError(
-                        message="System is None but replacement instructions file was provided. Cannot continue.",
-                        error_code="GEO_ERR_004",
-                    )
+            geometry_gen_dir = working_dir_root / ".tmp" / "geometry_gen"
+            replace_manual_dir = working_dir_root / ".tmp" / "replace_manual"
 
-            model_count = (
-                system.get_size() if hasattr(system, "get_size") else "unknown"
+            # =================================================================================
+            # STEP 1: SOURCE SELECTION + FILE SYNC
+            # =================================================================================
+
+            source_dir = geometry_gen_dir
+            if getattr(config, "auto_fix_unpaired", False) and getattr(config, "manual_replacements", None):
+                await self._apply_manual_replacements_to_dir(
+                    source_dir=geometry_gen_dir,
+                    dest_dir=replace_manual_dir,
+                    manual_list=[
+                        str(instr).strip()
+                        for instr in config.manual_replacements
+                        if str(instr).strip()
+                    ],
+                    working_dir_root=working_dir_root,
+                    config=config,
+                    system=system,
+                )
+                if getattr(config, "_replacement_verbose", True):
+                    LOG.section("Running crosslinks replacement")
+                source_dir = replace_manual_dir
+            elif not geometry_gen_dir.exists() and replace_manual_dir.exists():
+                source_dir = replace_manual_dir
+
+            if not source_dir.exists():
+                LOG.error(
+                    f"{Fore.RED}ERROR: Source directory not found at {source_dir}.{Style.RESET_ALL}"
+                )
+                source_dir = Path.cwd()
+
+            # Determine system type and setup type directory
+            type_dir_candidates = [source_dir]
+            for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
+                cand = source_dir / sub
+                if cand.exists():
+                    type_dir_candidates.append(cand)
+
+            model_zero = system.get_model(model_id=0.0)
+            system_type = model_zero.type if hasattr(model_zero, "type") else "D"
+            type_dir = temp_dir / system_type
+            type_dir.mkdir(parents=True, exist_ok=True)
+
+            # Handle connectivity file
+            connect_file = None
+            for candidate in [
+                source_dir / "connect_from_colbuilder.txt",
+                source_dir / "connect_from_colbuilder",
+            ]:
+                if candidate.exists():
+                    connect_file = candidate
+                    break
+                    
+            if connect_file and connect_file.exists():
+                if connect_file.suffix != ".txt":
+                    connect_file_txt = connect_file.with_suffix(".txt")
+                    if connect_file_txt.exists():
+                        connect_file = connect_file_txt
+                shutil.copy2(connect_file, temp_dir / "connect_from_colbuilder.txt")
+                connect_file = temp_dir / "connect_from_colbuilder.txt"
+            else:
+                try:
+                    connector = Connect(system=system)
+                    connect_file = temp_dir / "connect_from_colbuilder"
+                    connector.write_connect(system=system, connect_file=connect_file)
+                    connect_file = connect_file.with_suffix(".txt")
+                    LOG.info("Rebuilt connectivity file at %s", connect_file)
+                except Exception as e:
+                    LOG.warning("Could not rebuild connectivity file: %s", e)
+                    connect_file = None
+
+            # Copy caps files to type directory
+            caps_by_model: Dict[int, Path] = {}
+            for search_dir in type_dir_candidates:
+                for pdb_file in search_dir.glob("*.caps.pdb"):
+                    try:
+                        model_id = int(pdb_file.stem.split(".")[0])
+                    except ValueError:
+                        continue
+                    if model_id not in caps_by_model:
+                        caps_by_model[model_id] = pdb_file
+
+            for model_id, source_caps in sorted(caps_by_model.items()):
+                dest_caps = type_dir / source_caps.name
+                if source_caps.resolve() != dest_caps.resolve():
+                    shutil.copy2(source_caps, dest_caps)
+
+            # =================================================================================
+            # STEP 2: DETERMINE REPLACEMENT STRATEGY
+            # =================================================================================
+            
+            manual_list: List[str] = []
+            ratio_requested = (
+                config.ratio_replace is not None
+                and float(config.ratio_replace) > 0
             )
-            crosslink_count = 0
-            crosslink_types = set()
-            models_with_crosslinks = 0
+            generated_from_ratio = False
 
-            for model_id in system.get_models():
-                model = system.get_model(model_id=model_id)
-                if hasattr(model, "crosslink") and model.crosslink:
-                    if len(model.crosslink) > 0:
-                        models_with_crosslinks += 1
-                        for crosslink in model.crosslink:
-                            crosslink_count += 1
-                            if hasattr(crosslink, "resname"):
-                                crosslink_types.add(crosslink.resname)
+            # Check for manual replacements first
+            if not ratio_requested and getattr(config, "manual_replacements", None):
+                manual_list = [
+                    str(instr).strip()
+                    for instr in config.manual_replacements
+                    if str(instr).strip()
+                ]
+                LOG.debug(f"Using {len(manual_list)} manual replacement instructions")
 
-            if crosslink_types:
-                LOG.info(
-                    f"{Fore.BLUE}Crosslink residue types: {', '.join(crosslink_types)}{Style.RESET_ALL}"
+            # If ratio requested and we have connect groups, use connect-based replacement
+            if ratio_requested:
+                connect_groups = (
+                    self._load_connect_groups(connect_file) if connect_file else []
                 )
+                
+                if connect_groups:
+                    records = self._load_crosslinks_from_models(type_dir)
+                    manual_list = self._build_ratio_replacements_from_connect(
+                        records=records,
+                        connect_groups=connect_groups,
+                        ratio_replace=float(config.ratio_replace),
+                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        config=config,
+                    )
+                    generated_from_ratio = bool(manual_list)
+                    LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from connect groups")
+                else:
+                    # Fall back to system-based ratio replacement
+                    manual_list = self._build_ratio_replacements(
+                        system=system,
+                        ratio_replace=float(config.ratio_replace),
+                        fibril_length=config.fibril_length,
+                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                    )
+                    generated_from_ratio = bool(manual_list)
+                    LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from system")
 
-            if crosslink_count == 0:
-                LOG.warning("No crosslinks found in the system - nothing to replace!")
+            # No replacements to make
+            if not manual_list:
+                if ratio_requested:
+                    LOG.warning(
+                        "No replacement instructions generated (ratio=%s%%, scope=%s). "
+                        "No matching markers found.",
+                        config.ratio_replace,
+                        getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                    )
+                else:
+                    LOG.debug("No replacement instructions provided")
+                    
+                try:
+                    config._replacement_skipped = True  # type: ignore[attr-defined]
+                except Exception:
+                    pass
                 return system
 
-            if not hasattr(system, "config"):
-                system.config = config
+            # Save generated instructions if from ratio
+            if generated_from_ratio:
+                try:
+                    target_file_path = temp_dir / "manual_replacements.txt"
+                    with open(target_file_path, "w") as f:
+                        for instruction in manual_list:
+                            f.write(f"{instruction}\n")
+                    LOG.debug(f"Saved ratio-based instructions to {target_file_path}")
+                except Exception as e:
+                    LOG.warning("Could not persist ratio-based instructions: %s", e)
 
-            # Calculate bounds for replacement region
-            z_bounds = self._calculate_fibril_bounds(system, config.fibril_length)
-
-            # Select crosslinks for replacement
-            self._select_replacements(system, config.ratio_replace, z_bounds)
-            to_replace_count = 0
-            to_replace_types = {}
-
-            for model_id in system.get_models():
-                model = system.get_model(model_id=model_id)
-                if hasattr(model, "crosslink") and model.crosslink:
-                    for crosslink in model.crosslink:
-                        if hasattr(crosslink, "state") and crosslink.state == "replace":
-                            to_replace_count += 1
-                            if hasattr(crosslink, "resname"):
-                                to_replace_types[crosslink.resname] = (
-                                    to_replace_types.get(crosslink.resname, 0) + 1
-                                )
-
-            if to_replace_types:
-                LOG.debug("Replacing:")
-                for resname, count in to_replace_types.items():
-                    LOG.debug(f"  - {resname}: {count}")
-
-            if to_replace_count == 0:
-                LOG.warning(
-                    "No crosslinks selected for replacement - skipping Chimera step"
-                )
-                return system
-
-            # Write replacement instructions to file
+            # Write replacement instructions file
             replace_file = temp_dir / "replace.txt"
-            self._write_replace_file(system, str(replace_file))
+            with open(replace_file, "w") as f:
+                for instruction in manual_list:
+                    clean_instr = instruction.strip().strip('"').strip("'")
+                    f.write(f"{clean_instr}\n")
 
+            LOG.info(f"Prepared {len(manual_list)} replacement instructions")
+
+            # Ensure type_dir has caps files
+            if not list(type_dir.glob("*.caps.pdb")):
+                # Try fallback directories
+                fallback_dirs = []
+                for t in ["DT", "TD", "D", "T", "M", "NC"]:
+                    cand = temp_dir / t
+                    if cand not in fallback_dirs:
+                        fallback_dirs.append(cand)
+                if list(temp_dir.glob("*.caps.pdb")):
+                    fallback_dirs.append(temp_dir)
+
+                for cand in fallback_dirs:
+                    try:
+                        if cand.exists() and list(Path(cand).glob("*.caps.pdb")):
+                            type_dir = Path(cand)
+                            break
+                    except Exception:
+                        continue
+
+            # Copy caps from root if needed
+            caps_in_root = list(temp_dir.glob("*.caps.pdb"))
+            for f in caps_in_root:
+                dest = type_dir / f.name
+                if not dest.exists():
+                    shutil.copy2(f, dest)
+
+            # =================================================================================
+            # STEP 3: EXECUTE CHIMERA REPLACEMENT
+            # =================================================================================
+            
+            success = await self._run_chimera_command(
+                config, 
+                str(replace_file), 
+                type_dir, 
+                working_dir_root
+            )
+            
+            if not success:
+                raise GeometryGenerationError(
+                    message="Chimera execution failed.",
+                    error_code="GEO_ERR_004",
+                )
+
+            LOG.debug("Chimera replacements executed.")
+
+            # =================================================================================
+            # STEP 4: AGGRESSIVE BACK-PROPAGATION (FIX TOPOLOGY)
+            # Overwrite ALL copies of modified files in geometry_gen
+            # =================================================================================
+            
+            if getattr(config, "auto_fix_unpaired", False):
+                source_dir = type_dir
+                updated_count = 0
+                
+                if source_dir.exists():
+                    mutated_files = list(source_dir.glob("*.caps.pdb"))
+                    
+                    for mutated_file in mutated_files:
+                        filename = mutated_file.name
+                        
+                        # Overwrite in root of geometry_gen
+                        root_target = geometry_gen_dir / filename
+                        if root_target.exists():
+                            shutil.copy2(mutated_file, root_target)
+                        
+                        # Overwrite in ALL subdirectories of geometry_gen
+                        for subdir in geometry_gen_dir.iterdir():
+                            if subdir.is_dir():
+                                sub_target = subdir / filename
+                                if sub_target.exists():
+                                    shutil.copy2(mutated_file, sub_target)
+                        
+                        updated_count += 1
+
+                LOG.debug(f"Synced {updated_count} modified caps back to geometry_gen")
+
+            # =================================================================================
+            # STEP 5: RECOMPUTE CONNECTIVITY AFTER CHANGES
+            # Updates in-memory connects and rewrites connect_from_colbuilder.txt
+            # =================================================================================
+            
             try:
-                with open(replace_file, "r") as f:
-                    replace_lines = f.readlines()
-                    LOG.debug(
-                        f"Replace file contains {len(replace_lines)} instructions"
-                    )
-                    if len(replace_lines) > 0:
-                        LOG.debug(f"First few instructions: {replace_lines[:5]}")
-                    else:
-                        LOG.warning("Replace file is empty!")
+                connector = Connect(system=system)
+                new_connect = connector.run_connect(system=system)
+
+                if new_connect:
+                    for mid, conns in new_connect.items():
+                        model_obj = system.get_model(model_id=mid)
+                        if model_obj:
+                            model_obj.connect = conns
+
+                    connect_file_path = temp_dir / "connect_from_colbuilder.txt"
+                    connector.write_connect(system=system, connect_file=connect_file_path)
+
+                    try:
+                        geom_connect_path = geometry_gen_dir / "connect_from_colbuilder.txt"
+                        shutil.copy2(connect_file_path, geom_connect_path)
+                    except Exception as e:
+                        LOG.warning(f"Could not sync connectivity to geometry_gen: {e}")
+                else:
+                    LOG.warning("Connectivity recomputation returned empty; keeping previous connects.")
             except Exception as e:
-                LOG.warning(f"Error reading replace file: {e}")
+                LOG.warning(f"Failed to recompute connectivity after replacement: {e}")
 
-            # Run replacement with Chimera
-            await self._run_replacement_with_chimera(
-                system, config, str(replace_file), temp_dir
-            )
-
-            # Get final count for logging
-            replaced_count = system.count_states(state="replace")
-            LOG.info(
-                f"{Fore.BLUE}Successfully replaced {replaced_count} crosslinks{Style.RESET_ALL}"
-            )
-
+            LOG.info(f"{Fore.GREEN}Replacement completed successfully{Style.RESET_ALL}")
+            
             return system
 
         except Exception as e:
@@ -245,343 +562,131 @@ class CrosslinkReplacer:
                     error_code="GEO_ERR_004",
                 )
 
-            output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
+            working_dir_root = Path(config.working_directory).resolve()
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            local_pdb = temp_dir / input_pdb.name
+            if input_pdb.resolve() != local_pdb.resolve():
+                shutil.copy2(input_pdb, local_pdb)
 
             # Create type-specific directory within the temp directory
             type_dir = temp_dir / "NC"
             type_dir.mkdir(parents=True, exist_ok=True)
 
             # Split PDB into models
-            model_count = self._split_pdb_into_models(str(input_pdb), str(type_dir))
+            self._split_pdb_into_models(local_pdb, type_dir)
+            system_from_caps: Optional[System] = None
 
-            # Create temporary crosslinks file within the type directory
-            temp_crosslinks_file = type_dir / "temp_crosslinks.txt"
-            LOG.debug(f"Creating temporary crosslinks file: {temp_crosslinks_file}")
+            # Copy manual_replacements.txt if present
+            candidate_path = working_dir_root / "manual_replacements.txt"
+            if not candidate_path.exists():
+                candidate_path = Path.cwd() / "manual_replacements.txt"
+            target_file_path = temp_dir / "manual_replacements.txt"
+            if candidate_path.exists() and candidate_path.resolve() != target_file_path.resolve():
+                shutil.copy2(candidate_path, target_file_path)
 
-            with open(temp_crosslinks_file, "w") as f:
-                for model_id in range(model_count):
-                    model_path = type_dir / f"{model_id}.caps.pdb"
-                    if not model_path.exists():
-                        LOG.warning(f"Model file not found: {model_path}")
-                        continue
+            # Determine replacement strategy
+            manual_list: List[str] = []
+            ratio_requested = config.ratio_replace is not None and float(config.ratio_replace) > 0
+            generated_from_ratio = False
 
-                    LOG.debug(f"Processing model file: {model_path}")
-                    atom_count = 0
-                    crosslink_count = 0
-
-                    with open(model_path, "r") as model_file:
-                        for line in model_file:
-                            if line.startswith(("ATOM", "HETATM")):
-                                atom_count += 1
-
-                                if len(line) >= 20:
-                                    resname = line[17:20].strip()
-
-                                    if resname in [
-                                        "L2Y",
-                                        "L2X",
-                                        "L3Y",
-                                        "L3X",
-                                        "LY2",
-                                        "LY3",
-                                        "LX2",
-                                        "LX3",
-                                        "LYX",
-                                        "LXY",
-                                        "LYY",
-                                        "LXX",
-                                        "L4Y",
-                                        "L5Y",
-                                        "LY4",
-                                        "LY5",
-                                        "LX4",
-                                        "LX5",
-                                        "LGX",
-                                        "LPS",
-                                        "AGS",
-                                        "APD",
-                                    ]:
-                                        f.write(f"{model_id}|{line}")
-                                        crosslink_count += 1
-
-                    LOG.debug(
-                        f"Model {model_id}: {atom_count} atoms total, {crosslink_count} crosslink atoms found"
-                    )
-
-            # Process crosslinks to identify residues
-            LOG.info("Analyzing crosslinks...")
-            crosslink_residues = {}
-
-            with open(temp_crosslinks_file, "r") as f:
-                for line in f:
-                    parts = line.strip().split("|", 1)
-                    if len(parts) != 2:
-                        continue
-
-                    model_id = int(parts[0])
-                    atom_line = parts[1]
-
-                    atom_name = atom_line[12:16].strip()
-                    resname = atom_line[17:20].strip()
-                    resid = atom_line[22:26].strip()
-                    chain = atom_line[21]
-                    x = float(atom_line[30:38])
-                    y = float(atom_line[38:46])
-                    z = float(atom_line[46:54])
-
-                    key = (model_id, resname, resid, chain)
-
-                    if key not in crosslink_residues:
-                        crosslink_residues[key] = {
-                            "model_id": model_id,
-                            "resname": resname,
-                            "resid": resid,
-                            "chain": chain,
-                            "atoms": [],
-                            "position": None,
-                        }
-
-                    crosslink_residues[key]["atoms"].append(
-                        {"atom_name": atom_name, "position": [x, y, z]}
-                    )
-
-            # Calculate center of each residue
-            for key, residue in crosslink_residues.items():
-                atoms = residue["atoms"]
-                if not atoms:
-                    continue
-
-                x_sum = sum(atom["position"][0] for atom in atoms)
-                y_sum = sum(atom["position"][1] for atom in atoms)
-                z_sum = sum(atom["position"][2] for atom in atoms)
-
-                residue["position"] = [
-                    x_sum / len(atoms),
-                    y_sum / len(atoms),
-                    z_sum / len(atoms),
+            # Check for manual replacements
+            if getattr(config, "manual_replacements", None):
+                manual_list = [
+                    str(instr).strip()
+                    for instr in config.manual_replacements
+                    if str(instr).strip()
                 ]
 
-            # Filter out residues without positions
-            crosslink_residues = {
-                k: v for k, v in crosslink_residues.items() if v["position"] is not None
-            }
-            LOG.debug(f"Found {len(crosslink_residues)} crosslink residues")
-
-            # Define crosslink pair types we're looking for
-            pair_types = [
-                (["L4Y", "L4X", "LY4", "LX4"], ["L5Y", "L5X", "LY5", "LX5"]),
-                (["LGX", "LPS"], ["AGS", "APD"]),
-            ]
-
-            # Group residues by type
-            residues_by_type = {}
-            for key, residue in crosslink_residues.items():
-                resname = residue["resname"]
-                if resname not in residues_by_type:
-                    residues_by_type[resname] = []
-                residues_by_type[resname].append((key, residue))
-
-            LOG.debug(f"Found residue types: {list(residues_by_type.keys())}")
-
-            # Identify crosslink pairs
-            all_pairs = []
-
-            for type1_list, type2_list in pair_types:
-                type1_residues = []
-                for resname in type1_list:
-                    if resname in residues_by_type:
-                        type1_residues.extend(residues_by_type[resname])
-
-                type2_residues = []
-                for resname in type2_list:
-                    if resname in residues_by_type:
-                        type2_residues.extend(residues_by_type[resname])
-
-                if not type1_residues or not type2_residues:
-                    continue
-
-                for i, (key1, residue1) in enumerate(type1_residues):
-                    for j, (key2, residue2) in enumerate(type2_residues):
-                        try:
-                            pos1 = residue1["position"]
-                            pos2 = residue2["position"]
-                            dist = self._calculate_distance(pos1, pos2)
-
-                            if dist <= 10.0:
-                                pair = {
-                                    "members": [residue1, residue2],
-                                    "distance": dist,
-                                    "keys": [key1, key2],
-                                }
-                                all_pairs.append(pair)
-                                LOG.debug(
-                                    f"Found pair at distance {dist:.2f}Å: "
-                                    f"{residue1['resname']} {residue1['resid']}{residue1['chain']} (model {residue1['model_id']}) - "
-                                    f"{residue2['resname']} {residue2['resid']}{residue2['chain']} (model {residue2['model_id']})"
-                                )
-                        except Exception as e:
-                            LOG.warning(
-                                f"Error calculating distance between {residue1['resname']} {residue1['resid']}{residue1['chain']} and "
-                                f"{residue2['resname']} {residue2['resid']}{residue2['chain']}: {e}"
-                            )
-
-            # Sort pairs by distance and filter for uniqueness
-            all_pairs.sort(key=lambda p: p["distance"])
-
-            used_residues = set()
-            unique_pairs = []
-
-            for pair in all_pairs:
-                key1 = pair["keys"][0]
-                key2 = pair["keys"][1]
-
-                if key1 not in used_residues and key2 not in used_residues:
-                    unique_pairs.append(pair)
-                    used_residues.add(key1)
-                    used_residues.add(key2)
-
-            # Calculate how many pairs to replace
-            num_to_replace = min(
-                math.ceil(len(unique_pairs) * config.ratio_replace / 100),
-                len(unique_pairs),
-            )
-
-            LOG.info(
-                f"Will replace {num_to_replace} pairs out of {len(unique_pairs)} (ratio: {config.ratio_replace}%)"
-            )
-
-            # Select random pairs for replacement
-            pairs_to_replace = (
-                random.sample(unique_pairs, num_to_replace)
-                if num_to_replace > 0
-                else []
-            )
-
-            instructions = []
-
-            for pair in pairs_to_replace:
-                for residue in pair["members"]:
-                    model_id = residue["model_id"]
-                    instructions.append(
-                        f"{model_id}.caps.pdb LYS {residue['resid']} {residue['chain']}"
-                    )
-                    LOG.debug(
-                        f"Will replace {residue['resname']} {residue['resid']}{residue['chain']} in model {model_id}"
-                    )
-
-            # Handle no replacements case
-            if not instructions:
-                LOG.warning("No replacement instructions generated")
-                LOG.info(
-                    "Creating output file without modifications since no replacements were made"
+            # If ratio requested, generate instructions
+            if not manual_list and ratio_requested:
+                records = self._load_crosslinks_from_models(type_dir)
+                manual_list = self._build_ratio_replacements_from_records(
+                    records=records,
+                    ratio_replace=float(config.ratio_replace),
+                    fibril_length=getattr(config, "fibril_length", 0.0),
+                    scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
                 )
-                with open(output_pdb, "w") as out:
-                    with open(input_pdb, "r") as in_file:
-                        first_line = in_file.readline().strip()
-                        if first_line.startswith("CRYST1"):
-                            out.write(first_line + "\n")
-                        else:
-                            in_file.seek(0)
-                            out.write(
-                                "REMARK   Generated by colbuilder - no replacements made\n"
-                            )
+                generated_from_ratio = bool(manual_list)
 
-                        for line in in_file:
-                            if line.startswith(("ATOM", "HETATM", "TER")):
-                                out.write(line)
+            # Try loading from manual_replacements.txt file
+            if not manual_list and target_file_path.exists() and not ratio_requested:
+                with open(target_file_path, "r") as f:
+                    manual_list = [
+                        line.strip()
+                        for line in f
+                        if line.strip() and not line.startswith("#")
+                    ]
 
-                    out.write("END\n")
+            # Check config dict for manual_replacements
+            if not manual_list and hasattr(config, "__dict__"):
+                manual_list = config.__dict__.get("manual_replacements") or []
 
+            # No replacements to make
+            if not manual_list:
+                LOG.warning(
+                    f"{Fore.YELLOW}No replacement instructions generated. Copying input to output without changes.{Style.RESET_ALL}"
+                )
+                output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
+                if output_pdb.resolve() != local_pdb.resolve():
+                    shutil.copy2(local_pdb, output_pdb)
+                else:
+                    output_pdb = local_pdb
                 return None, output_pdb
 
-            # Run Chimera to perform replacements
-            success = self._run_chimera_replacement(
-                instructions=instructions,
-                chimera_scripts_dir=config.CHIMERA_SCRIPTS_DIR,
-                system_type=str(type_dir),
-                output_pdb=str(output_pdb),
-                temp_dir=temp_dir,
+            # Save generated instructions if from ratio
+            if generated_from_ratio:
+                try:
+                    with open(target_file_path, "w") as f:
+                        for instruction in manual_list:
+                            f.write(f"{instruction}\n")
+                    LOG.info(
+                        "Saved ratio-based replacement instructions to %s for transparency.",
+                        target_file_path,
+                    )
+                except Exception as e:
+                    LOG.warning("Could not persist ratio-based instructions: %s", e)
+
+            # Write replacement file
+            replace_file = temp_dir / "replace.txt"
+            with open(replace_file, "w") as f:
+                for instruction in manual_list:
+                    clean_instr = str(instruction).strip().strip('"').strip("'")
+                    f.write(f"{clean_instr}\n")
+
+            # Run Chimera
+            success = await self._run_chimera_command(
+                config,
+                str(replace_file),
+                type_dir,
+                working_dir_root,
             )
 
             if not success:
-                LOG.error("Chimera replacement failed")
                 raise GeometryGenerationError(
-                    message="Chimera replacement process failed",
+                    message="Chimera replacement failed in direct mode",
                     error_code="GEO_ERR_004",
                 )
 
-            # We now have individual model files with replacements
-            # Create a System from the output for return
+            # Combine caps files into output PDB
+            output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
+            self._combine_caps_to_pdb(
+                source_dir=type_dir,
+                output_pdb=output_pdb,
+                template_pdb=local_pdb,
+            )
+
+            # Try to build system and recompute connectivity
             try:
-                crystal = Crystal(pdb=str(input_pdb))
-                system = System(crystal=crystal)
-
-                LOG.info(f"Final PDB with replacements written to: {output_pdb}")
-
-                with open(output_pdb, "w") as out:
-                    # Write header
-                    with open(input_pdb, "r") as in_file:
-                        first_line = in_file.readline().strip()
-                        if first_line.startswith("CRYST1"):
-                            out.write(first_line + "\n")
-                        else:
-                            out.write(
-                                "REMARK   Generated by colbuilder direct replacement\n"
-                            )
-
-                    # Write all model contents in order
-                    pdb_files = sorted(
-                        [f for f in type_dir.glob("*.caps.pdb")],
-                        key=lambda x: int(x.stem.split(".")[0]),
-                    )
-
-                    LOG.debug(
-                        f"Found {len(pdb_files)} model files to include in output PDB"
-                    )
-
-                    for pdb_file in pdb_files:
-                        with open(pdb_file, "r") as f:
-                            for line in f:
-                                if line.startswith(("ATOM", "HETATM", "TER")):
-                                    if line.startswith("HETATM"):
-                                        line = "ATOM  " + line[6:]
-                                    out.write(line)
-
-                    out.write("END\n")
-                return system, output_pdb
-
+                system_from_caps = self._categorize_caps_and_build_system(
+                    base_dir=temp_dir, source_dir=type_dir, reference_pdb=local_pdb
+                )
+                if system_from_caps:
+                    self._recompute_connectivity_from_caps(system_from_caps, temp_dir)
             except Exception as e:
-                LOG.error(f"Error creating output PDB with System class: {str(e)}")
-                LOG.info("Falling back to direct file combining method")
+                LOG.warning(f"Failed to build system/connectivity from replaced caps: {e}")
 
-                with open(output_pdb, "w") as out:
-                    out.write("REMARK   Generated by colbuilder direct replacement\n")
-                    try:
-                        with open(input_pdb, "r") as in_file:
-                            for line in in_file:
-                                if line.startswith("CRYST1"):
-                                    out.write(line)
-                                    break
-                    except Exception as e:
-                        LOG.warning(f"Could not retrieve CRYST1 info: {e}")
-
-                    pdb_files = sorted(
-                        [f for f in type_dir.glob("*.caps.pdb")],
-                        key=lambda x: int(x.stem.split(".")[0]),
-                    )
-
-                    for pdb_file in pdb_files:
-                        with open(pdb_file, "r") as f:
-                            for line in f:
-                                if line.startswith(("ATOM", "HETATM", "TER")):
-                                    if line.startswith("HETATM"):
-                                        line = "ATOM  " + line[6:]
-                                    out.write(line)
-
-                    out.write("END\n")
-
-                LOG.info(f"Created output PDB file using fallback method: {output_pdb}")
-                return None, output_pdb
+            return system_from_caps, output_pdb
 
         except GeometryGenerationError:
             raise
@@ -593,22 +698,14 @@ class CrosslinkReplacer:
                 error_code="GEO_ERR_004",
             )
 
+    # ==================================================================================
+    # HELPER METHODS - Position/Distance Calculations
+    # ==================================================================================
+
     def _calculate_fibril_bounds(
         self, system: Any, fibril_length: float
     ) -> Tuple[float, float]:
-        """
-        Calculate the z-coordinate bounds of the collagen fibril.
-
-        Determines an appropriate z-coordinate range to focus crosslink replacement,
-        based on model centers of geometry and the specified fibril length.
-
-        Args:
-            system: System containing models with spatial information
-            fibril_length: Length of the fibril in nanometers
-
-        Returns:
-            Tuple of (z_min, z_max) as floating point values defining the bounds
-        """
+        """Calculate the z-coordinate bounds of the collagen fibril."""
         try:
             z_values = []
 
@@ -624,7 +721,7 @@ class CrosslinkReplacer:
 
             if not z_values:
                 LOG.warning(
-                    "No valid z-coordinates found in system models or crosslinks"
+                    "No valid z-coordinates found in system models"
                 )
                 return (0.0, 10000.0)
 
@@ -650,21 +747,7 @@ class CrosslinkReplacer:
             return (0.0, 10000.0)
 
     def _get_z_position(self, position: Any) -> float:
-        """
-        Extract the z-component from a position vector.
-
-        Safely extracts the z-coordinate from various position representations
-        (numpy arrays, lists, tuples) and converts it to a Python float.
-
-        Args:
-            position: Position object which may be a numpy array, list, tuple or similar
-
-        Returns:
-            Z-coordinate as a Python float
-
-        Raises:
-            IndexError, TypeError, ValueError: If extraction fails
-        """
+        """Extract the z-component from a position vector."""
         try:
             if hasattr(position, "shape"):
                 if len(position.shape) == 1 and position.shape[0] >= 3:
@@ -691,22 +774,7 @@ class CrosslinkReplacer:
             raise
 
     def _calculate_distance(self, pos1: Any, pos2: Any) -> float:
-        """
-        Calculate Euclidean distance between two positions.
-
-        Handles various position representations (numpy arrays, lists, tuples)
-        and computes the 3D Euclidean distance between them.
-
-        Args:
-            pos1: First position as a vector-like object
-            pos2: Second position as a vector-like object
-
-        Returns:
-            Distance as a Python float
-
-        Raises:
-            IndexError, TypeError, ValueError: If position extraction fails
-        """
+        """Calculate Euclidean distance between two positions."""
         try:
             x1 = self._get_component(pos1, 0)
             y1 = self._get_component(pos1, 1)
@@ -729,22 +797,7 @@ class CrosslinkReplacer:
             raise
 
     def _get_component(self, position: Any, index: int) -> float:
-        """
-        Extract a specific component from a position vector.
-
-        Safely extracts the specified component (x=0, y=1, z=2) from various
-        position representations and converts it to a Python float.
-
-        Args:
-            position: Position object which may be a numpy array, list, tuple or similar
-            index: Component index to extract (0=x, 1=y, 2=z)
-
-        Returns:
-            Component value as a Python float
-
-        Raises:
-            IndexError, TypeError, ValueError: If extraction fails
-        """
+        """Extract a specific component from a position vector."""
         try:
             if hasattr(position, "shape"):
                 if len(position.shape) == 1 and position.shape[0] > index:
@@ -769,536 +822,1125 @@ class CrosslinkReplacer:
             LOG.error(f"position type: {type(position)}, value: {position}")
             raise
 
-    def _write_replace_file(self, system: Any, replace_file: str) -> None:
-        """
-        Write replacement instructions to a file for Chimera.
+    # ==================================================================================
+    # HELPER METHODS - Chimera Execution
+    # ==================================================================================
 
-        Creates a file containing replacement instructions for crosslinks
-        marked with state='replace' in the system. Each line specifies a model,
-        residue name, residue ID, and chain for Chimera to process.
-
-        Args:
-            system: System with marked crosslinks
-            replace_file: Path to the output file for instructions
-
-        Raises:
-            GeometryGenerationError: If the file cannot be written
-        """
-        try:
-            LOG.debug(f"Writing replacement instructions to {replace_file}")
-            with open(replace_file, "w") as f:
-                instruction_count = 0
-                for model_id in system.get_models():
-                    model = system.get_model(model_id=model_id)
-                    if not hasattr(model, "crosslink") or not model.crosslink:
-                        continue
-
-                    for cross in model.crosslink:
-                        if hasattr(cross, "state") and cross.state == "replace":
-                            if (
-                                hasattr(cross, "resname")
-                                and hasattr(cross, "resid")
-                                and hasattr(cross, "chain")
-                            ):
-                                # Write instruction in correct format for Chimera script
-                                instruction = f"{int(model_id)}.caps.pdb LYS {cross.resid} {cross.chain}\n"
-                                f.write(instruction)
-                                instruction_count += 1
-                            else:
-                                LOG.warning(
-                                    f"Crosslink in model {model_id} missing required attributes (resname, resid, or chain)"
-                                )
-
-                if instruction_count == 0:
-                    LOG.warning(
-                        "No replacement instructions were written! Check if crosslinks have proper attributes."
-                    )
-
-        except Exception as e:
-            LOG.error(f"Failed to write replacement file: {e}")
-            raise GeometryGenerationError(
-                message=f"Failed to write replacement file: {str(e)}",
-                error_code="GEO_ERR_004",
-            )
-
-    async def _run_replacement_with_chimera(
+    async def _run_chimera_command(
         self,
-        system: Any,
         config: ColbuilderConfig,
-        replace_file: str,
-        temp_dir: Optional[Path] = None,
-    ) -> None:
-        """
-        Execute Chimera to perform crosslink replacements.
-
-        Args:
-            system: System with crosslinks to replace
-            config: Configuration settings for Chimera execution
-            replace_file: Path to file with replacement instructions
-            temp_dir: Optional temporary directory for file operations
-        """
-        try:
-            LOG.debug("Running Chimera to replace crosslinks with lysines")
-
-            # Determine system type
-            model_zero = system.get_model(model_id=0.0)
-            if not hasattr(model_zero, "type"):
-                LOG.warning("Model doesn't have a 'type' attribute, defaulting to 'D'")
-                system_type = "D"  # Default to 'D' type, divalent
-            else:
-                system_type = model_zero.type
-
-            if temp_dir is None:
-                temp_dir = Path(config.working_directory) / ".tmp" / "replacement"
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                LOG.debug(f"Created temporary directory for replacement: {temp_dir}")
-
-            # Create type-specific directory within the temp directory
-            type_dir = temp_dir / system_type
-            type_dir.mkdir(parents=True, exist_ok=True)
-            LOG.debug(f"Using type-specific directory for replacement: {type_dir}")
-
-            copied_count = 0
-
-            model_ids = set(int(float(model_id)) for model_id in system.get_models())
-            LOG.debug(f"System has {len(model_ids)} model IDs")
-
-            # Possible source locations for PDB files
-            source_locations = [
-                temp_dir,
-                Path.cwd(),
-                Path(config.working_directory),
-                Path.cwd() / ".tmp" / "geometry_gen",
-                temp_dir.parent if temp_dir else None,
-            ]
-            source_locations = [loc for loc in source_locations if loc and loc.exists()]
-
-            for loc in source_locations:
-                caps_files = list(loc.glob("*.caps.pdb"))
-
-                for caps_file in caps_files:
-                    try:
-                        model_id = int(caps_file.stem.split(".")[0])
-
-                        if model_id in model_ids:
-                            target = type_dir / caps_file.name
-
-                            if not target.exists():
-                                shutil.copy2(caps_file, target)
-                                copied_count += 1
-                    except Exception as e:
-                        LOG.error(f"Error processing caps file {caps_file}: {e}")
-
-                if copied_count < len(model_ids):
-                    regular_pdbs = list(loc.glob("*.pdb"))
-
-                    for pdb_file in regular_pdbs:
-                        if any(
-                            x in pdb_file.name
-                            for x in ["_geom_only", "_original", "output"]
-                        ):
-                            continue
-
-                        try:
-                            model_id = int(pdb_file.stem.split(".")[0])
-
-                            if model_id in model_ids:
-                                target = type_dir / f"{model_id}.caps.pdb"
-
-                                if not target.exists():
-                                    shutil.copy2(pdb_file, target)
-                                    copied_count += 1
-                        except Exception as e:
-                            # Ignore errors for files that don't match our pattern
-                            continue
-
-            if copied_count < len(model_ids):
-                missing_models = set(model_ids) - set(
-                    int(caps_file.stem.split(".")[0])
-                    for caps_file in type_dir.glob("*.caps.pdb")
-                )
-                LOG.debug(f"Missing models: {sorted(missing_models)}")
-
-                for source_dir in source_locations:
-                    for model_id in sorted(missing_models):
-                        pattern = f"**/{model_id}*.pdb"
-                        matching_files = list(source_dir.glob(pattern))
-
-                        for found_file in matching_files:
-                            if found_file.is_file():
-                                target = type_dir / f"{model_id}.caps.pdb"
-                                if not target.exists():
-                                    try:
-                                        shutil.copy2(found_file, target)
-                                        copied_count += 1
-                                        missing_models.remove(model_id)
-                                        break
-                                    except Exception as e:
-                                        LOG.warning(
-                                            f"Error copying file {found_file}: {e}"
-                                        )
-
-            caps_files = list(type_dir.glob("*.caps.pdb"))
-            LOG.debug(
-                f"Type directory contains {len(caps_files)} caps files for {len(model_ids)} models"
-            )
-
-            if len(caps_files) == 0:
-                LOG.error(
-                    "No caps files found in type directory! Creating placeholder files..."
-                )
-
-                for model_id in sorted(model_ids):
-                    target = type_dir / f"{model_id}.caps.pdb"
-                    if not target.exists():
-                        try:
-                            with open(target, "w") as f:
-                                f.write("REMARK Created as placeholder for Chimera\n")
-                                f.write(
-                                    "ATOM      1  CA  GLY A   1      0.000   0.000   0.000  1.00 20.00\n"
-                                )
-                                f.write("TER\nEND\n")
-                            LOG.debug(f"Created placeholder file for model {model_id}")
-                        except Exception as e:
-                            LOG.warning(
-                                f"Failed to create placeholder for model {model_id}: {e}"
-                            )
-
-                caps_files = list(type_dir.glob("*.caps.pdb"))
-                LOG.info(f"Created {len(caps_files)} placeholder model files")
-
-            if len(caps_files) == 0:
-                LOG.error(
-                    "Could not find or create any model files! Replacement cannot proceed."
-                )
-                raise GeometryGenerationError(
-                    message="No model files found for replacement",
-                    error_code="GEO_ERR_004",
-                )
-
-            replace_path = Path(replace_file)
-            LOG.debug(f"Using replacement instructions from: {replace_path}")
-
-            if not replace_path.exists():
-                LOG.error(f"Replacement file not found: {replace_path}")
-                raise GeometryGenerationError(
-                    message=f"Replacement file not found: {replace_path}",
-                    error_code="GEO_ERR_004",
-                )
-
-            with open(replace_path, "r") as f:
-                instructions = f.readlines()
-
-            if not instructions:
-                LOG.warning("Replacement file is empty, skipping Chimera execution")
-                return
-
-            # Find the swapaa.py script
-            chimera_scripts_dir = None
-            try:
-                if (
-                    hasattr(config, "CHIMERA_SCRIPTS_DIR")
-                    and config.CHIMERA_SCRIPTS_DIR
-                ):
-                    chimera_scripts_dir = Path(config.CHIMERA_SCRIPTS_DIR)
-
-                if not chimera_scripts_dir or not chimera_scripts_dir.exists():
-                    if hasattr(self, "file_manager") and self.file_manager:
-                        try:
-                            chimera_scripts_dir = self.file_manager.find_file(
-                                "chimera_scripts"
-                            )
-                        except:
-                            pass
-
-                    if not chimera_scripts_dir or not chimera_scripts_dir.exists():
-                        potential_dirs = [
-                            Path(config.working_directory) / "chimera_scripts",
-                            Path(config.working_directory)
-                            / "src"
-                            / "colbuilder"
-                            / "chimera_scripts",
-                            Path.cwd() / "chimera_scripts",
-                            Path.cwd() / "src" / "colbuilder" / "chimera_scripts",
-                            Path("/usr/local/lib/colbuilder/chimera_scripts"),
-                            Path(__file__).parent / "chimera_scripts",
-                        ]
-
-                        for dir_path in potential_dirs:
-                            if dir_path.exists():
-                                chimera_scripts_dir = dir_path
-                                break
-
-                if not chimera_scripts_dir or not chimera_scripts_dir.exists():
-                    LOG.warning(
-                        "Could not find chimera_scripts directory in standard locations"
-                    )
-                    search_dirs = [Path(config.working_directory), Path.cwd()]
-                    for search_dir in search_dirs:
-                        for script_dir in search_dir.glob("**/chimera_scripts"):
-                            if script_dir.exists():
-                                chimera_scripts_dir = script_dir
-                                LOG.info(
-                                    f"Found chimera_scripts directory through search: {chimera_scripts_dir}"
-                                )
-                                break
-            except Exception as e:
-                LOG.error(f"Error finding chimera_scripts directory: {e}")
-                raise GeometryGenerationError(
-                    message=f"Error finding chimera_scripts directory: {str(e)}",
-                    error_code="GEO_ERR_004",
-                )
-
-            if not chimera_scripts_dir:
-                LOG.error(
-                    "Could not find chimera_scripts directory after extensive search"
-                )
-                raise GeometryGenerationError(
-                    message="Chimera scripts directory not found",
-                    error_code="GEO_ERR_004",
-                )
-
-            LOG.debug(f"Using chimera_scripts directory: {chimera_scripts_dir}")
-
-            swapaa_script = chimera_scripts_dir / "swapaa.py"
-            if not swapaa_script.exists():
-                LOG.error(f"Chimera swapaa script not found at: {swapaa_script}")
-                for pyfile in chimera_scripts_dir.glob("*.py"):
-                    LOG.debug(f"Found script: {pyfile}")
-
-                raise GeometryGenerationError(
-                    message=f"Chimera swapaa script not found: {swapaa_script}",
-                    error_code="GEO_ERR_004",
-                )
-
-            # Set up command for Chimera - make sure to pass proper arguments
-            cmd = f'chimera --nogui --silent --script "{swapaa_script} {replace_path} {type_dir}"'
-
-            import subprocess
-
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            if result.returncode != 0:
-                LOG.error(f"Chimera failed with return code {result.returncode}")
-                if result.stderr:
-                    LOG.error(f"Chimera stderr: {result.stderr}")
-                if result.stdout:
-                    LOG.info(f"Chimera stdout: {result.stdout}")
-
-                raise GeometryGenerationError(
-                    message="Chimera replacement failed", error_code="GEO_ERR_004"
-                )
-
-            if result.stdout:
-                LOG.debug(f"Chimera output: {result.stdout}")
-
-            # After Chimera runs, verify the files were modified
-            modified_caps_files = list(type_dir.glob("*.caps.pdb"))
-
-            # Check if the files have LYS residues that weren't there before
-            has_replacements = False
-            for caps_file in modified_caps_files[:5]:  # Check a few files
-                try:
-                    with open(caps_file, "r") as f:
-                        content = f.read()
-                        if "LYS" in content:
-                            has_replacements = True
-                            LOG.debug(
-                                f"Final check: Found LYS residue in {caps_file}, confirming replacement"
-                            )
-                            break
-                except Exception as e:
-                    LOG.warning(f"Error checking {caps_file} for LYS residues: {e}")
-
-            if not has_replacements:
-                LOG.warning(
-                    "No LYS residues found in sampled caps files. Replacement might not have worked."
-                )
-
-        except Exception as e:
-            LOG.error(f"Error during replacement with Chimera: {str(e)}")
-            import traceback
-
-            LOG.error(f"Traceback: {traceback.format_exc()}")
-            raise GeometryGenerationError(
-                message=f"Error during replacement with Chimera: {str(e)}",
-                error_code="GEO_ERR_004",
-            )
-
-    def _read_replacement_instructions(self, replace_file: str) -> List[str]:
-        """
-        Read replacement instructions from a file.
-
-        Parses the replacement instructions file and returns a list of instruction strings.
-
-        Args:
-            replace_file: Path to the replacement instructions file
-
-        Returns:
-            List of replacement instruction strings
-
-        Raises:
-            GeometryGenerationError: If the file cannot be read
-        """
-        instructions = []
-        try:
-            with open(replace_file, "r") as f:
-                instructions = [line.strip() for line in f if line.strip()]
-        except Exception as e:
-            LOG.error(f"Error reading replacement file: {e}")
-            raise GeometryGenerationError(
-                message=f"Failed to read replacement file: {str(e)}",
-                error_code="GEO_ERR_004",
-            )
-        return instructions
-
-    def _run_chimera_replacement(
-        self,
-        instructions: List[str],
-        chimera_scripts_dir: str,
-        system_type: str,
-        output_pdb: Optional[str] = None,
-        temp_dir: Optional[Path] = None,
+        replace_file_path: str,
+        type_dir_path: Path,
+        root_dir: Path
     ) -> bool:
-        """
-        Run Chimera to perform replacements on PDB files.
-
-        Executes Chimera with the swapaa.py script to replace residues in the
-        specified PDB files according to the provided instructions.
-
-        Args:
-            instructions: List of replacement instructions
-            chimera_scripts_dir: Directory containing Chimera scripts
-            system_type: Type of system (directory name)
-            output_pdb: Optional path for output PDB file
-            temp_dir: Optional temporary directory for intermediate files
-
-        Returns:
-            True if successful, False if replacement failed
-        """
+        """Run Chimera to perform replacements on PDB files."""
         try:
-            scripts_dir = Path(chimera_scripts_dir)
-            system_type_path = Path(system_type)
+            swapaa_script = None
+            search_paths = [
+                Path(config.CHIMERA_SCRIPTS_DIR) / "swapaa.py" if config.CHIMERA_SCRIPTS_DIR else None,
+                root_dir / "chimera_scripts" / "swapaa.py",
+                Path("/home/guido/miniforge3/envs/colbuilder/lib/python3.9/site-packages/colbuilder/chimera_scripts/swapaa.py")
+            ]
+            
+            for p in search_paths:
+                if p and p.exists():
+                    swapaa_script = p
+                    break
 
-            if temp_dir and temp_dir.exists():
-                replace_file = temp_dir / "replace.txt"
-            else:
-                replace_file = Path("replace.txt")
-
-            with open(replace_file, "w") as f:
-                f.write("\n".join(instructions))
-
-            LOG.debug(f"Created replacement file: {replace_file}")
-
-            LOG.debug("Running Chimera to replace crosslinks")
-            swapaa_script = scripts_dir / "swapaa.py"
-
-            if not swapaa_script.exists():
-                raise GeometryGenerationError(
-                    message=f"Chimera swapaa script not found: {swapaa_script}",
-                    error_code="GEO_ERR_004",
-                )
-
-            base_file_str = str(replace_file)
-            if base_file_str.endswith(".txt"):
-                base_file_str = base_file_str[:-4]
-
-            cmd = f'chimera --nogui --silent --script "{swapaa_script} {base_file_str} {system_type_path}"'
-
-            LOG.debug(f"        Running command: {cmd}")
-
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            LOG.debug(f"    Chimera returned: {result.returncode}")
-
-            if result.returncode != 0:
-                LOG.error(f"Chimera failed with return code {result.returncode}")
-                if result.stderr:
-                    LOG.error(f"Chimera stderr: {result.stderr}")
-                if result.stdout:
-                    LOG.info(f"Chimera stdout: {result.stdout}")
-
+            if not swapaa_script:
+                LOG.error("Cannot find swapaa.py script.")
                 return False
 
-            if output_pdb:
-                output_path = Path(output_pdb)
-                with open(output_path, "w") as out:
-                    out.write("REMARK   Generated by colbuilder replacement\n")
+            cmd = f'chimera --nogui --silent --script "{swapaa_script} {replace_file_path} {type_dir_path}"'
 
-                    pdb_files = sorted(
-                        [f for f in system_type_path.glob("*.caps.pdb")],
-                        key=lambda x: int(x.stem.split(".")[0]),
-                    )
+            if getattr(config, "_replacement_verbose", True):
+                LOG.info(
+                    "Running command: chimera --nogui --silent --script %s",
+                    swapaa_script,
+                )
+            LOG.debug("swapaa args: %s %s", replace_file_path, type_dir_path)
+            
+            result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            if result.returncode != 0:
+                LOG.error(f"Chimera Error: {result.stderr}")
+                return False
 
-                    LOG.debug(f"Adding {len(pdb_files)} model files to output PDB")
-
-                    for pdb_file in pdb_files:
-                        with open(pdb_file, "r") as f:
-                            for line in f:
-                                if line.startswith(("ATOM", "HETATM", "TER")):
-                                    if line.startswith("HETATM"):
-                                        line = "ATOM  " + line[6:]
-                                    out.write(line)
-
-                    out.write("END\n")
-
-            LOG.debug("Chimera replacement completed successfully")
+            if getattr(config, "_replacement_verbose", True):
+                LOG.info("Chimera swapaa executed via %s", swapaa_script)
             return True
 
         except Exception as e:
-            LOG.error(f"Error during Chimera execution: {str(e)}")
-            traceback.print_exc()
+            LOG.error(f"Chimera execution exception: {e}")
             return False
 
-    def _split_pdb_into_models(
-        self, input_pdb: Union[str, Path], system_type: Union[str, Path]
-    ) -> int:
+    # ==================================================================================
+    # HELPER METHODS - Ratio-based Replacement Selection  
+    # ==================================================================================
+
+    def _build_ratio_replacements(
+        self, system: Any, ratio_replace: float, fibril_length: float, scope: str = "non_enzymatic"
+    ) -> List[str]:
         """
-        Split a PDB file into individual triple helix models.
+        Select crosslinks to mutate based on a density (ratio_replace) value.
 
-        Divides the PDB file into individual models using the repeating A-B-C
-        chain pattern that is typical of collagen triple helices.
-
-        Args:
-            input_pdb: Path to input PDB file
-            system_type: Type of system/directory to create
-
-        Returns:
-            Number of models created
-
-        Raises:
-            GeometryGenerationError: If the input PDB file is not a valid Colbuilder structure
+        Returns a list of swap instructions in the format expected by swapaa.py.
         """
-        input_pdb_path = Path(input_pdb)
-        system_type_path = Path(system_type)
+        if system is None:
+            LOG.warning("Cannot build ratio-based replacements without a system object.")
+            return []
 
-        is_colbuilder_pdb = False
-        with open(input_pdb_path, "r") as f:
-            first_line = f.readline().strip()
-            if first_line.startswith("CRYST1"):
-                is_colbuilder_pdb = True
+        if ratio_replace <= 0:
+            return []
 
-        if not is_colbuilder_pdb:
+        try:
+            scope = scope or "non_enzymatic"
+            scope = str(scope).strip().lower()
+            if scope not in {"enzymatic", "non_enzymatic", "all"}:
+                LOG.warning("Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope)
+                scope = "non_enzymatic"
+
+            z_bounds = self._calculate_fibril_bounds(system, fibril_length)
+        except Exception as e:
+            LOG.warning("Failed to calculate fibril bounds, using all crosslinks: %s", e)
+            z_bounds = (-math.inf, math.inf)
+
+        # Define target residue names based on scope
+        if scope == "enzymatic":
+            target_resnames = ENZYMATIC_SINGLETONS.copy()
+        elif scope == "non_enzymatic":
+            target_resnames = NON_ENZYMATIC_PAIRED.copy()
+        else:  # "all"
+            target_resnames = NON_ENZYMATIC_PAIRED.union(ENZYMATIC_SINGLETONS)
+
+        crosslinks_by_type: Dict[str, List[Dict[str, Any]]] = {res: [] for res in target_resnames}
+
+        # Collect crosslinks from system
+        for model_id in system.get_models():
+            model = system.get_model(model_id=model_id)
+            if not hasattr(model, "crosslink") or not model.crosslink:
+                continue
+
+            for crosslink in model.crosslink:
+                resname = getattr(crosslink, "resname", None)
+                if resname not in target_resnames:
+                    continue
+                if not hasattr(crosslink, "position"):
+                    continue
+
+                try:
+                    z_pos = self._get_component(crosslink.position, 2)
+                except Exception as e:
+                    LOG.debug("Skipping crosslink without valid z-position: %s", e)
+                    continue
+
+                if not (z_bounds[0] <= z_pos <= z_bounds[1]):
+                    continue
+
+                crosslinks_by_type.setdefault(resname, []).append(
+                    {"model_id": model_id, "crosslink": crosslink, "model": model}
+                )
+
+        pairs: List[List[Dict[str, Any]]] = []
+        singles: List[Dict[str, Any]] = []
+        pyd_trios: List[List[Dict[str, Any]]] = []
+
+        # Build pairs based on PAIRING_RULES
+        for donors, acceptors in PAIRING_RULES:
+            # Skip pairs outside scope
+            if not (target_resnames.issuperset(set(donors)) and target_resnames.issuperset(set(acceptors))):
+                continue
+
+            donor_list: List[Dict[str, Any]] = []
+            acceptor_list: List[Dict[str, Any]] = []
+
+            for resname in donors:
+                donor_list.extend(crosslinks_by_type.get(resname, []))
+            for resname in acceptors:
+                acceptor_list.extend(crosslinks_by_type.get(resname, []))
+
+            if not donor_list or not acceptor_list:
+                continue
+
+            used_donors = set()
+            used_acceptors = set()
+
+            for i, donor_ref in enumerate(donor_list):
+                if i in used_donors:
+                    continue
+
+                donor = donor_ref["crosslink"]
+                best_idx = -1
+                best_dist = float("inf")
+
+                for j, acc_ref in enumerate(acceptor_list):
+                    if j in used_acceptors:
+                        continue
+
+                    acceptor = acc_ref["crosslink"]
+
+                    try:
+                        dist = self._calculate_distance(donor.position, acceptor.position)
+                    except Exception as e:
+                        LOG.debug("Distance calculation failed, skipping pair: %s", e)
+                        continue
+
+                    if dist <= PAIR_DISTANCE_CUTOFF and dist < best_dist:
+                        best_idx = j
+                        best_dist = dist
+
+                if best_idx != -1:
+                    pairs.append([donor_ref, acceptor_list[best_idx]])
+                    used_donors.add(i)
+                    used_acceptors.add(best_idx)
+
+        # Group enzymatic markers into PYD trios
+        if scope in {"enzymatic", "all"}:
+            lyx_list = crosslinks_by_type.get("LYX", [])
+            ly2_list = crosslinks_by_type.get("LY2", [])
+            ly3_list = crosslinks_by_type.get("LY3", [])
+            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+
+        # Calculate how many to replace
+        num_pair_to_replace = (
+            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
+            if pairs
+            else 0
+        )
+
+        num_trio_to_replace = (
+            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
+            if pyd_trios
+            else 0
+        )
+
+        # Collect singletons (excluding those in pairs or trios)
+        if scope in {"enzymatic", "all"}:
+            for resname in target_resnames:
+                if resname in PAIRED_RESIDUES:
+                    continue
+                singles.extend(crosslinks_by_type.get(resname, []))
+            
+            # Remove any singleton that is already part of a PYD trio
+            trio_members = {
+                (getattr(x["crosslink"], "resid", ""), getattr(x["crosslink"], "chain", ""), x.get("model_id", 0.0))
+                for trio in pyd_trios
+                for x in trio
+            }
+            singles = [
+                s
+                for s in singles
+                if (getattr(s["crosslink"], "resid", ""), getattr(s["crosslink"], "chain", ""), s.get("model_id", 0.0))
+                not in trio_members
+            ]
+
+        num_single_to_replace = (
+            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
+            if singles
+            else 0
+        )
+
+        # Randomly select items to replace
+        random.seed(int(time.time()))
+        random.shuffle(pairs)
+        selected_pairs = pairs[:num_pair_to_replace] if num_pair_to_replace else []
+        random.shuffle(pyd_trios)
+        selected_trios = pyd_trios[:num_trio_to_replace] if num_trio_to_replace else []
+        random.shuffle(singles)
+        selected_singles = singles[:num_single_to_replace] if num_single_to_replace else []
+
+        # Build instructions list
+        instructions: List[str] = []
+        seen = set()
+
+        for pair in selected_pairs:
+            for cross_ref in pair:
+                crosslink = cross_ref["crosslink"]
+                resname = getattr(crosslink, "resname", "")
+                resid = getattr(crosslink, "resid", "").strip()
+                chain = getattr(crosslink, "chain", "").strip() or "A"
+                model_id = cross_ref.get("model_id", 0.0)
+
+                if not resid:
+                    continue
+
+                new_res = REPLACEMENT_MAP.get(resname, DEFAULT_REPLACEMENT)
+                model_file = f"{int(float(model_id))}.caps.pdb"
+                instruction = f"{model_file} {new_res} {resid} {chain}"
+
+                if instruction not in seen:
+                    seen.add(instruction)
+                    instructions.append(instruction)
+
+        for trio in selected_trios:
+            for cross_ref in trio:
+                crosslink = cross_ref["crosslink"]
+                resname = getattr(crosslink, "resname", "")
+                resid = getattr(crosslink, "resid", "").strip()
+                chain = getattr(crosslink, "chain", "").strip() or "A"
+                model_id = cross_ref.get("model_id", 0.0)
+
+                if not resid:
+                    continue
+
+                new_res = REPLACEMENT_MAP.get(resname, DEFAULT_REPLACEMENT)
+                model_file = f"{int(float(model_id))}.caps.pdb"
+                instruction = f"{model_file} {new_res} {resid} {chain}"
+
+                if instruction not in seen:
+                    seen.add(instruction)
+                    instructions.append(instruction)
+
+        for single in selected_singles:
+            crosslink = single["crosslink"]
+            resname = getattr(crosslink, "resname", "")
+            resid = getattr(crosslink, "resid", "").strip()
+            chain = getattr(crosslink, "chain", "").strip() or "A"
+            model_id = single.get("model_id", 0.0)
+
+            if not resid:
+                continue
+
+            new_res = REPLACEMENT_MAP.get(resname, DEFAULT_REPLACEMENT)
+            model_file = f"{int(float(model_id))}.caps.pdb"
+            instruction = f"{model_file} {new_res} {resid} {chain}"
+
+            if instruction not in seen:
+                seen.add(instruction)
+                instructions.append(instruction)
+
+        # Sort instructions
+        def sort_key(line: str) -> Tuple:
+            parts = line.split()
+            model_part = parts[0] if parts else ""
+            try:
+                model_idx = int(model_part.split(".")[0])
+            except (ValueError, IndexError):
+                model_idx = model_part
+
+            resid_part = parts[2] if len(parts) > 2 else ""
+            try:
+                resid_idx = int(resid_part)
+            except ValueError:
+                resid_idx = resid_part
+
+            chain_part = parts[3] if len(parts) > 3 else ""
+            return (model_idx, chain_part, resid_idx, parts[1] if len(parts) > 1 else "")
+
+        instructions.sort(key=sort_key)
+        
+        return instructions
+
+    # ==================================================================================
+    # HELPER METHODS - Connect-based and File-based Replacement
+    # ==================================================================================
+
+    def _load_crosslinks_from_models(self, type_dir: Path) -> List[Dict[str, Any]]:
+        """Parse caps models to extract crosslink residues and their positions."""
+        records: List[Dict[str, Any]] = []
+        for pdb_file in type_dir.glob("*.caps.pdb"):
+            try:
+                model_id = int(pdb_file.stem.split(".")[0])
+            except ValueError:
+                continue
+
+            residue_atoms: Dict[Tuple[str, str, str], List[List[float]]] = {}
+
+            with open(pdb_file, "r") as fh:
+                for line in fh:
+                    if not line.startswith(("ATOM", "HETATM")) or len(line) < 54:
+                        continue
+                    resname = line[17:20].strip()
+                    if resname not in self._crosslink_resnames:
+                        continue
+                    resid = line[22:26].strip()
+                    chain = line[21].strip() or "A"
+                    key = (resname, resid, chain)
+                    try:
+                        x = float(line[30:38])
+                        y = float(line[38:46])
+                        z = float(line[46:54])
+                    except ValueError:
+                        continue
+                    residue_atoms.setdefault(key, []).append([x, y, z])
+
+            for (resname, resid, chain), atoms in residue_atoms.items():
+                if not atoms:
+                    continue
+                x_avg = sum(a[0] for a in atoms) / len(atoms)
+                y_avg = sum(a[1] for a in atoms) / len(atoms)
+                z_avg = sum(a[2] for a in atoms) / len(atoms)
+                records.append(
+                    {
+                        "model_id": model_id,
+                        "resname": resname,
+                        "resid": resid,
+                        "chain": chain,
+                        "position": [x_avg, y_avg, z_avg],
+                    }
+                )
+
+        return records
+
+    def _load_connect_groups(self, connect_file: Path) -> List[List[int]]:
+        """Parse connect_from_colbuilder.txt into groups of connected model ids."""
+        if not connect_file or not connect_file.exists():
+            return []
+
+        groups: List[List[int]] = []
+        try:
+            with open(connect_file, "r") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split(";")[0].strip().split()
+                    if not parts:
+                        continue
+                    model_ids: List[int] = []
+                    for token in parts:
+                        token = token.strip()
+                        if not token:
+                            continue
+                        stem = token.split(".")[0]
+                        try:
+                            model_ids.append(int(stem))
+                        except ValueError:
+                            continue
+                    if model_ids:
+                        groups.append(sorted(set(model_ids)))
+        except Exception as e:
+            LOG.warning("Failed to parse connect file %s: %s", connect_file, e)
+            return []
+
+        return groups
+
+    def _parse_term_combination(
+        self, combo: Optional[str]
+    ) -> Set[Tuple[str, str]]:
+        """Parse a term combination like '9.C - 5.B - 944.B' into resid/chain pairs."""
+        if not combo:
+            return set()
+        pairs: Set[Tuple[str, str]] = set()
+        for token in combo.split("-"):
+            token = token.strip()
+            if not token or "." not in token:
+                continue
+            resid, chain = token.split(".", 1)
+            resid = resid.strip()
+            chain = chain.strip()
+            if resid and chain:
+                pairs.add((resid, chain))
+        return pairs
+
+    async def _apply_manual_replacements_to_dir(
+        self,
+        source_dir: Path,
+        dest_dir: Path,
+        manual_list: List[str],
+        working_dir_root: Path,
+        config: ColbuilderConfig,
+        system: Any,
+    ) -> bool:
+        """Apply manual replacements to caps in a dedicated directory."""
+        if not manual_list:
+            return False
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        stale_manual = dest_dir / "manual_replacements.txt"
+        if stale_manual.exists():
+            try:
+                stale_manual.unlink()
+            except Exception:
+                pass
+
+        type_dir_candidates = [source_dir]
+        for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
+            cand = source_dir / sub
+            if cand.exists():
+                type_dir_candidates.append(cand)
+
+        try:
+            model_zero = system.get_model(model_id=0.0)
+            system_type = model_zero.type if hasattr(model_zero, "type") else "D"
+        except Exception:
+            system_type = "D"
+        type_dir = dest_dir / system_type
+        type_dir.mkdir(parents=True, exist_ok=True)
+
+        caps_by_model: Dict[int, Path] = {}
+        for search_dir in type_dir_candidates:
+            for pdb_file in search_dir.glob("*.caps.pdb"):
+                try:
+                    model_id = int(pdb_file.stem.split(".")[0])
+                except ValueError:
+                    continue
+                if model_id not in caps_by_model:
+                    caps_by_model[model_id] = pdb_file
+
+        for model_id, source_caps in sorted(caps_by_model.items()):
+            dest_caps = type_dir / source_caps.name
+            if source_caps.resolve() != dest_caps.resolve():
+                shutil.copy2(source_caps, dest_caps)
+
+        connect_file = None
+        for candidate in [
+            source_dir / "connect_from_colbuilder.txt",
+            source_dir / "connect_from_colbuilder",
+        ]:
+            if candidate.exists():
+                connect_file = candidate
+                break
+        if connect_file and connect_file.exists():
+            if connect_file.suffix != ".txt":
+                connect_file_txt = connect_file.with_suffix(".txt")
+                if connect_file_txt.exists():
+                    connect_file = connect_file_txt
+            shutil.copy2(connect_file, dest_dir / "connect_from_colbuilder.txt")
+        else:
+            try:
+                connector = Connect(system=system)
+                connect_file = dest_dir / "connect_from_colbuilder"
+                connector.write_connect(system=system, connect_file=connect_file)
+            except Exception as e:
+                LOG.warning("Could not rebuild connectivity for auto-fix: %s", e)
+
+        replace_file = dest_dir / "replace.txt"
+        with open(replace_file, "w") as f:
+            for instruction in manual_list:
+                clean_instr = instruction.strip().strip('"').strip("'")
+                f.write(f"{clean_instr}\n")
+
+        success = await self._run_chimera_command(
+            config=config,
+            replace_file_path=str(replace_file),
+            type_dir_path=type_dir,
+            root_dir=working_dir_root,
+        )
+
+        if not success:
             raise GeometryGenerationError(
-                message="Input PDB file does not appear to be a valid Colbuilder-generated structure. "
-                "Direct replacement only works on PDB files generated by the Colbuilder geometry module.",
+                message="Chimera execution failed for auto-fix manual replacements.",
                 error_code="GEO_ERR_004",
             )
 
-        with open(input_pdb_path, "r") as f:
-            all_lines = f.readlines()
+        return True
+
+    def _build_ratio_replacements_from_connect(
+        self,
+        records: List[Dict[str, Any]],
+        connect_groups: List[List[int]],
+        ratio_replace: float,
+        scope: str = "non_enzymatic",
+        config: Optional[ColbuilderConfig] = None,
+    ) -> List[str]:
+        """Generate replacement instructions using connect groups and parsed caps records."""
+        if not records or not connect_groups or ratio_replace <= 0:
+            return []
+
+        scope = (scope or "non_enzymatic").strip().lower()
+        if scope not in {"enzymatic", "non_enzymatic", "all"}:
+            LOG.warning(
+                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+            )
+            scope = "non_enzymatic"
+
+        records_by_model: Dict[int, List[Dict[str, Any]]] = {}
+        for rec in records:
+            try:
+                model_id = int(rec.get("model_id", -1))
+            except (ValueError, TypeError):
+                continue
+            records_by_model.setdefault(model_id, []).append(rec)
+
+        n_term_pairs = self._parse_term_combination(
+            getattr(config, "n_term_combination", None) if config else None
+        )
+        c_term_pairs = self._parse_term_combination(
+            getattr(config, "c_term_combination", None) if config else None
+        )
+
+        entity_pool: List[Tuple[str, List[Dict[str, Any]]]] = []
+        
+        for group in connect_groups:
+            group_records: List[Dict[str, Any]] = []
+            for model_id in group:
+                group_records.extend(records_by_model.get(model_id, []))
+            if not group_records:
+                continue
+
+            by_type: Dict[str, List[Dict[str, Any]]] = {}
+            for rec in group_records:
+                by_type.setdefault(rec.get("resname", ""), []).append(rec)
+
+            pairs: List[List[Dict[str, Any]]] = []
+            used_records: Set[Tuple[int, str, str, str]] = set()
+
+            for donors, acceptors in PAIRING_RULES:
+                donor_list: List[Dict[str, Any]] = []
+                acceptor_list: List[Dict[str, Any]] = []
+                for res in donors:
+                    donor_list.extend(by_type.get(res, []))
+                for res in acceptors:
+                    acceptor_list.extend(by_type.get(res, []))
+
+                if not donor_list or not acceptor_list:
+                    continue
+
+                used_donors: Set[int] = set()
+                used_acceptors: Set[int] = set()
+
+                for i, donor in enumerate(donor_list):
+                    if i in used_donors:
+                        continue
+                    best_idx = -1
+                    best_dist = float("inf")
+                    for j, acceptor in enumerate(acceptor_list):
+                        if j in used_acceptors:
+                            continue
+                        dist = self._calculate_distance(
+                            donor["position"], acceptor["position"]
+                        )
+                        if dist <= 10.0 and dist < best_dist:
+                            best_idx = j
+                            best_dist = dist
+                    if best_idx != -1:
+                        pair = [donor, acceptor_list[best_idx]]
+                        pairs.append(pair)
+                        used_donors.add(i)
+                        used_acceptors.add(best_idx)
+
+            for pair in pairs:
+                for rec in pair:
+                    used_records.add(
+                        (
+                            int(float(rec.get("model_id", -1))),
+                            rec.get("resid", ""),
+                            rec.get("chain", ""),
+                            rec.get("resname", ""),
+                        )
+                    )
+
+            for pair in pairs:
+                resnames = {rec.get("resname", "") for rec in pair}
+                if resnames.issubset(NON_ENZYMATIC_PAIRED):
+                    scope_tag = "non_enzymatic"
+                else:
+                    scope_tag = None
+                    pair_pairs = {(r.get("resid", ""), r.get("chain", "")) for r in pair}
+                    if n_term_pairs and pair_pairs.issubset(n_term_pairs):
+                        scope_tag = "enzymatic_n"
+                    elif c_term_pairs and pair_pairs.issubset(c_term_pairs):
+                        scope_tag = "enzymatic_c"
+                if scope_tag:
+                    entity_pool.append((scope_tag, pair))
+
+            for scope_tag, term_pairs in (
+                ("enzymatic_n", n_term_pairs),
+                ("enzymatic_c", c_term_pairs),
+            ):
+                if not term_pairs:
+                    continue
+                term_records = [
+                    rec
+                    for rec in group_records
+                    if rec.get("resname", "") in ENZYMATIC_SINGLETONS
+                    and (rec.get("resid", ""), rec.get("chain", "")) in term_pairs
+                ]
+                term_found = {(r.get("resid", ""), r.get("chain", "")) for r in term_records}
+                if term_found and term_found.issuperset(term_pairs):
+                    entity_pool.append((scope_tag, term_records))
+
+        if not entity_pool:
+            return []
+
+        if scope == "enzymatic":
+            eligible_entities = [
+                e
+                for e in entity_pool
+                if e[0] in {"enzymatic_n", "enzymatic_c"}
+            ]
+        elif scope == "non_enzymatic":
+            eligible_entities = [e for e in entity_pool if e[0] == "non_enzymatic"]
+        else:
+            eligible_entities = entity_pool
+
+        if not eligible_entities:
+            return []
+
+        random.seed(int(time.time()))
+
+        selected_entities: List[Tuple[str, List[Dict[str, Any]]]] = []
+        if scope == "all":
+            buckets = {
+                "non_enzymatic": [e for e in eligible_entities if e[0] == "non_enzymatic"],
+                "enzymatic_c": [e for e in eligible_entities if e[0] == "enzymatic_c"],
+                "enzymatic_n": [e for e in eligible_entities if e[0] == "enzymatic_n"],
+            }
+            for key, bucket in buckets.items():
+                if not bucket:
+                    continue
+                random.shuffle(bucket)
+                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                selected_entities.extend(bucket[:target])
+        elif scope == "enzymatic":
+            buckets = {
+                "enzymatic_c": [e for e in eligible_entities if e[0] == "enzymatic_c"],
+                "enzymatic_n": [e for e in eligible_entities if e[0] == "enzymatic_n"],
+            }
+            for key, bucket in buckets.items():
+                if not bucket:
+                    continue
+                random.shuffle(bucket)
+                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                selected_entities.extend(bucket[:target])
+        else:
+            random.shuffle(eligible_entities)
+            target = max(1, math.ceil(len(eligible_entities) * ratio_replace / 100.0))
+            selected_entities = eligible_entities[:target]
+
+        seen: Set[str] = set()
+        instructions: List[str] = []
+        for _scope_tag, entity_records in selected_entities:
+            for rec in entity_records:
+                new_res = REPLACEMENT_MAP.get(rec["resname"], DEFAULT_REPLACEMENT)
+                instruction = (
+                    f"{int(float(rec['model_id']))}.caps.pdb {new_res} {rec['resid']} {rec['chain']}"
+                )
+                if instruction not in seen:
+                    seen.add(instruction)
+                    instructions.append(instruction)
+
+        def sort_key(line: str) -> Tuple:
+            parts = line.split()
+            model_part = parts[0] if parts else ""
+            try:
+                model_idx = int(model_part.split(".")[0])
+            except (ValueError, IndexError):
+                model_idx = model_part
+            resid_part = parts[2] if len(parts) > 2 else ""
+            try:
+                resid_idx = int(resid_part)
+            except ValueError:
+                resid_idx = resid_part
+            chain_part = parts[3] if len(parts) > 3 else ""
+            return (model_idx, chain_part, resid_idx, parts[1] if len(parts) > 1 else "")
+
+        instructions.sort(key=sort_key)
+        return instructions
+
+    def _build_ratio_replacements_from_records(
+        self,
+        records: List[Dict[str, Any]],
+        ratio_replace: float,
+        fibril_length: float,
+        scope: str = "non_enzymatic",
+    ) -> List[str]:
+        """Generate replacement instructions using parsed crosslink records."""
+        if not records or ratio_replace <= 0:
+            return []
+
+        scope = (scope or "non_enzymatic").strip().lower()
+        if scope not in {"enzymatic", "non_enzymatic", "all"}:
+            LOG.warning(
+                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+            )
+            scope = "non_enzymatic"
+
+        if scope == "enzymatic":
+            target_resnames = ENZYMATIC_SINGLETONS.copy()
+        elif scope == "non_enzymatic":
+            target_resnames = NON_ENZYMATIC_PAIRED.copy()
+        else:
+            target_resnames = NON_ENZYMATIC_PAIRED.union(ENZYMATIC_SINGLETONS)
+
+        z_bounds = self._calculate_bounds_from_records(records, fibril_length)
+        filtered = [
+            r
+            for r in records
+            if r["resname"] in target_resnames
+            and z_bounds[0] <= self._get_component(r["position"], 2) <= z_bounds[1]
+        ]
+
+        by_type: Dict[str, List[Dict[str, Any]]] = {res: [] for res in target_resnames}
+        for rec in filtered:
+            by_type.setdefault(rec["resname"], []).append(rec)
+
+        pairs: List[List[Dict[str, Any]]] = []
+        singles: List[Dict[str, Any]] = []
+        pyd_trios: List[List[Dict[str, Any]]] = []
+
+        for donors, acceptors in PAIRING_RULES:
+            if not (target_resnames.issuperset(set(donors)) and target_resnames.issuperset(set(acceptors))):
+                continue
+
+            donor_list: List[Dict[str, Any]] = []
+            acceptor_list: List[Dict[str, Any]] = []
+            for res in donors:
+                donor_list.extend(by_type.get(res, []))
+            for res in acceptors:
+                acceptor_list.extend(by_type.get(res, []))
+
+            if not donor_list or not acceptor_list:
+                continue
+
+            used_donors: Set[int] = set()
+            used_acceptors: Set[int] = set()
+
+            for i, donor in enumerate(donor_list):
+                if i in used_donors:
+                    continue
+                best_idx = -1
+                best_dist = float("inf")
+                for j, acceptor in enumerate(acceptor_list):
+                    if j in used_acceptors:
+                        continue
+                    dist = self._calculate_distance(donor["position"], acceptor["position"])
+                    if dist <= 10.0 and dist < best_dist:
+                        best_idx = j
+                        best_dist = dist
+                if best_idx != -1:
+                    pairs.append([donor, acceptor_list[best_idx]])
+                    used_donors.add(i)
+                    used_acceptors.add(best_idx)
+
+        # PYD trios when enzymatic scope is active
+        if scope in {"enzymatic", "all"}:
+            lyx_list = by_type.get("LYX", [])
+            ly2_list = by_type.get("LY2", [])
+            ly3_list = by_type.get("LY3", [])
+            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+
+        num_pair_to_replace = (
+            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
+            if pairs
+            else 0
+        )
+
+        num_trio_to_replace = (
+            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
+            if pyd_trios
+            else 0
+        )
+
+        if scope in {"enzymatic", "all"}:
+            for resname in target_resnames:
+                if resname in PAIRED_RESIDUES:
+                    continue
+                singles.extend(by_type.get(resname, []))
+            trio_members = {
+                (r.get("resid", ""), r.get("chain", ""), r.get("model_id", 0.0))
+                for trio in pyd_trios
+                for r in trio
+            }
+            singles = [
+                s
+                for s in singles
+                if (s.get("resid", ""), s.get("chain", ""), s.get("model_id", 0.0)) not in trio_members
+            ]
+        
+        # Fallback: if we found no valid pairs or trios but still have candidates, treat them as singles
+        if not pairs and not pyd_trios and filtered:
+            singles = filtered.copy()
+
+        num_single_to_replace = (
+            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
+            if singles
+            else 0
+        )
+
+        random.seed(int(time.time()))
+        random.shuffle(pairs)
+        random.shuffle(singles)
+        random.shuffle(pyd_trios)
+        selected_pairs = pairs[:num_pair_to_replace]
+        selected_trios = pyd_trios[:num_trio_to_replace]
+        selected_singles = singles[:num_single_to_replace]
+
+        seen: Set[str] = set()
+        instructions: List[str] = []
+
+        for pair in selected_pairs:
+            for rec in pair:
+                new_res = REPLACEMENT_MAP.get(rec["resname"], DEFAULT_REPLACEMENT)
+                instruction = f"{int(float(rec['model_id']))}.caps.pdb {new_res} {rec['resid']} {rec['chain']}"
+                if instruction not in seen:
+                    seen.add(instruction)
+                    instructions.append(instruction)
+
+        for trio in selected_trios:
+            for rec in trio:
+                new_res = REPLACEMENT_MAP.get(rec["resname"], DEFAULT_REPLACEMENT)
+                instruction = f"{int(float(rec['model_id']))}.caps.pdb {new_res} {rec['resid']} {rec['chain']}"
+                if instruction not in seen:
+                    seen.add(instruction)
+                    instructions.append(instruction)
+
+        for rec in selected_singles:
+            new_res = REPLACEMENT_MAP.get(rec["resname"], DEFAULT_REPLACEMENT)
+            instruction = f"{int(float(rec['model_id']))}.caps.pdb {new_res} {rec['resid']} {rec['chain']}"
+            if instruction not in seen:
+                seen.add(instruction)
+                instructions.append(instruction)
+
+        def sort_key(line: str) -> Tuple:
+            parts = line.split()
+            model_part = parts[0] if parts else ""
+            try:
+                model_idx = int(model_part.split(".")[0])
+            except (ValueError, IndexError):
+                model_idx = model_part
+            resid_part = parts[2] if len(parts) > 2 else ""
+            try:
+                resid_idx = int(resid_part)
+            except ValueError:
+                resid_idx = resid_part
+            chain_part = parts[3] if len(parts) > 3 else ""
+            return (model_idx, chain_part, resid_idx, parts[1] if len(parts) > 1 else "")
+
+        instructions.sort(key=sort_key)
+        
+        LOG.info(
+            "Selected %d residues for replacement (pairs: %d residues, PYD trios: %d residues, singles: %d) out of %d candidates (scope=%s, ratio=%s%%).",
+            len(instructions),
+            len(selected_pairs) * 2,
+            len(selected_trios) * 3,
+            len(selected_singles),
+            len(pairs) * 2 + len(pyd_trios) * 3 + len(singles),
+            scope,
+            ratio_replace,
+        )
+        
+        return instructions
+
+    def _calculate_bounds_from_records(
+        self, records: List[Dict[str, Any]], fibril_length: float
+    ) -> Tuple[float, float]:
+        """Rudimentary z-bounds based on parsed crosslink positions."""
+        if not records:
+            return (-math.inf, math.inf)
+
+        z_vals = [self._get_component(r["position"], 2) for r in records if "position" in r]
+        if not z_vals:
+            return (-math.inf, math.inf)
+
+        z_min = min(z_vals) - 500.0
+        z_max = max(z_vals) + 500.0
+
+        if z_max - z_min > 5000.0 and fibril_length:
+            center = (z_min + z_max) / 2.0
+            fibril_len_ang = fibril_length * 10.0
+            return (center - fibril_len_ang * 5, center + fibril_len_ang * 5)
+
+        return (z_min, z_max)
+
+    def _build_pyd_trios(
+        self,
+        lyx_list: List[Dict[str, Any]],
+        ly2_list: List[Dict[str, Any]],
+        ly3_list: List[Dict[str, Any]],
+    ) -> List[List[Dict[str, Any]]]:
+        """
+        Group LYX/LY2/LY3 into PYD trios based on proximity.
+        """
+        trios: List[List[Dict[str, Any]]] = []
+        used_ly2: Set[int] = set()
+        used_ly3: Set[int] = set()
+
+        for lyx in lyx_list:
+            best_ly2 = None
+            best_ly2_dist = float("inf")
+            for idx, ly2 in enumerate(ly2_list):
+                if idx in used_ly2:
+                    continue
+                try:
+                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
+                    ly2_pos = ly2.get("crosslink", {}).get("position") if "crosslink" in ly2 else ly2.get("position")
+                    if not lyx_pos or not ly2_pos:
+                        continue
+                    dist = self._calculate_distance(lyx_pos, ly2_pos)
+                except Exception:
+                    continue
+                if dist <= PYD_THRESHOLD and dist < best_ly2_dist:
+                    best_ly2 = (idx, ly2)
+                    best_ly2_dist = dist
+
+            best_ly3 = None
+            best_ly3_dist = float("inf")
+            for jdx, ly3 in enumerate(ly3_list):
+                if jdx in used_ly3:
+                    continue
+                try:
+                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
+                    ly3_pos = ly3.get("crosslink", {}).get("position") if "crosslink" in ly3 else ly3.get("position")
+                    if not lyx_pos or not ly3_pos:
+                        continue
+                    dist = self._calculate_distance(lyx_pos, ly3_pos)
+                except Exception:
+                    continue
+                if dist <= PYD_THRESHOLD and dist < best_ly3_dist:
+                    best_ly3 = (jdx, ly3)
+                    best_ly3_dist = dist
+
+            if best_ly2 and best_ly3:
+                used_ly2.add(best_ly2[0])
+                used_ly3.add(best_ly3[0])
+                trios.append([lyx, best_ly2[1], best_ly3[1]])
+
+        return trios
+
+    # ==================================================================================
+    # HELPER METHODS - File Operations
+    # ==================================================================================
+
+    def _categorize_caps_and_build_system(
+        self, base_dir: Path, source_dir: Path, reference_pdb: Path
+    ) -> Optional[System]:
+        """
+        Classify caps models by remaining marker type and build a lightweight System.
+        """
+        search_dirs = [source_dir]
+        for sub in ["D", "T", "M", "NC", "DT", "TD", "DY"]:
+            sub_dir = base_dir / sub
+            if sub_dir.exists() and sub_dir not in search_dirs:
+                search_dirs.append(sub_dir)
+
+        caps_candidates: List[Path] = []
+        seen: Set[Path] = set()
+        for directory in search_dirs:
+            for pdb_file in sorted(directory.glob("*.caps.pdb")):
+                resolved = pdb_file.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                caps_candidates.append(pdb_file)
+
+        if not caps_candidates:
+            LOG.warning("No caps files found to categorise in %s", base_dir)
+            return None
+
+        system = System()
+        try:
+            system.crystal = Crystal(pdb=str(reference_pdb))
+        except Exception as e:
+            LOG.warning("Could not attach crystal to replacement system: %s", e)
+
+        temp_models: List[Tuple[Path, Model]] = []
+        found_types: Set[str] = set()
+        for caps_file in caps_candidates:
+            try:
+                model_id = float(caps_file.stem.split(".")[0])
+            except ValueError:
+                LOG.debug("Skipping caps file without numeric id: %s", caps_file)
+                continue
+
+            model_obj = Model(
+                id=model_id, transformation=[0.0, 0.0, 0.0], pdb_file=str(caps_file)
+            )
+            temp_models.append((caps_file, model_obj))
+            if model_obj.type:
+                found_types.add(model_obj.type)
+
+        canonical_types = {t for t in found_types if t and t != "NC"}
+        if not canonical_types:
+            aggregated_type = "NC"
+        else:
+            aggregated_type = "".join(sorted(canonical_types))
+
+        dest_dir = base_dir / aggregated_type
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for caps_file, model_obj in temp_models:
+            dest_path = dest_dir / caps_file.name
+            if caps_file.resolve() != dest_path.resolve():
+                try:
+                    shutil.move(caps_file, dest_path)
+                except Exception:
+                    shutil.copy2(caps_file, dest_path)
+
+            model_obj.pdb_file = str(dest_path)
+            model_obj.type = aggregated_type
+            system.add_model(model_obj)
+
+        system.get_models()
+
+        # Clean up empty type directories
+        for sub in ["D", "T", "M", "NC", "DT", "TD", "DY"]:
+            sub_dir = base_dir / sub
+            if sub_dir == dest_dir or not sub_dir.exists():
+                continue
+            try:
+                if next(sub_dir.iterdir(), None) is None:
+                    shutil.rmtree(sub_dir)
+            except Exception:
+                continue
+
+        return system
+
+    def _recompute_connectivity_from_caps(self, system: System, output_dir: Path) -> None:
+        """Rebuild connect_from_colbuilder.txt from the categorised caps files."""
+        connector = Connect(system=system)
+        new_connect = connector.run_connect(system=system)
+
+        if new_connect:
+            for mid, conns in new_connect.items():
+                try:
+                    model_obj = system.get_model(model_id=mid)
+                except Exception:
+                    model_obj = None
+                if model_obj:
+                    model_obj.connect = conns
+
+            connect_file_path = output_dir / "connect_from_colbuilder.txt"
+            connector.write_connect(system=system, connect_file=connect_file_path)
+            LOG.info(f"Connectivity written to {connect_file_path}")
+        else:
+            LOG.warning("Connectivity recomputation returned empty; forcing self-connect entries.")
+            fallback_connect = {mid: [mid] for mid in system.get_models()}
+            for mid, conns in fallback_connect.items():
+                try:
+                    model_obj = system.get_model(model_id=mid)
+                except Exception:
+                    continue
+                model_obj.connect = conns
+            connector.connect = fallback_connect
+            connect_file_path = output_dir / "connect_from_colbuilder.txt"
+            connector.write_connect(system=system, connect_file=connect_file_path)
+            LOG.info(f"Connectivity (self-only) written to {connect_file_path}")
+
+    def _combine_caps_to_pdb(self, source_dir: Path, output_pdb: Path, template_pdb: Path) -> None:
+        """Combine modified caps files into a single PDB."""
+        with open(output_pdb, "w") as out:
+            try:
+                with open(template_pdb, "r") as tmpl:
+                    first_line = tmpl.readline().strip()
+                    if first_line.startswith("CRYST1"):
+                        out.write(first_line + "\n")
+                    else:
+                        out.write("REMARK   Generated by colbuilder replacement\n")
+            except Exception:
+                out.write("REMARK   Generated by colbuilder replacement\n")
+
+            pdb_files = sorted(
+                [f for f in source_dir.glob("*.caps.pdb")],
+                key=lambda x: int(x.stem.split(".")[0]),
+            )
+
+            for pdb_file in pdb_files:
+                with open(pdb_file, "r") as fh:
+                    for line in fh:
+                        if line.startswith(("ATOM", "HETATM", "TER")):
+                            if line.startswith("HETATM"):
+                                line = "ATOM  " + line[6:]
+                            out.write(line)
+            out.write("END\n")
+
+    def _split_pdb_into_models(self, input_pdb: Path, type_dir: Path) -> int:
+        """
+        Split a Colbuilder-generated PDB into per-model caps files.
+        """
+        with open(input_pdb, "r") as fh:
+            all_lines = fh.readlines()
 
         cryst_line = None
         for line in all_lines:
@@ -1306,288 +1948,46 @@ class CrosslinkReplacer:
                 cryst_line = line
                 break
 
-        atom_lines = [
-            line for line in all_lines if line.startswith(("ATOM", "HETATM", "TER"))
-        ]
-
-        if not atom_lines:
-            raise GeometryGenerationError(
-                message="Input PDB file does not contain any ATOM, HETATM, or TER records.",
-                error_code="GEO_ERR_004",
-            )
-
-        models = []
-        current_model = []
-        chain_sequence = []
+        atom_lines = [ln for ln in all_lines if ln.startswith(("ATOM", "HETATM", "TER"))]
+        models: List[List[str]] = []
+        current: List[str] = []
+        chain_sequence: List[str] = []
 
         for line in atom_lines:
             if line.startswith(("ATOM", "HETATM")):
                 chain = line[21]
-
                 if not chain_sequence or chain != chain_sequence[-1]:
                     chain_sequence.append(chain)
-
-                    if len(chain_sequence) > 3 and chain_sequence[-4:] == [
-                        "A",
-                        "B",
-                        "C",
-                        "A",
-                    ]:
-                        models.append(current_model)
-                        current_model = []
+                    if len(chain_sequence) > 3 and chain_sequence[-4:] == ["A", "B", "C", "A"]:
+                        models.append(current)
+                        current = []
                         chain_sequence = ["A"]
+            current.append(line)
 
-            current_model.append(line)
-
-        if current_model:
-            models.append(current_model)
+        if current:
+            models.append(current)
 
         if not models:
-            LOG.warning(
-                "Could not split into multiple models. Using entire PDB as one model."
-            )
             models = [atom_lines]
 
-        LOG.debug(f"Split PDB into {len(models)} models")
-
-        system_type_path.mkdir(parents=True, exist_ok=True)
-
-        for i, model_lines in enumerate(models):
-            caps_file = system_type_path / f"{i}.caps.pdb"
-            with open(caps_file, "w") as f:
+        type_dir.mkdir(parents=True, exist_ok=True)
+        for idx, model_lines in enumerate(models):
+            caps_file = type_dir / f"{idx}.caps.pdb"
+            with open(caps_file, "w") as fh:
                 if cryst_line:
-                    f.write(cryst_line)
-
-                f.writelines(model_lines)
-
+                    fh.write(cryst_line)
+                fh.writelines(model_lines)
                 if not model_lines[-1].startswith("TER"):
-                    f.write("TER\n")
-
-            LOG.debug(f"Created model file: {caps_file}")
+                    fh.write("TER\n")
 
         return len(models)
-
-    def _select_replacements(
-        self, system: Any, ratio_replace: float, z_bounds: Tuple[float, float]
-    ) -> None:
-        """
-        Select crosslinks to replace based on the given ratio and spatial constraints.
-
-        Identifies complete crosslink pairs within the specified z-bounds, ensures
-        they are properly paired, and marks a subset for replacement based on the
-        specified ratio.
-
-        Args:
-            system: System containing models and crosslinks
-            ratio_replace: Percentage of crosslinks to replace (0-100)
-            z_bounds: Tuple of (z_min, z_max) defining the region to focus on
-        """
-        reset_count = 0
-        for model_id in system.get_models():
-            model = system.get_model(model_id=model_id)
-            if hasattr(model, "crosslink") and model.crosslink:
-                for crosslink in model.crosslink:
-                    if hasattr(crosslink, "state"):
-                        crosslink.state = "none"
-                        reset_count += 1
-
-        LOG.debug(f"Reset state for {reset_count} crosslinks")
-
-        crosslinks_in_bounds = []
-        for model_id in system.get_models():
-            model = system.get_model(model_id=model_id)
-            if not hasattr(model, "crosslink") or not model.crosslink:
-                continue
-
-            for crosslink in model.crosslink:
-                try:
-                    if not hasattr(crosslink, "position"):
-                        LOG.debug(
-                            f"Crosslink in model {model_id} has no position attribute"
-                        )
-                        continue
-
-                    z_pos = self._get_z_position(crosslink.position)
-
-                    if z_bounds[0] <= z_pos <= z_bounds[1]:
-                        crosslink_info = {
-                            "model_id": model_id,
-                            "model": model,
-                            "crosslink": crosslink,
-                            "type": getattr(crosslink, "type", "D"),
-                            "resname": getattr(crosslink, "resname", "UNK"),
-                            "z_position": z_pos,
-                        }
-                        crosslinks_in_bounds.append(crosslink_info)
-
-                except Exception as e:
-                    LOG.warning(
-                        f"Error checking crosslink bounds for model {model_id}: {e}"
-                    )
-
-        if not crosslinks_in_bounds:
-            LOG.warning("No crosslinks found within z-bounds, nothing will be replaced")
-            return
-
-        crosslinks_by_type = {}
-        for cross_ref in crosslinks_in_bounds:
-            crosslink = cross_ref["crosslink"]
-            resname = getattr(crosslink, "resname", "UNK")
-            if resname not in crosslinks_by_type:
-                crosslinks_by_type[resname] = []
-            crosslinks_by_type[resname].append(cross_ref)
-
-        LOG.debug(f"Found crosslink types: {list(crosslinks_by_type.keys())}")
-
-        # Define which residue types should be paired together
-        pair_types = [
-            (["L4Y", "L4X", "LY4", "LX4"], ["L5Y", "L5X", "LY5", "LX5"]),
-            (["LGX", "LPS"], ["AGS", "APD"]),
-        ]
-
-        pairs = []
-
-        for type1_list, type2_list in pair_types:
-            type1_crosslinks = []
-            for resname in type1_list:
-                if resname in crosslinks_by_type:
-                    type1_crosslinks.extend(crosslinks_by_type[resname])
-
-            type2_crosslinks = []
-            for resname in type2_list:
-                if resname in crosslinks_by_type:
-                    type2_crosslinks.extend(crosslinks_by_type[resname])
-
-            if not type1_crosslinks or not type2_crosslinks:
-                continue
-
-            used_type1 = set()
-            used_type2 = set()
-
-            for i, cross_ref1 in enumerate(type1_crosslinks):
-                if i in used_type1:
-                    continue
-
-                crosslink1 = cross_ref1["crosslink"]
-                min_dist = float("inf")
-                closest_idx = -1
-
-                for j, cross_ref2 in enumerate(type2_crosslinks):
-                    if j in used_type2:
-                        continue
-
-                    crosslink2 = cross_ref2["crosslink"]
-
-                    try:
-                        dist = self._calculate_distance(
-                            crosslink1.position, crosslink2.position
-                        )
-                        if dist < min_dist and dist <= 5.0:
-                            min_dist = dist
-                            closest_idx = j
-                    except Exception as e:
-                        LOG.warning(f"Error calculating distance: {e}")
-
-                if closest_idx != -1:
-                    pairs.append([cross_ref1, type2_crosslinks[closest_idx]])
-                    used_type1.add(i)
-                    used_type2.add(closest_idx)
-
-                    if LOG.level <= 10:  # DEBUG level
-                        crosslink1_info = (
-                            f"{crosslink1.resname} {crosslink1.resid}{crosslink1.chain}"
-                            if all(
-                                hasattr(crosslink1, attr)
-                                for attr in ["resname", "resid", "chain"]
-                            )
-                            else "Unknown"
-                        )
-                        crosslink2_info = (
-                            f"{type2_crosslinks[closest_idx]['crosslink'].resname} {type2_crosslinks[closest_idx]['crosslink'].resid}{type2_crosslinks[closest_idx]['crosslink'].chain}"
-                            if all(
-                                hasattr(
-                                    type2_crosslinks[closest_idx]["crosslink"], attr
-                                )
-                                for attr in ["resname", "resid", "chain"]
-                            )
-                            else "Unknown"
-                        )
-
-                        LOG.debug(
-                            f"Found pair: {crosslink1_info} + {crosslink2_info} (distance: {min_dist:.2f}Å)"
-                        )
-
-        num_to_replace = min(
-            max(1, math.ceil(len(pairs) * ratio_replace / 100)), len(pairs)
-        )
-
-        LOG.info(
-            f"Will replace {num_to_replace} pairs out of {len(pairs)} (ratio: {ratio_replace}%)"
-        )
-
-        import random
-
-        random.seed(int(time.time()))  # Set random seed for reproducibility
-        random.shuffle(pairs)
-        pairs_to_replace = pairs[:num_to_replace]
-
-        replaced_count = 0
-        for pair in pairs_to_replace:
-            for cross_ref in pair:
-                cross_ref["crosslink"].state = "replace"
-                replaced_count += 1
-
-                model_id = cross_ref["model_id"]
-                crosslink = cross_ref["crosslink"]
-
-                if (
-                    hasattr(crosslink, "resname")
-                    and hasattr(crosslink, "resid")
-                    and hasattr(crosslink, "chain")
-                ):
-                    LOG.debug(
-                        f"Marked {crosslink.resname} {crosslink.resid}{crosslink.chain} in model {model_id} for replacement"
-                    )
-
-        # Protect nearby crosslinks from being replaced
-        protected_count = 0
-        for pair in pairs_to_replace:
-            for cross_ref in pair:
-                crosslink = cross_ref["crosslink"]
-                model = cross_ref["model"]
-
-                for other in model.crosslink:
-                    if other.state != "none" or other in [p["crosslink"] for p in pair]:
-                        continue
-
-                    try:
-                        distance = self._calculate_distance(
-                            crosslink.position, other.position
-                        )
-                        if 5.0 < distance <= 15.0:
-                            other.state = "protect"
-                            protected_count += 1
-                    except Exception as e:
-                        LOG.warning(f"Error protecting nearby crosslink: {e}")
 
 
 # Backward compatibility functions
 
-
 async def replace_in_system(system: Any, config: ColbuilderConfig) -> Any:
     """
     Backward compatibility function for system-based crosslink replacement.
-
-    This is a standalone function that creates a CrosslinkReplacer and calls
-    its replace_in_system method, maintaining backward compatibility with
-    code that uses the function-based API.
-
-    Args:
-        system: System containing the models to be modified
-        config: Configuration for replacement
-
-    Returns:
-        Modified system with replaced crosslinks
     """
     replacer = CrosslinkReplacer()
     return await replacer.replace_in_system(system, config)
@@ -1596,13 +1996,6 @@ async def replace_in_system(system: Any, config: ColbuilderConfig) -> Any:
 async def direct_replace_geometry(config: ColbuilderConfig) -> None:
     """
     Backward compatibility function for direct PDB-based crosslink replacement.
-
-    This is a standalone function that creates a CrosslinkReplacer and calls
-    its replace_direct method, maintaining backward compatibility with
-    code that uses the function-based API.
-
-    Args:
-        config: Configuration settings for the replacement
     """
     replacer = CrosslinkReplacer()
     temp_dir = Path(config.working_directory) / ".tmp" / "replacement_direct"

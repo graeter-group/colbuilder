@@ -118,6 +118,7 @@ def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, 
     path_keys = [
         "working_directory",
         "fasta_file",
+        "mutated_pdb",
         "pdb_file",
         "crystalcontacts_file",
         "connect_file",
@@ -180,6 +181,36 @@ class ColbuilderConfig(BaseModel):
     c_term_combination: Optional[str] = Field(
         None, description="C-terminal combination"
     )
+    
+    # Crosslink optimization settings
+    crosslink_copies: List[str] = Field(
+        default=["D0", "D5"],
+        description="Pair of unit cell translations for crosslink optimization. "
+                    "Must be exactly 2 elements from: D0, D1, D2, D3, D4, D5"
+    )
+    # Pre-mutated PDB input (skips homology modeling)
+    mutated_pdb: Optional[Path] = Field(
+        None, 
+        description="Path to pre-mutated PDB file. If provided, skips homology modeling and applies only additional crosslinks"
+    )
+    
+    # Additional crosslinks (applied when using mutated_pdb)
+    additional_1_type: Optional[str] = Field(
+        None, 
+        description="First additional crosslink type to apply to mutated_pdb"
+    )
+    additional_2_type: Optional[str] = Field(
+        None, 
+        description="Second dditional crosslink type to apply to mutated_pdb"
+    )
+    additional_1_combination: Optional[str] = Field(
+        None, 
+        description="First additional crosslink position"
+    )
+    additional_2_combination: Optional[str] = Field(
+        None, 
+        description="Second additional crosslink position"
+    )
 
     # Fibril geometry generation mode
     geometry_generator: bool = Field(
@@ -223,11 +254,23 @@ class ColbuilderConfig(BaseModel):
     replace_bool: bool = Field(
         default=False, description="Generate a microfibril with less crosslinks"
     )
+    auto_fix_unpaired: bool = Field(
+        default=False,
+        description="Automatically detect unpaired enzymatic crosslinks and replace them",
+    )
+    ratio_replace_scope: Literal["enzymatic", "non_enzymatic", "all"] = Field(
+        default="non_enzymatic",
+        description="Scope of residues considered for ratio-based replacement",
+    )
     ratio_replace: Optional[float] = Field(
         None, description="Ratio of crosslinks to be replaced"
     )
     replace_file: Optional[Path] = Field(
         None, description="File with crosslinks to be replaced"
+    )
+    manual_replacements: Optional[List[str]] = Field(
+        default=None,
+        description="Manual replacement directives (<pdb> <RES> <resid> <chain>)",
     )
 
     # Topology generation mode
@@ -517,6 +560,71 @@ class ColbuilderConfig(BaseModel):
         if isinstance(value, list):
             return tuple(value)
         return value
+    
+    @field_validator("crosslink_copies")
+    def validate_crosslink_copies(cls, value: List[str]) -> List[str]:
+        """Validate crosslink copies - must be exactly 2 valid translation names."""
+        valid_names = ["D0", "D1", "D2", "D3", "D4", "D5"]
+        if len(value) != 2:
+            raise ConfigurationError(
+                f"crosslink_copies must contain exactly 2 elements, got {len(value)}",
+                error_code="CFG_ERR_006"
+            )
+        for item in value:
+            if item not in valid_names:
+                raise ConfigurationError(
+                    f"Invalid translation name: {item}. Valid options: {valid_names}",
+                    error_code="CFG_ERR_006"
+                )
+        if value[0] == value[1]:
+            raise ConfigurationError(
+                f"crosslink_copies must contain 2 different translations, got duplicate: {value[0]}",
+                error_code="CFG_ERR_006"
+            )
+        
+        return value
+    
+    @model_validator(mode="after")
+    def validate_mutated_pdb_config(self) -> "ColbuilderConfig":
+        """Validate mutated PDB configuration."""
+        if self.mutated_pdb:
+            # If mutated_pdb is provided, we need at least one additional crosslink
+            has_additional = any([
+                self.additional_1_type,
+                self.additional_2_type
+            ])
+            
+            if not has_additional and not self.crosslink:
+                LOG.warning(
+                    "mutated_pdb provided but no additional crosslinks specified. "
+                    "Only optimization will be performed."
+                )
+            
+            # Validate that additional crosslink positions are provided if types are specified
+            if self.additional_1_type and not self.additional_1_combination:
+                raise ConfigurationError(
+                    "additional_1_combination required when additional_1_type is specified",
+                    error_code="CFG_ERR_006"
+                )
+                
+            if self.additional_2_type and not self.additional_2_combination:
+                raise ConfigurationError(
+                    "additional_2_combination required when additional_2_type is specified",
+                    error_code="CFG_ERR_006"
+                )
+        
+        return self
+    
+    @field_validator("mutated_pdb", mode="before")
+    def validate_mutated_pdb_path(cls, value):
+        """Validate mutated PDB path."""
+        if value is not None:
+            path = Path(value)
+            if not path.is_absolute():
+                # Will be resolved relative to working directory later
+                return value
+            return value
+        return None
 
     @field_validator("files_mix", mode="before")
     def validate_files_mix(cls, value):
@@ -533,6 +641,24 @@ class ColbuilderConfig(BaseModel):
         """Set ratio mix property."""
         self._ratio_mix = self._convert_ratio_mix(value)
 
+    @field_validator("manual_replacements", mode="before")
+    def validate_manual_replacements(
+        cls, value: Optional[Union[str, List[str], Tuple[str, ...]]]
+    ) -> Optional[List[str]]:
+        """Normalize manual replacement directives."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = [line.strip() for line in value.splitlines() if line.strip()]
+            return cleaned or None
+        if isinstance(value, (list, tuple)):
+            cleaned = [str(v).strip() for v in value if str(v).strip()]
+            return cleaned or None
+        raise ConfigurationError(
+            f"Invalid manual_replacements type: {type(value).__name__}",
+            error_code="CFG_ERR_006",
+        )
+
     def set_mode(self):
         """Set operation mode based on configuration flags."""
         self.mode = OperationMode.NONE
@@ -545,6 +671,8 @@ class ColbuilderConfig(BaseModel):
         if self.mix_bool:
             self.mode |= OperationMode.MIX
         if self.replace_bool:
+            self.mode |= OperationMode.REPLACE
+        if self.auto_fix_unpaired:
             self.mode |= OperationMode.REPLACE
 
     def validate_paths(self):
@@ -565,6 +693,7 @@ class ColbuilderConfig(BaseModel):
 
         # Only check paths that are specified
         optional_paths = [
+            self.mutated_pdb,
             self.pdb_file,
             self.crystalcontacts_file,
             self.connect_file,
@@ -674,9 +803,21 @@ class ColbuilderConfig(BaseModel):
     def validate_replace_config(self) -> "ColbuilderConfig":
         """Validate replacement configuration."""
         if self.replace_bool:
-            if self.ratio_replace is None and self.replace_file is None:
+            has_manual_replacements = bool(self.manual_replacements)
+            if self.geometry_generator:
+                if self.ratio_replace is None and not has_manual_replacements:
+                    raise ConfigurationError(
+                        "Either ratio_replace or manual_replacements must be specified when replace_bool is True with geometry generation",
+                        error_code="CFG_ERR_006",
+                    )
+            elif self.ratio_replace is None and self.replace_file is None and not has_manual_replacements:
                 raise ConfigurationError(
-                    "Either ratio_replace or replace_file must be specified when replace_bool is True",
+                    "Either ratio_replace, replace_file, or manual_replacements must be specified when replace_bool is True",
+                    error_code="CFG_ERR_006",
+                )
+            if self.ratio_replace_scope not in {"enzymatic", "non_enzymatic", "all"}:
+                raise ConfigurationError(
+                    "ratio_replace_scope must be one of: enzymatic, non_enzymatic, all",
                     error_code="CFG_ERR_006",
                 )
             if self.ratio_replace is not None:
@@ -847,3 +988,4 @@ def validate_config(config: Dict[str, Any]) -> ColbuilderConfig:
             original_error=e,
             error_code="CFG_ERR_001",
         )
+    

@@ -587,6 +587,8 @@ class FileManager:
                         self.sequence_dir,
                     ]:
                         continue
+                    if dir_path.name == "replace_manual":
+                        continue
 
                     # Skip certain directories in debug mode
                     if self.config.debug and any(
@@ -832,3 +834,4 @@ class FileManager:
         """
         temp_dir = self.get_temp_path(dirname, create_dir=True)
         return temp_dir
+    

@@ -602,24 +602,21 @@ class Itp:
         for cnt_con in range(len(self.atoms)):
             self.merge_topology(cnt_con=cnt_con)
 
-        # Crosslinks: decide based on connection count we actually merged
-        if len(self.atoms) <= 1:
+        # Always try to detect crosslinks - they can exist regardless of connection count
+        try:
+            crosslinker = Crosslink(cnt_model=cnt_model)
+            self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
+            
+            if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
+                LOG.debug(f"Found crosslinks for model {model_id}:")
+                LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
+                LOG.debug(f"  Angles: {len(self.crosslink_bonded['angles'])}")
+                LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
+            else:
+                LOG.debug(f"No crosslinks found for model {model_id}")
+        except Exception as e:
+            LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
-            LOG.debug(f"Single connection model {model_id}: no crosslinks")
-        else:
-            try:
-                crosslinker = Crosslink(cnt_model=cnt_model)
-                self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
-                if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):
-                    LOG.debug(f"Found crosslinks for model {model_id}:")
-                    LOG.debug(f"  Bonds: {len(self.crosslink_bonded['bonds'])}")
-                    LOG.debug(f"  Angles: {len(self.crosslink_bonded['angles'])}")
-                    LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
-                else:
-                    LOG.debug(f"No crosslinks found for model {model_id}")
-            except Exception as e:
-                LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
-                self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
 
         # Write final topology files
         self.write_topology(cnt_model=cnt_model)

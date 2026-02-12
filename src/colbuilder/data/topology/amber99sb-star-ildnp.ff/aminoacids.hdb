@@ -268,6 +268,62 @@ LYY	8
 2       6       HE      CE      CD      NZ
 1       1       H10     C10     C12    C13
 1       1       H14     C14     C13     NZ
+AGS     13
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG          
+2       6       HG      CG      CB      CD          
+2       6       HD      CD      CG      NE          
+1       1       HE      NE      CD      CZ          
+1       1       H15     C15     C16     NZ          
+2       6       H17     C17     C15     NZ          
+1       1       H18     C18     C17    O18                                                                             
+1       1       H19     C19     C18    C20          
+2       6       H20     C20     C19    C16           
+1       2       HO18    O18     C18    C17          
+1       2       HO19    O19     C19    C18          
+LGX 6
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG
+2       6       HG      CG      CB      CD
+2       6       HD      CD      CG      CE
+2       6       HE      CE      CD      CB
+LZS 9                                                                                                                                                                                                                                                
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG
+2       6       HG      CG      CB      CD
+2       6       HD      CD      CG      CE
+2       6       HE      CE      CD      CB
+1       1       H30     C30     NZ1     C28
+1       4       H31     C31     NZ1     NZ2
+3       4       HH3     CH3     C28     NZ1
+LZD 6
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG
+2       6       HG      CG      CB      CD
+2       6       HD      CD      CG      CE
+2       6       HE      CE      CD      CB
+APD 10
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG
+2       6       HG      CG      CB      CD
+2       6       HD      CD      CG      NE
+1       1       HE      NE      CD      CZ
+1       1       HH1     NH1     C24     CZ
+1       1       H25     C25     C26     NZ
+1       1       H26     C26     C27     C24
+1       1       H27     C27     C24     C23
+LPS 6 
+1       1       H       N       -C      CA
+1       5       HA      CA      N       CB      C
+2       6       HB      CB      CA      CG
+2       6       HG      CG      CB      CD
+2       6       HD      CD      CG      CE
+2       6       HE      CE      CD      CB
 L3X     4
 1       1       H       N       -C      CA
 1       5       HA      CA      N       CB      C

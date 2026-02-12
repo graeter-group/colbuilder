@@ -51,7 +51,9 @@ def main():
                 continue
                 
             pdb_file = replace[0]
-            # residue_type = replace[1]  # Currently not used, always replacing with LYS
+            residue_type = replace[1].upper() if len(replace) > 1 else "LYS"
+            if residue_type not in {"LYS", "ARG"}:
+                residue_type = "LYS"
             residue_id = replace[2]
             chain_id = replace[3].replace('\n', '').lower()
             
@@ -62,9 +64,9 @@ def main():
             print("Opening {0}".format(pdb_path))
             rc("open {0}".format(pdb_path))
             
-            # Replace residue with lysine
-            print("Replacing residue {0}.{1} with LYS".format(residue_id, chain_id))
-            rc("swapaa LYS #0:{0}.{1}".format(residue_id, chain_id))
+            # Replace residue with requested type (default LYS)
+            print("Replacing residue {0}.{1} with {2}".format(residue_id, chain_id, residue_type))
+            rc("swapaa {0} #0:{1}.{2}".format(residue_type, residue_id, chain_id))
             
             # Write modified structure back to file
             print("Writing updated structure to {0}".format(pdb_path))
