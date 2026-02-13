@@ -1,48 +1,141 @@
+# ================================================================================
+# ColBuilder Configuration File
+# ================================================================================
+# This configuration file controls the ColBuilder pipeline for generating collagen
+# structures. The pipeline consists of three main modules that can be run 
+# independently or in combination:
+#
+# 1. SEQUENCE GENERATOR: Creates collagen triple helix structures from sequences
+# 2. GEOMETRY GENERATOR: Builds collagen microfibrils from triple helices
+# 3. TOPOLOGY GENERATOR: Generates force field topologies for simulations
+#
+# IMPORTANT: When using additional crosslinks with a pre-mutated PDB, 
+# e.g. to add AGE crosslinks:
+# - Run sequence generation first to apply and optimize additional crosslinks
+# - Then run geometry generation in a separate execution using the output PDB
+# ================================================================================
+
 # Operation Mode
-mode: null                   # Specific operation mode if needed
-config_file: null            # Path to another config file (for nested configs)
-sequence_generator: true     # Generate sequence from species
-geometry_generator: true     # Generate fibril geometry
-topology_generator: true    # Generate topology files
-debug: false                 # Enable debug mode
+mode: null
+config_file: null            # Path to another config file (for nested configs)  
+sequence_generator: true    # Generate triple helix structure from sequence
+geometry_generator: true    # Build microfibril from triple helix
+topology_generator: true     # Generate simulation topology files
+debug: false                 # Keep intermediate files for debugging
+working_directory: "./"      # Directory for output files
 
-# Input Configuration
-species: "rattus_norvegicus"      # Species for collagen sequence
-# Available species options:
-# Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
-# Mammals (Rodents): mus_musculus, rattus_norvegicus
-# Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
-# Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
-# Reptiles: pelodiscus_sinensis
+# ================================================================================
+# SEQUENCE GENERATION SETTINGS
+# ================================================================================
+# These settings control the generation of collagen triple helix structures.
+# Two main workflows are supported:
+# 1. Standard: Generate from FASTA sequence (leave mutated_pdb as null)
+# 2. Mutated PDB: Add crosslinks to existing structure (must provide mutated_pdb)
 
-# Sequence Settings
-fasta_file: null             # Custom FASTA file path (if null, auto-generated based on species)
-crosslink: true             # enable crosslinking in the model
+# Species selection - determines the collagen sequence if no custom FASTA provided
+species: "rattus_norvegicus"  # Available options:
+                        # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
+                        # Mammals (Rodents): mus_musculus, rattus_norvegicus
+                        # Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
+                        # Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
+                        # Reptiles: pelodiscus_sinensis
+
+# Mutated PDB workflow - provide pre-optimized structure to add additional crosslinks
+mutated_pdb: null  # Path to pre-mutated PDB, or null for standard workflow
+# Example: "rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
+
+# Custom sequence input - overrides species selection if provided
+fasta_file: null  # Path to custom FASTA file, or null to use available species sequence
+# Example: "path/to/custom_sequence.fasta"
+
+# ================================================================================
+# CROSSLINK CONFIGURATION
+# ================================================================================
+# Terminal crosslinks are applied at N and C termini during standard generation.
+# Additional crosslinks can be added anywhere (e.g., AGE products).
+
+crosslink: true  # Enable crosslink application and optimization
+
+# Terminal crosslinks (applied during standard sequence generation)
+n_term_type: "HLKNL"               # N-terminal crosslink type
+c_term_type: "HLKNL"               # C-terminal crosslink type
+n_term_combination: "9.C - 946.A"  # Format: "residue.chain - residue.chain"
+c_term_combination: "1046.C - 103.C"
+# Available crosslink types: DPD, DPL, HLKNL, LKNL, PYD, PYL, deHHLNL, deHLNL
 # Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
-n_term_type: "DPD" #  "PYD"  #      # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
-c_term_type: "DPD" #   "PYD"  #       # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
-n_term_combination: "5.B - 9.C - 946.A" # "6.B - 9.C - 946.A"  # N-terminal residue combination
-c_term_combination: "1046.C - 1046.A -103.C" # "1046.C - 1046.A - 103.C" # C-terminal residue combination
 
-# Geometry Parameters
-pdb_file: null # "rattusnorvegicus_N_PYD_C_PYD.pdb"               # Input PDB file (set to null if sequence_generator is true)
-contact_distance: 35         # Distance threshold for contacts (Å)
-fibril_length: 40.0          # Length of the generated fibril (nm)
-crystalcontacts_file: null   # File with crystal contacts 
-connect_file: null           # File with connection information
-crystalcontacts_optimize: false  # Optimize crystal contacts during generation
+# Additional crosslinks (uncomment for mutated PDB workflow)
+# These are applied on top of existing crosslinks in the structure
+# additional_1_type: "Pentosidine"            # First additional crosslink type
+# additional_2_type: null                     # Second additional crosslink type (optional)
+# additional_1_combination: "1008.A - 767.B"  # Position for first crosslink
+# additional_2_combination: null              # Position for second crosslink
 
-# Mixing Options (for mixed crosslinked microfibril)
-mix_bool: false              # Enable mixing of different crosslink types
-ratio_mix: "A:70 B:30"       # Format: "Type:percentage Type:percentage"
-files_mix:                   # Required if mix_bool is true
- - "collagen-molecule-crosslinkA.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
- - "collagen-molecule-crosslinkB.pdb" # PDB file of collagen molecule with type B crosslinks
+# Crosslink optimization settings
+# crosslink_copies: ["D0", "D5"]  # Periodic copies for optimization, must be exactly 2 elements
+# Options: D0-D5, D0-D1, D1-D2, D2-D3, D3-D4. If not specified, default is ["D0", "D5"]
 
-# Replacement Options (for fewer crosslinks)
-replace_bool: false          # Enable crosslink replacement
-ratio_replace: 30            # Percentage of crosslinks to replace
-replace_file: null           # File with crosslinks to be replaced (set to null if geometry_generation is true)
+# ================================================================================
+# GEOMETRY GENERATION SETTINGS
+# ================================================================================
+# These settings control microfibril assembly from triple helices.
+# The geometry generator arranges multiple copies of the input structure
+# into a collagen microfibril based on crystal contacts.
 
-# Topology Options
-force_field: "amber99"       # Force field for topology generation (Options: "amber99", "martini3")
+# Input structure for geometry generation
+pdb_file: null  # Path to input PDB, or null if sequence_generator is true
+# Example: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+# IMPORTANT: When using additional crosslinks, run sequence generation 
+# separately first, then use its output here
+
+# Microfibril parameters
+contact_distance: 20      # Maximum distance (Å) for crystal contacts
+fibril_length: 70.0       # Target length of microfibril (nm)
+
+# Advanced geometry options (usually left as null/false)
+crystalcontacts_file: null      # Custom crystal contacts file
+connect_file: null              # Custom connectivity information
+crystalcontacts_optimize: false # Optimize crystal contacts
+# Note: crystalcontacts_optimize is automatically true when using contact_distance
+
+# ================================================================================
+# MIXING OPTIONS
+# ================================================================================
+# Create heterogeneous microfibrils with different crosslink types.
+
+mix_bool: false           # Enable mixing of different crosslink types
+ratio_mix: "D:80 T:20"    # Ratio of each type (must sum to 100)
+# Format: "TypeLabel:percentage TypeLabel:percentage"
+# Example: "D:80 T:20" = 80% divalent, 20% trivalent
+files_mix:  # PDB files for each crosslink type (required if mix_bool=true)
+  - "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"    # File for type "D" (divalent)
+  - "rattusnorvegicus_N_PYD_C_PYD.pdb"        # File for type "T" (trivalent)
+# Note: Labels (D, T) are arbitrary but must match ratio_mix
+
+# ================================================================================
+# REPLACEMENT OPTIONS
+# ================================================================================
+# Reduce crosslink density by replacing some with standard amino acids.
+# Useful for modeling aged or diseased tissue with fewer crosslinks.
+
+replace_bool: false                     # Enable crosslink replacement
+ratio_replace: 30                       # Percentage of crosslinks to remove (0-100)
+replace_file: "rattus_norvegicus.pdb"   # Path to a file containing specific crosslinks to replace 
+# If running with geometry step set to true, this file can be ommited (set to null) 
+# and the output of geometry will be used in its place. 
+
+# ================================================================================
+# TOPOLOGY GENERATION SETTINGS
+# ================================================================================
+# Generate molecular dynamics topology files for the final structure.
+
+force_field: "amber99"  # Force field to use
+# Options: "amber99" (all-atom), "martini3" (coarse-grained)
+
+topology_debug: false     # Save intermediate topology files
+
+# Topology-Only Mode
+# When topology_generator: true AND both sequence_generator: false and 
+# geometry_generator: false, ColBuilder operates in topology-only mode,
+# reading an existing fibril PDB and generating topology files without 
+# running geometry generation. Crosslink parameters must match the input PDB.
