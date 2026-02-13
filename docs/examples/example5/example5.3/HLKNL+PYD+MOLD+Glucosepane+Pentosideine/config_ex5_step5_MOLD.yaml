@@ -1,0 +1,9 @@
+species: "rattus_norvegicus"
+sequence_generator: true
+geometry_generator: false 
+working_directory: "./"  
+crosslink: true              # Enable crosslinking in the model
+n_term_type: "MOLD"         # N-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE") 
+c_term_type: "MOLD"         # C-terminal crosslink type (Options: "DPD", "DPL", "HLKNL", "LKNL", "PYD", "PYL", "deHHLNL", "deHLNL", "NONE")
+n_term_combination: "9.C - 944.B"    # N-terminal residue combination
+c_term_combination: "1046.C - 103.C" # C-terminal residue combination

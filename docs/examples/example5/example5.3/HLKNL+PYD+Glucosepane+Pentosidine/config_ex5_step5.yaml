@@ -1,0 +1,12 @@
+species: "rattus_norvegicus"
+sequence_generator: false
+geometry_generator: false
+mix_bool: true
+topology_generator: true
+force_field: amber99
+ratio_mix: "A:80 B:20"
+files_mix:
+ - "rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb"
+ - "rattusnorvegicus_N_PYD_C_PYD+ADD1_Pentosidine.pdb"
+contact_distance: 25         # Distance threshold for contacts (Å)
+fibril_length: 67

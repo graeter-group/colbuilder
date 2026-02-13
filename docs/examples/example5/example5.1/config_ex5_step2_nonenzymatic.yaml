@@ -1,0 +1,77 @@
+# ================================================================================
+# ColBuilder Configuration File
+# ================================================================================
+# This configuration file controls the ColBuilder pipeline for generating collagen
+# structures. The pipeline consists of three main modules that can be run 
+# independently or in combination:
+#
+# 1. SEQUENCE GENERATOR: Creates collagen triple helix structures from sequences
+# 2. GEOMETRY GENERATOR: Builds collagen microfibrils from triple helices
+# 3. TOPOLOGY GENERATOR: Generates force field topologies for simulations
+#
+# IMPORTANT: When using additional crosslinks with a pre-mutated PDB, 
+# e.g. to add AGE crosslinks:
+# - Run sequence generation first to apply and optimize additional crosslinks
+# - Then run geometry generation in a separate execution using the output PDB
+# - This two-step process is required for the specialized crosslink workflow
+# ================================================================================
+
+# Operation Mode
+mode: null
+config_file: null
+sequence_generator: true    # Generate triple helix structure from sequence
+geometry_generator: false     # Build microfibril from triple helix
+topology_generator: false    # Generate simulation topology files
+debug: false                 # Keep intermediate files for debugging
+working_directory: "./"      # Directory for output files
+
+# ================================================================================
+# SEQUENCE GENERATION SETTINGS
+# ================================================================================
+# These settings control the generation of collagen triple helix structures.
+# Two main workflows are supported:
+# 1. Standard: Generate from FASTA sequence (leave mutated_pdb as null)
+# 2. Mutated PDB: Add crosslinks to existing structure (provide mutated_pdb)
+
+# Species selection - determines the collagen sequence if no custom FASTA provided
+species: "rattus_norvegicus"  # Available options:
+                        # Mammals (Primates): homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii
+                        # Mammals (Rodents): mus_musculus, rattus_norvegicus
+                        # Mammals (Other): bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana
+                        # Fish: danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus
+                        # Reptiles: pelodiscus_sinensis
+
+# Mutated PDB workflow - provide pre-optimized structure to add more crosslinks
+# Set to null for standard sequence generation workflow
+mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+
+# Custom sequence input - overrides species selection if provided
+fasta_file: null  # Path to custom FASTA file, or null to use species sequence
+
+# ================================================================================
+# CROSSLINK CONFIGURATION
+# ================================================================================
+# Crosslinks are chemical modifications that stabilize collagen structure.
+# Terminal crosslinks are applied at N and C termini during initial generation.
+# Additional crosslinks can be added anywhere in the structure.
+
+crosslink: true  # Enable crosslink application and optimization
+
+# Terminal crosslinks (applied during standard sequence generation)
+# These are typically already present in mutated_pdb files
+n_term_type: "PYD"              # N-terminal crosslink type
+c_term_type: "PYD"              # C-terminal crosslink type
+n_term_combination: "9.C - 5.B - 944.B" 
+c_term_combination: "1046.C - 1046.A - 103.C"
+
+# Additional crosslinks (for mutated PDB workflow)
+# These are applied on top of existing crosslinks in the structure
+additional_1_type: "Glucosepane"      # First additional crosslink type
+additional_2_type: null               # Second additional crosslink type (optional)
+additional_1_combination: "523.A - 286.C"  # Position for first crosslink
+additional_2_combination: null        # Position for second crosslink
+ 
+# Crosslink optimization settings
+# Specifies which periodic copies to use for distance optimization
+crosslink_copies: ["D2", "D1"]  # Must be exactly 2 elements from: D0-D5
+# Default is ["D0", "D5"] if not specified
