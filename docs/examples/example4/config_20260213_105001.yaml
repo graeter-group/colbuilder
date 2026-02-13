@@ -1,0 +1,53 @@
+# ==============================================================================
+# Colbuilder Configuration - Topology Generation Only
+# ==============================================================================
+# This configuration generates topology files from an existing fibril PDB file
+# without performing sequence generation, geometry generation, or mixing.
+# ==============================================================================
+
+# Operation Mode
+mode: null
+config_file: null
+sequence_generator: false     # No sequence generation
+geometry_generator: false     # No geometry generation
+topology_generator: true      # Only generate topology files
+debug: false
+
+# Species Configuration
+species: "rattus_norvegicus"  # Species identifier for output naming
+
+# Input PDB File
+# IMPORTANT: Provide the path to your existing mixed fibril PDB file
+pdb_file: "collagen_fibril_rattus_norvegicus_MIX.pdb"
+
+# Sequence Settings (Not used in topology-only mode, but required fields)
+fasta_file: null
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "6.B - 9.C - 946.A"
+c_term_combination: "1046.C - 1046.A - 103.C"
+
+# Geometry Parameters (Not used in topology-only mode, but may be required fields)
+contact_distance: 30
+fibril_length: 80.0
+crystalcontacts_file: null
+connect_file: null
+crystalcontacts_optimize: false
+
+# Mixing Options (Disabled for topology-only mode)
+mix_bool: false
+ratio_mix: "A:70 B:30" 
+files_mix:                   # Required if mix_bool is true
+ - "rattusnorvegicus_N_PYD_C_PYD.pdb" # PDB file of collagen molecule with type A crosslinks (created by only setting squence and crosslinks = true (please look at the examples))
+ - "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb" # PDB file of collagen molecule with type B crosslinks
+
+# Replacement Options (Disabled for topology-only mode)
+replace_bool: false
+ratio_replace: null
+replace_file: null
+
+# Topology Options
+force_field: "amber99"        # Force field for topology generation
+                              # Options: "amber99" or "martini3"
+topology_debug: false         # Keep intermediate topology files for debugging
