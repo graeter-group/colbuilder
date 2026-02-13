@@ -192,7 +192,7 @@ These combinations can be run **in a single config file**:
 ```yaml
 # Example combination
 sequence_generator: true
-geometry_generator: true
+geometry_generator: true         # (optional)
 topology_generator: true         # (optional)
 replace_bool: true               # (optional)
 ```
@@ -202,13 +202,13 @@ replace_bool: true               # (optional)
 These mode combinations can be run **in a single configuration file**:
 
 - ✅ **`1 + 2`** - Generate molecule and build fibril
-- ✅ **`1 + 2 + 3`** - Complete pipeline: molecule → fibril → topology - [example](docs/examples/)
+- ✅ **`1 + 2 + 3`** - Complete pipeline: molecule → fibril → topology - [example1](docs/examples/example1)
 - ✅ **`2 + 3`** - Build fibril and topology from custom triple helix PDB
 - ✅ **`1 + 2 + 5`** - Generate, build, then replace crosslinks
 - ✅ **`1 + 2 + 5 + 3`** - Generate, build, replace crosslinks by their standard amino acid, then create topology
-- ✅ **`2 + 5`** - Build fibril then replace crosslinks - [example](docs/examples/)
+- ✅ **`2 + 5`** - Build fibril then replace crosslinks - [example3](docs/examples/example3)
 - ✅ **`2 + 5 + 3`** - Build fibril, replace crosslinks, then create topology
-- ✅ **`3`** - Topology-only mode: generate topology from existing fibril PDB
+- ✅ **`3`** - Topology-only mode: generate topology from existing fibril PDB - [example4](docs/examples/example4)
 
 ---
 
@@ -216,7 +216,7 @@ These mode combinations can be run **in a single configuration file**:
 
 Mixing crosslinks (**Mode 4**) currently requires a separate workflow using (at least) two config files for triple helix generation and one for fibril construction (and optional topology generation):
 
-[example](docs/examples/)
+[example2](docs/examples/example2)
 
 ```bash
 # Example bash script for mixing crosslinks
@@ -259,7 +259,7 @@ Advanced Glycation End-products form spontaneously and accumulate with aging:
 
 ### Crosslink Combinations
 
-Crosslinks form at specific anatomical positions in the collagen molecule:
+Crosslinks form at specific positions in the collagen molecule:
 
 **Terminal Crosslinks:**
 - **N-terminal**: Typically at positions 9 and 947 (or species-equivalent)
@@ -726,7 +726,7 @@ We welcome contributions to ColBuilder! Please see our [contributing guidelines]
 
 If you use ColBuilder in your research, please cite our paper:
 
-https://www.biorxiv.org/content/10.1101/2024.12.10.627782v1
+https://academic.oup.com/bioinformatics/article/41/6/btaf278/8125020
 
 A BibTeX entry is provided in the [CITATION.bibtex](https://github.com/graeter-group/colbuilder/tree/main/CITATION.bibtex) file.
 
