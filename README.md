@@ -630,7 +630,13 @@ colbuilder --config_file config_replace_crosslinks.yaml
 
 #### Adding AGE Crosslinks to an Existing Structure (Mutated PDB Workflow)
 
-Add non-enzymatic crosslinks (AGEs) on top of existing enzymatic crosslinks in three steps ([example5](docs/examples/example5))
+Add non-enzymatic crosslinks (AGEs) on top of existing enzymatic crosslinks. Examples for this workflow can be found in [docs/examples/example5](https://github.com/graeter-group/colbuilder/tree/main/docs/examples/example5):
+
+- Sequence + Geometry + Topology generation for a collagen with a mixture of PYD and Glucosepane crosslinks [example5.1](https://github.com/graeter-group/colbuilder/tree/main/docs/examples/example5/example5.1)
+- Sequence + Geometry + Replacement generation for a collagen with a mixture PYD and Glucosepane crosslinks [example5.2](https://github.com/graeter-group/colbuilder/tree/main/docs/examples/example5/example5.2)
+- Sequence + Geometry + Mixing + Topology generation for different crosslink combinations [example5.3](https://github.com/graeter-group/colbuilder/tree/main/docs/examples/example5/example5.3)
+
+In general, the most basic workflow happens in three steps:
 
 **Step 1:** Generate base structure with enzymatic crosslinks
 
