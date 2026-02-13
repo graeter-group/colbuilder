@@ -630,7 +630,7 @@ colbuilder --config_file config_replace_crosslinks.yaml
 
 #### Adding AGE Crosslinks to an Existing Structure (Mutated PDB Workflow)
 
-Add non-enzymatic crosslinks (AGEs) on top of existing enzymatic crosslinks in two steps:
+Add non-enzymatic crosslinks (AGEs) on top of existing enzymatic crosslinks in three steps ([example5](docs/examples/example5))
 
 **Step 1:** Generate base structure with enzymatic crosslinks
 
