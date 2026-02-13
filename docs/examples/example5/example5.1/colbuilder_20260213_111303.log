@@ -1,0 +1,99 @@
+2026-02-13 11:13:03,755 - colbuilder - TITLE - ************************************************************************************
+2026-02-13 11:13:03,755 - colbuilder - TITLE - * ColBuilder: Collagen Microfibril Builder *
+2026-02-13 11:13:03,755 - colbuilder - TITLE - ************************************************************************************
+2026-02-13 11:13:03,755 - colbuilder - INFO - Version: 0.0.0
+2026-02-13 11:13:03,756 - colbuilder - INFO - Copyright (c) 2024, ColBuilder Development Team
+2026-02-13 11:13:03,756 - colbuilder - INFO - Distributed under the terms of the Apache License 2.0
+2026-02-13 11:13:03,756 - colbuilder - INFO - 
+2026-02-13 11:13:03,756 - colbuilder - INFO - Loading configuration from: config_ex5_step3.yaml
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - Fibril Parameters
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - --------------------------------------------------------------------------------
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Species: rattus_norvegicus
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Contact Distance: 25.0
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Fibril Length: 67.0
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Crosslinks:
+2026-02-13 11:13:03,760 - colbuilder - INFO - -     N-terminal: PYD, 9.C - 5.B - 944.B
+2026-02-13 11:13:03,760 - colbuilder - INFO - -     C-terminal: PYD, 1046.C - 1046.A - 103.C
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - Operation Modes
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - --------------------------------------------------------------------------------
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Geometry Generation ✓
+2026-02-13 11:13:03,760 - colbuilder - INFO - - Topology Generation ✓
+2026-02-13 11:13:03,760 - colbuilder - INFO - Input File: /Users/deboramonego/colbuilder-vOG/colbuilder/rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb
+2026-02-13 11:13:03,760 - colbuilder - INFO - Output File: collagen_fibril_rattus_norvegicus.pdb
+2026-02-13 11:13:03,760 - colbuilder - INFO - Working Directory: /Users/deboramonego/colbuilder-vOG/colbuilder
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - Starting ColBuilder Pipeline
+2026-02-13 11:13:03,760 - colbuilder - SUBSECTION - --------------------------------------------------------------------------------
+2026-02-13 11:13:03,761 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:13:03,761 - colbuilder - SECTION - Running geometry generation
+2026-02-13 11:13:03,761 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:13:03,763 - colbuilder.core.geometry.main_geometry - INFO - Geometry mode: building system from crystal
+2026-02-13 11:13:03,763 - colbuilder.core.geometry.crystal_builder - INFO - Step 1/7 Initializing crystal
+2026-02-13 11:13:03,839 - colbuilder.core.geometry.crystal_builder - INFO - Step 2/7 Building initial system
+2026-02-13 11:14:07,176 - colbuilder.core.geometry.crystal_builder - INFO - Optimizing system
+2026-02-13 11:18:46,317 - colbuilder.core.geometry.crystal_builder - INFO - Step 3/7 Writing crystal contacts
+2026-02-13 11:18:46,318 - colbuilder.core.geometry.crystal_builder - INFO - Step 4/7 Generating system matrix
+2026-02-13 11:18:46,318 - colbuilder.core.geometry.crystal_builder - INFO - Please wait, this may take some time ...
+2026-02-13 11:29:53,075 - colbuilder.core.geometry.crystal_builder - INFO - Step 5/7 Writing models' connectivity
+2026-02-13 11:29:53,077 - colbuilder.core.geometry.crystal_builder - INFO - Step 6/7 Adding caps
+2026-02-13 11:29:53,077 - colbuilder.core.geometry.crystal_builder - INFO - Model type: DT
+2026-02-13 11:29:54,847 - colbuilder.core.geometry.crystal_builder - INFO - Step 7/7 Writing final structure
+2026-02-13 11:29:55,012 - colbuilder.core.geometry.crystal_builder - INFO - Final structure written successfully
+2026-02-13 11:29:55,181 - colbuilder - INFO - Geometry generation completed, output PDB: /Users/deboramonego/colbuilder-vOG/colbuilder/collagen_fibril_rattus_norvegicus.pdb
+2026-02-13 11:29:55,181 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:29:55,181 - colbuilder - SECTION - Running topology generation
+2026-02-13 11:29:55,181 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:29:55,203 - colbuilder - INFO - Using existing system from geometry generation
+2026-02-13 11:29:55,227 - colbuilder.core.topology.main_topology - SUBSECTION - Building topology based on the amber99 force field
+2026-02-13 11:29:55,227 - colbuilder.core.topology.main_topology - SUBSECTION - --------------------------------------------------------------------------------
+2026-02-13 11:29:55,227 - colbuilder.core.topology.amber - INFO - Step 1/3 Setting up Amber99 force field
+2026-02-13 11:29:55,244 - colbuilder.core.topology.amber - INFO - Step 2/3 Grouping connected models and processing with GROMACS
+2026-02-13 11:29:55,252 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 0_62
+2026-02-13 11:29:55,805 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_0_62.itp
+2026-02-13 11:29:56,354 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 1_65
+2026-02-13 11:29:56,921 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_1_65.itp
+2026-02-13 11:29:57,505 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 2_89
+2026-02-13 11:29:58,043 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_2_89.itp
+2026-02-13 11:29:59,010 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 7_59
+2026-02-13 11:29:59,552 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_7_59.itp
+2026-02-13 11:30:00,333 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 9_90
+2026-02-13 11:30:00,859 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_9_90.itp
+2026-02-13 11:30:01,402 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 11_18
+2026-02-13 11:30:01,777 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_11_18.itp
+2026-02-13 11:30:02,665 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 12_75
+2026-02-13 11:30:03,041 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_12_75.itp
+2026-02-13 11:30:04,183 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 14_70
+2026-02-13 11:30:04,563 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_14_70.itp
+2026-02-13 11:30:05,444 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 16_33
+2026-02-13 11:30:05,974 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_16_33.itp
+2026-02-13 11:30:06,503 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 17_48
+2026-02-13 11:30:06,881 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_17_48.itp
+2026-02-13 11:30:07,809 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 19_74
+2026-02-13 11:30:08,195 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_19_74.itp
+2026-02-13 11:30:09,080 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 20_38
+2026-02-13 11:30:09,459 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_20_38.itp
+2026-02-13 11:30:10,398 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 23_58
+2026-02-13 11:30:10,786 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_23_58.itp
+2026-02-13 11:30:12,179 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 31_72
+2026-02-13 11:30:12,564 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_31_72.itp
+2026-02-13 11:30:13,495 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 32_54
+2026-02-13 11:30:14,037 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_32_54.itp
+2026-02-13 11:30:15,149 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 40_67
+2026-02-13 11:30:15,692 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_40_67.itp
+2026-02-13 11:30:16,256 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 41_49
+2026-02-13 11:30:16,791 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_41_49.itp
+2026-02-13 11:30:17,586 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 46_61
+2026-02-13 11:30:17,962 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_46_61.itp
+2026-02-13 11:30:19,333 - colbuilder.core.topology.amber - INFO - Found 8 crosslink pairs for group 56_63
+2026-02-13 11:30:19,708 - colbuilder.core.topology.amber - INFO - Adding 8 crosslink pairs to col_56_63.itp
+2026-02-13 11:30:20,906 - colbuilder.core.topology.amber - INFO - Found 1 crosslink pairs for group 69_156
+2026-02-13 11:30:21,437 - colbuilder.core.topology.amber - INFO - Adding 1 crosslink pairs to col_69_156.itp
+2026-02-13 11:30:22,963 - colbuilder.core.topology.amber - INFO - Step 3/3 Generating system topology files
+2026-02-13 11:30:23,030 - colbuilder.core.topology.amber - INFO - GRO file written with 433341 atoms from 35 groups
+2026-02-13 11:30:23,034 - colbuilder.core.topology.amber - INFO - Successfully generated topology for 35 molecular groups
+2026-02-13 11:30:23,129 - colbuilder.core.topology.main_topology - INFO - Force field directory 'amber99sb-star-ildnp.ff' copied to output directory
+2026-02-13 11:30:23,129 - colbuilder.core.topology.main_topology - INFO - Force field files can be found in the output directory. Please check and modify these files according to your custom needs and requirements.
+2026-02-13 11:30:23,129 - colbuilder.core.topology.main_topology - INFO - Topology files written at: /Users/deboramonego/colbuilder-vOG/colbuilder/rattus_norvegicus_topology_files
+2026-02-13 11:30:23,131 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:30:23,131 - colbuilder - SECTION - ColBuilder Pipeline Complete
+2026-02-13 11:30:23,131 - colbuilder - SECTION - ================================================================================
+2026-02-13 11:30:23,131 - colbuilder - INFO - Done! Colbuilder completed successfully.

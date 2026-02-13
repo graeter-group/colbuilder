@@ -1,0 +1,26 @@
+; Topology for Collagen Microfibril from Colbuilder 2.0
+#include "./amber99sb-star-ildnp.ff/forcefield.itp"
+#include "col_0_16_17_33_37_40_48_52_56_62_63_64_67.itp"
+#include "col_1_8_12_20_26_38_41_45_49_65_75.itp"
+#include "col_2_11_14_18_25_35_70_85_105.itp"
+#include "col_4_9_23_31_58_69_72_86_106.itp"
+#include "col_7_13_19_32_46_54_59_61_71_74_77.itp"
+#include "col_53.itp"
+#include "col_76.itp"
+#include "./amber99sb-star-ildnp.ff/ions.itp"
+#include "./amber99sb-star-ildnp.ff/tip3p.itp"
+
+
+[ system ]
+ ;name
+Collagen Microfibril in Water
+
+[ molecules ]
+;name  number
+col_0_16_17_33_37_40_48_52_56_62_63_64_67   1
+col_1_8_12_20_26_38_41_45_49_65_75   1
+col_2_11_14_18_25_35_70_85_105   1
+col_4_9_23_31_58_69_72_86_106   1
+col_7_13_19_32_46_54_59_61_71_74_77   1
+col_53   1
+col_76   1
