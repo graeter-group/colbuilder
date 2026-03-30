@@ -730,15 +730,10 @@ We welcome contributions to ColBuilder! Please see our [contributing guidelines]
 
 ## 📚 Publications & Citation
 
-If you use ColBuilder in your research, please cite our paper:
+* If you use ColBuilder in your research, please cite our paper: https://academic.oup.com/bioinformatics/article/41/6/btaf278/8125020. A BibTeX entry is provided in the [CITATION.bibtex](https://github.com/graeter-group/colbuilder/tree/main/CITATION.bibtex) file.
 
-https://academic.oup.com/bioinformatics/article/41/6/btaf278/8125020
-
-A BibTeX entry is provided in the [CITATION.bibtex](https://github.com/graeter-group/colbuilder/tree/main/CITATION.bibtex) file.
-
-If you perform coarse-grained simulations, please also cite the Martini 3 paper for collagen fibrils:
-
-https://www.cell.com/biophysj/fulltext/S0006-3495(25)00663-0
+* If you perform coarse-grained simulations, please also cite the Martini 3 paper for collagen fibrils: https://www.cell.com/biophysj/fulltext/S0006-3495(25)00663-0
+* If you use AGE crosslinks in colbuilder, then please also cite "Introducing non-enzymatic crosslinks into atomistic simulations of collagen fibrils" https://www.biorxiv.org/content/10.64898/2026.03.13.711566v1
 
 ## 🙏 Acknowledgements
 
