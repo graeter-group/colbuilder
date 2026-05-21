@@ -533,7 +533,7 @@ colbuilder --config_file config_trivalent_molecule.yaml
 colbuilder --config_file config_mixed_crosslinks.yaml
 ```
 
-#### Generating a Coarse-Grained Topology File for MD Simulation
+#### Generating a Coarse-Grained Topology File for MD Simulation -use colbuilder version from 28.08!! (all recent changes do not change CG creation) 
 
 ```yaml
 # config_topology.yaml
