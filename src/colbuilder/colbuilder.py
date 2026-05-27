@@ -89,11 +89,6 @@ def print_version(ctx: click.Context, param: click.Parameter, value: bool) -> No
     ctx.exit()
 
 
-from colbuilder.core.sequence.main_sequence import build_sequence
-from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
-from colbuilder.core.topology.main_topology import build_topology
-
-
 def configure_loggers():
     """Configure external loggers to prevent duplicated output."""
     problematic_loggers = [
@@ -203,6 +198,7 @@ async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Optional[Pa
     """
     try:
         LOG.subsection("Generating Sequence")
+        from colbuilder.core.sequence.main_sequence import build_sequence
         return await build_sequence(config)
     except Exception as e:
         LOG.error(f"Sequence generation failed: {str(e)}")
@@ -234,6 +230,7 @@ async def run_geometry_generation(
     """
     try:
         LOG.subsection("Building Geometry or Mixing")
+        from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
 
         current_file_manager = file_manager or FileManager(config)
 
@@ -324,6 +321,8 @@ async def run_topology_generation(
         TopologyGenerationError: If topology generation fails
     """
     try:
+        from colbuilder.core.topology.main_topology import build_topology
+
         if file_manager is None:
             file_manager = FileManager(config)
 

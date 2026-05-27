@@ -7,6 +7,7 @@ crosslink handling between models.
 """
 
 import os
+import re
 import shutil
 from pathlib import Path
 import asyncio
@@ -902,6 +903,12 @@ class Amber:
         
         output_file = itp_file.parent / str(itp_file.name).replace("top", "itp")
         
+        # pdb2gmx -merge all writes a single moleculetype.  Older GROMACS
+        # versions name it "Protein_chain_A"; newer versions (>=2023) write
+        # just "Protein".  Match either so the topology body is copied
+        # regardless of GROMACS version.
+        molname_re = re.compile(r'^\s*Protein(?:_chain_\w+)?\s+\d+\s*$')
+
         with open(output_file, 'w') as f:
             write = False
             for line in itp_model:
@@ -909,7 +916,7 @@ class Amber:
                     break
                 if write:
                     f.write(line)
-                elif 'Protein_chain_A' in line:
+                elif molname_re.match(line):
                     f.write('[ moleculetype ]\n')
                     f.write(f'{molecule_name}  3\n')
                     write = True
