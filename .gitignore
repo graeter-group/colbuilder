@@ -111,3 +111,6 @@ glucosepane/
 logs/
 homosapiens*
 homo_sapiens*/
+.DS_Store
+*.o
+contact_map
