@@ -843,7 +843,7 @@ async def build_martini3(
                         itp_.read_model(model_id=int(model_id))
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=int(cnt_model))
-                        processed_models.append(model_id)
+                        processed_models.append(cnt_model)
                         
                         for connect_id in model.connect:
                             processed_in_topology.add(connect_id)
