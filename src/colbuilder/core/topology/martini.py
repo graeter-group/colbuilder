@@ -15,6 +15,7 @@ The module requires the Martinize2 tool and custom contact map utilities.
 
 import cmd
 import os
+import sys
 import subprocess
 import shutil
 from pathlib import Path
@@ -33,6 +34,7 @@ from colbuilder.core.utils.martinize_finder import (
     get_active_conda_env,
     find_and_install_custom_force_field,
     get_conda_command_with_path,
+    find_martinize2_executable,
 )
 from colbuilder.core.utils.logger import setup_logger
 from colbuilder.core.utils.files import FileManager
@@ -561,6 +563,47 @@ class Martini:
         return None
 
 
+def _build_connected_groups(system: System) -> List[List[Any]]:
+    """
+    Collapse crosslink-connected models into transitive groups.
+
+    Mirrors Amber.get_connected_groups so that each physically connected set
+    of triple helices is emitted exactly once. model.connect is symmetric and
+    self-inclusive (e.g. {self} + direct neighbors); a BFS gives the full group.
+    """
+    all_models = list(system.get_models())
+    processed: set = set()
+    groups: List[List[Any]] = []
+
+    for model_id in all_models:
+        if model_id in processed:
+            continue
+
+        model = system.get_model(model_id=model_id)
+        if not model or not getattr(model, "connect", None):
+            groups.append([model_id])
+            processed.add(model_id)
+            continue
+
+        group: set = set()
+        stack = [model_id]
+        while stack:
+            cur = stack.pop()
+            if cur in group:
+                continue
+            group.add(cur)
+            cur_model = system.get_model(model_id=cur)
+            if cur_model and getattr(cur_model, "connect", None):
+                for nb in cur_model.connect:
+                    if nb not in group:
+                        stack.append(nb)
+
+        groups.append(sorted(group))
+        processed.update(group)
+
+    return groups
+
+
 def check_output_files(topology_dir: Path, expected_models: int):
     """Diagnostic function to check which files were created"""
     cg_files = list(topology_dir.glob("*.CG.pdb"))
@@ -715,27 +758,38 @@ async def build_martini3(
             type_dir.mkdir(exist_ok=True, parents=True)
 
         models_list = [model_id for model_id in system.get_models()]
+
+        # Group crosslink-connected models so each physical triple helix is
+        # written exactly once. Without this, every model re-merges its whole
+        # neighborhood and connected helices are emitted multiple times,
+        # producing duplicate beads (0 A overlaps) and inflated particle counts.
+        connected_groups = _build_connected_groups(system)
+        LOG.debug(
+            f"Martini: collapsed {len(models_list)} models into "
+            f"{len(connected_groups)} connected group(s)"
+        )
+
         model_status = {}
         failed_martinize, failed_contact, failed_go, failed_itp = [], [], [], []
         processed_in_topology: set = set()
 
-        for model_id in tqdm(models_list, desc="Building topology", unit="%"):
+        for group in tqdm(connected_groups, desc="Building topology", unit="grp"):
+            # Representative model id drives all file naming for this group.
+            model_id = group[0]
             model = system.get_model(model_id=model_id)
             if model is None:
-                LOG.warning(f"Skipping model {model_id}: model not found in System")
+                LOG.warning(f"Skipping group {group}: representative model not found in System")
                 model_status[model_id] = "no_model"
                 continue
 
-            # build connect_ids fallback
-            sys_connect = getattr(model, "connect", None)
-            if sys_connect:
-                connect_ids = list(sys_connect)
-            else:
-                connect_ids = [model_id]  # self-connection
-                LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
+            # Process every member of the group exactly once, and make sure the
+            # downstream helpers that read connectivity from the System
+            # (merge_pdbs, Itp.allocate/read_model) see the full group.
+            connect_ids = list(group)
+            model.connect = list(group)
 
             if not connect_ids:
-                LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
+                LOG.warning(f"Skipping group {group}: no members")
                 model_status[model_id] = "no_connections"
                 continue
 
@@ -762,7 +816,30 @@ async def build_martini3(
                                 f"-nter {nter_flag} -cter {cter_flag} "
                                 f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
                             )
-                            return get_conda_command_with_path("martinize2", args)
+                            # An explicit user override wins.
+                            configured = getattr(config, "martinize2_command", None)
+                            if configured and configured not in ("martinize2", "auto"):
+                                return f"{configured} {args}"
+                            # Prefer the martinize2 that lives in the SAME environment
+                            # as the running interpreter: that is the vermouth into
+                            # which the custom martini300C force field was just
+                            # installed. This avoids picking a martinize2 from another
+                            # Python (e.g. a pyenv shim ahead on PATH) whose vermouth
+                            # does not know the custom force field ("Unknown force
+                            # field martini300C").
+                            local_exe = Path(sys.executable).parent / "martinize2"
+                            if local_exe.exists():
+                                return f"{local_exe} {args}"
+                            # Otherwise fall back to a direct martinize2 on PATH, and
+                            # only wrap in `conda run` when it is reachable solely via
+                            # a conda env.
+                            try:
+                                exe, use_conda, _env = find_martinize2_executable()
+                            except Exception:
+                                exe, use_conda = "martinize2", True
+                            if use_conda:
+                                return get_conda_command_with_path("martinize2", args)
+                            return f"{exe} {args}"
 
                         cmd = _martinize_cmd(nter, cter)
                         process = await asyncio.create_subprocess_shell(
@@ -799,7 +876,7 @@ async def build_martini3(
                             continue
 
                         go_cmd = (
-                            f"python create_goVirt.py -s {int(model_id)}.{int(connect_id)}.CG.pdb "
+                            f"{sys.executable} create_goVirt.py -s {int(model_id)}.{int(connect_id)}.CG.pdb "
                             f"-f map.out --moltype col_{int(model_id)}.{int(connect_id)} --go_eps {go_epsilon}"
                         )
                         go_process = await asyncio.create_subprocess_shell(

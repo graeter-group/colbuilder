@@ -165,12 +165,15 @@ class Chimera(object):
             LOG.debug(
                 f"Chimera command completed with return code: {result.returncode}"
             )
-            if result.stdout:
-                # LOG.debug(f"Chimera stdout: {result.stdout}")
-                pass
-            if result.stderr:
-                # LOG.debug(f"Chimera stderr: {result.stderr}")
-                pass
+            if result.returncode != 0:
+                # Surface failures: a silent swapaa failure leaves unpaired crosslink
+                # markers (non-standard residues) in the structure, which breaks
+                # downstream topology generation / simulation.
+                LOG.error(
+                    f"Chimera swapaa failed (return code {result.returncode}); "
+                    f"unpaired crosslink markers may remain unmutated. "
+                    f"stderr: {result.stderr}"
+                )
             return result
         except Exception as e:
             LOG.error(f"Error executing Chimera command: {str(e)}")

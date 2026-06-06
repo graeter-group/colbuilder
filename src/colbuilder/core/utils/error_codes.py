@@ -152,7 +152,7 @@ CONFIGURATION_ERRORS: Dict[str, ErrorInfo] = {
             "Contact distance must be a positive number",
             "Fibril length must be a positive number less than 334",
             "Terminal combinations must follow format 'ResidueNumber.Chain - ResidueNumber.Chain'",
-            "Force field must be either 'amber99' or 'martini'",
+            "Force field must be either 'amber99' or 'martini3'",
         ],
     ),
 }
@@ -284,7 +284,7 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
         code="TOP_ERR_001",
         message="Invalid force field specification",
         suggestions=[
-            "Use a supported force field (currently only amber99)",
+            "Use a supported force field ('amber99' or 'martini3')",
             "Check force field spelling",
             "Verify force field is properly configured",
             "Ensure force field files are available in the expected location",

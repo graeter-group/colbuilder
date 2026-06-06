@@ -387,8 +387,8 @@ class ColbuilderConfig(BaseModel):
             data["working_directory"] = Path.cwd().resolve()
 
         super().__init__(**data)
-        if self.mix_bool and self.ratio_mix is not None:
-            self.ratio_mix = self._convert_ratio_mix(self.ratio_mix)
+        # ratio_mix is converted/validated (incl. sum-to-100) by the
+        # validate_ratio_mix field validator; no extra conversion needed here.
         self.solution_space = self._convert_to_tuple(self.solution_space)
         self.files_mix = tuple(self.files_mix) if self.files_mix else None
         self.set_mode()
@@ -483,8 +483,12 @@ class ColbuilderConfig(BaseModel):
         return value
 
     @field_validator("fibril_length")
-    def validate_fibril_length(cls, v: float) -> float:
-        """Validate fibril length."""
+    def validate_fibril_length(cls, v: Optional[float]) -> Optional[float]:
+        """Validate fibril length. None is allowed here; required-ness is enforced
+        per-mode by validate_fibril_length_required (avoids a confusing TypeError
+        when the value is simply omitted)."""
+        if v is None:
+            return None
         if v <= 0:
             raise ValueError("fibril_length must be greater than 0")
         LOG.debug(f"Validating fibril_length: {v}")
@@ -630,16 +634,6 @@ class ColbuilderConfig(BaseModel):
     def validate_files_mix(cls, value):
         """Validate files mix format."""
         return tuple(value) if value else None
-
-    @property
-    def ratio_mix(self) -> Dict[str, int]:
-        """Get ratio mix property."""
-        return self._ratio_mix
-
-    @ratio_mix.setter
-    def ratio_mix(self, value: Union[str, Dict[str, int]]):
-        """Set ratio mix property."""
-        self._ratio_mix = self._convert_ratio_mix(value)
 
     @field_validator("manual_replacements", mode="before")
     def validate_manual_replacements(
@@ -793,11 +787,30 @@ class ColbuilderConfig(BaseModel):
                     error_code="CFG_ERR_004",
                 )
             if values.fibril_length is None:
-                values.fibril_length = values.get(
-                    "fibril_length", 40.0
-                )  # Default to 40 for mixing
+                values.fibril_length = 40.0  # Default to 40 nm for mixing
             LOG.debug(f"Validated fibril_length for mixing: {values.fibril_length}")
         return values
+
+    @model_validator(mode="after")
+    def validate_fibril_length_required(self) -> "ColbuilderConfig":
+        """fibril_length is required for geometry generation (no sensible default)."""
+        if self.geometry_generator and self.fibril_length is None:
+            raise ConfigurationError(
+                "fibril_length (nm) is required for geometry generation",
+                error_code="CFG_ERR_006",
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_topology_requirements(self) -> "ColbuilderConfig":
+        """force_field is required when generating topology."""
+        if self.topology_generator and not self.force_field:
+            raise ConfigurationError(
+                "force_field is required for topology generation "
+                "(supported: 'amber99' or 'martini3')",
+                error_code="CFG_ERR_006",
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_replace_config(self) -> "ColbuilderConfig":

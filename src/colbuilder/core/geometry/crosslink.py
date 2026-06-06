@@ -97,9 +97,9 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         resname=line[17:20],
                         chain=line[21],
                         position=[
-                            float(line[29:38]),
+                            float(line[30:38]),
                             float(line[38:46]),
-                            float(line[46:56]),
+                            float(line[46:54]),
                         ],
                         type="T",
                     )
@@ -113,9 +113,9 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         resname=line[17:20],
                         chain=line[21],
                         position=[
-                            float(line[29:38]),
+                            float(line[30:38]),
                             float(line[38:46]),
-                            float(line[46:56]),
+                            float(line[46:54]),
                         ],
                         type="D",
                     )
@@ -129,9 +129,9 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         resname=line[17:20],
                         chain=line[21],
                         position=[
-                            float(line[29:38]),
+                            float(line[30:38]),
                             float(line[38:46]),
-                            float(line[46:56]),
+                            float(line[46:54]),
                         ],
                         type="D",
                     )
@@ -145,9 +145,9 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         resname=line[17:20],
                         chain=line[21],
                         position=[
-                            float(line[29:38]),
+                            float(line[30:38]),
                             float(line[38:46]),
-                            float(line[46:56]),
+                            float(line[46:54]),
                         ],
                         type="D",
                     )

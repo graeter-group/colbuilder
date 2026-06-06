@@ -445,7 +445,7 @@ class Optimizer:
                     )
                     
                     system.add_model(model=new_model)
-                    
+
                     if not self._node_exists_in_system(pr_candidate, system):
                         pr_model = model.Model(
                             id=new_id + 1,
@@ -453,8 +453,24 @@ class Optimizer:
                             transformation=pr_transformation,
                             pdb_file=system.crystal.pdb_file
                         )
-                        system.add_model(model=pr_model)
-                    
+                        # Only keep the point-reflection copy if it is actually
+                        # crosslink-connected to the existing system. Adding it
+                        # unconditionally can introduce a floating, unconnected
+                        # triple helix (orphan molecule) into the fibril.
+                        pr_connected = any(
+                            connect.get_connect(
+                                ref_model=system.get_model(model_id=mid),
+                                model=pr_model,
+                            )
+                            for mid in system.get_models()
+                        )
+                        if pr_connected:
+                            system.add_model(model=pr_model)
+                        else:
+                            LOG.debug(
+                                f"Skipping unconnected point-reflection copy at {pr_candidate}"
+                            )
+
                     self._mark_model_crosslinks_paired(new_model)
                     
                     crosslink_id = f"{source_model.id}_{crosslink.resid}_{crosslink.type}"

@@ -47,12 +47,15 @@ class Crosslink:
             'dihedrals': []
         }
         
-        # Distance thresholds for different crosslink types (in Å)
-        # Adjust these values based on your coarse-grained model
+        # Distance thresholds for different crosslink types (in Å).
+        # Equilibrium bead-bead distances are ~2.3-4.2 A (see dlyxly3/dlyxly2/dly45
+        # below). A loose 15 A cutoff lets one bead pair with several partners in
+        # crosslink-dense regions, creating spurious bonds. Keep the cutoff modest
+        # so only genuine partners (close in the assembled fibril) are bonded.
         self.crosslink_thresholds = {
-            'LYX_LY2': 15.0,  # Maximum distance for LYX SC4 - LY2 SC1 crosslinks
-            'LYX_LY3': 15.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
-            'L4Y_L5Y': 15.0   # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
+            'LYX_LY2': 6.0,  # Maximum distance for LYX SC4 - LY2 SC1 crosslinks
+            'LYX_LY3': 6.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
+            'L4Y_L5Y': 6.0   # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
         }
         
         # HLKNL-crosslink parameters
@@ -110,7 +113,7 @@ class Crosslink:
                         (line[17:20] == 'L4Y' and line[12:15] == 'SC1') or
                         (line[17:20] == 'L5Y' and line[12:15] == 'SC2')):
                         
-                        coords = [float(line[29:38]), float(line[38:46]), float(line[46:56])]
+                        coords = [float(line[30:38]), float(line[38:46]), float(line[46:54])]
                         
                         self.crosslink_pdb.append([
                             str(it_pdb),           # atom index as string

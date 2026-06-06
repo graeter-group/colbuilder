@@ -35,7 +35,8 @@ TEMP_FILES_TO_CLEAN: Set[str] = {
     'go-table.itp',
     'col_go-sites.itp',
     '*.CG.pdb',
-    'D'
+    # Intermediate per-type caps subdirs copied into the topology working dir
+    'D', 'T', 'NC', 'DT', 'TD', 'M',
 }
 
 def cleanup_temporary_files(ff_name: str, temp_patterns: Set[str], search_dirs: Optional[List[Path]] = None) -> None:
@@ -329,11 +330,12 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
             # Always return to original directory
             os.chdir(original_dir)
             
-            # Clean up temporary files unless in debug mode
+            # Clean up temporary files unless in debug mode.
+            # Only clean the working topology_dir, NOT output_topology_dir: the
+            # latter holds the deliverables and some temp-file globs could match
+            # and delete them.
             search_dirs = [topology_dir]
-            if output_topology_dir is not None:
-                search_dirs.append(output_topology_dir)
-            
+
             if not config.topology_debug:
                 cleanup_temporary_files(
                     config.force_field or "unknown_force_field", 

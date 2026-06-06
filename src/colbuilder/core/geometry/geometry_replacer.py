@@ -269,11 +269,14 @@ class CrosslinkReplacer:
                 source_dir = Path.cwd()
 
             # Determine system type and setup type directory
-            type_dir_candidates = [source_dir]
+            # Prefer canonical typed caps in subdirs; check the source root LAST so a
+            # stale root copy cannot shadow the correct typed file (first-match-wins).
+            type_dir_candidates = []
             for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
                 cand = source_dir / sub
                 if cand.exists():
                     type_dir_candidates.append(cand)
+            type_dir_candidates.append(source_dir)
 
             model_zero = system.get_model(model_id=0.0)
             system_type = model_zero.type if hasattr(model_zero, "type") else "D"
@@ -1254,11 +1257,14 @@ class CrosslinkReplacer:
             except Exception:
                 pass
 
-        type_dir_candidates = [source_dir]
+        # Prefer canonical typed caps in subdirs; check the source root LAST so a
+        # stale root copy cannot shadow the correct typed file (first-match-wins).
+        type_dir_candidates = []
         for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
             cand = source_dir / sub
             if cand.exists():
                 type_dir_candidates.append(cand)
+        type_dir_candidates.append(source_dir)
 
         try:
             model_zero = system.get_model(model_id=0.0)
@@ -1951,17 +1957,29 @@ class CrosslinkReplacer:
         atom_lines = [ln for ln in all_lines if ln.startswith(("ATOM", "HETATM", "TER"))]
         models: List[List[str]] = []
         current: List[str] = []
-        chain_sequence: List[str] = []
+        current_chains: List[str] = []   # ordered chain ids seen in the current model
+        first_chain: Optional[str] = None
 
         for line in atom_lines:
             if line.startswith(("ATOM", "HETATM")):
                 chain = line[21]
-                if not chain_sequence or chain != chain_sequence[-1]:
-                    chain_sequence.append(chain)
-                    if len(chain_sequence) > 3 and chain_sequence[-4:] == ["A", "B", "C", "A"]:
+                # Chains are written contiguously; act only on a chain transition.
+                if not current_chains or chain != current_chains[-1]:
+                    # A new triple helix begins when we return to the model's first
+                    # chain after a full set of >=3 distinct chains. This does not
+                    # hardcode A/B/C ordering, so non-standard chain labels still split.
+                    if (
+                        first_chain is not None
+                        and chain == first_chain
+                        and len(set(current_chains)) >= 3
+                    ):
                         models.append(current)
                         current = []
-                        chain_sequence = ["A"]
+                        current_chains = []
+                        first_chain = None
+                    if first_chain is None:
+                        first_chain = chain
+                    current_chains.append(chain)
             current.append(line)
 
         if current:

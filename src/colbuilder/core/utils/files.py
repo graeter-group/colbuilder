@@ -531,6 +531,38 @@ class FileManager:
 
         return self.mixing_dir
 
+    def clear_generation_dirs(self) -> None:
+        """
+        Remove stale per-model PDBs, caps files and type subdirectories from the
+        geometry, mixing and replacement temp directories at the start of a run.
+
+        Without this, re-running with a different fibril length / contact distance
+        leaves old ``{id}.caps.pdb`` files behind; since the final PDB is assembled
+        by selecting caps per model id, a model whose caps were not regenerated this
+        run would silently be written from the previous run's geometry.
+
+        Deliberately does NOT touch topology_gen or sequence_gen (those are consumed
+        in later phases and may legitimately persist within a run).
+        """
+        type_subdirs = {"NC", "D", "T", "TD", "DT", "M", "DY"}
+        for base in (self.geometry_dir, self.mixing_dir, self.replacement_dir):
+            if not base.exists():
+                continue
+            try:
+                for entry in base.iterdir():
+                    if entry.is_dir() and entry.name in type_subdirs:
+                        shutil.rmtree(entry, ignore_errors=True)
+                    elif entry.is_file() and (
+                        entry.name.endswith(".caps.pdb") or entry.suffix == ".pdb"
+                    ):
+                        try:
+                            entry.unlink()
+                        except Exception:
+                            pass
+            except Exception as e:
+                LOG.debug(f"Could not clear generation dir {base}: {e}")
+        LOG.debug("Cleared stale caps/type subdirs from geometry/mixing/replacement temp dirs")
+
     def cleanup(self, category: Optional[str] = None, force: bool = False) -> None:
         """
         Clean up temporary files and directories.

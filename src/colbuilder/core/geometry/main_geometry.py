@@ -419,6 +419,11 @@ class GeometryService:
                 LOG.section("Mixing geometry...")
                 mixing_dir = self.file_manager.ensure_mixing_dir()
                 system, _ = await self.mixer_service.mix(system, temp_config, mixing_dir)
+                # Finalize from where the mixed, per-type caps actually live. The
+                # mixer writes caps into mixing_dir/<type>; geometry_dir only holds
+                # the original single build type, so writing from it would miss the
+                # newly assigned mix types (FileNotFoundError or stale caps).
+                final_temp_dir = mixing_dir
                 LOG.info("Mixing completed.")
 
             # Determine if replacement is requested
@@ -601,7 +606,7 @@ class GeometryService:
 
                 LOG.info(f"Writing final mixed system PDB to {output_pdb_path}")
                 system.write_pdb(
-                    pdb_out=output_prefix,
+                    pdb_out=output_pdb_path,
                     fibril_length=temp_config.fibril_length,
                     cleanup=False,
                     temp_dir=final_temp_dir,
@@ -696,6 +701,14 @@ class GeometryService:
             GeometryGenerationError: If any step in the process fails
         """
         try:
+            # Clear stale caps/type-subdirs from previous runs so a re-run cannot
+            # silently reuse old geometry (different fibril length, contact distance, etc.).
+            try:
+                if getattr(self, "file_manager", None) is not None:
+                    self.file_manager.clear_generation_dirs()
+            except Exception as e:
+                LOG.debug(f"Could not clear generation dirs at run start: {e}")
+
             # Allow direct replacement when a PDB is provided, even if replace_bool was not set explicitly
             if self.config.replace_file and not self.config.geometry_generator:
                 self.config.replace_bool = True
