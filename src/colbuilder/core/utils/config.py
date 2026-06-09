@@ -220,8 +220,8 @@ class ColbuilderConfig(BaseModel):
     contact_distance: Optional[float] = Field(
         None, description="Contact distance for microfibril"
     )
-    fibril_length: float = Field(
-        default=None,  # Remove default here
+    fibril_length: Optional[float] = Field(
+        default=None,  # Required check is deferred to validate_fibril_length_required
         description="Length of microfibril in nanometers",
     )
     crystalcontacts_file: Optional[Path] = Field(
