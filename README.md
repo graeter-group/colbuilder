@@ -408,7 +408,7 @@ crystalcontacts_optimize: false # Optimize crystal contacts
 # ================================================================================
 # Create heterogeneous microfibrils with different crosslink types.
 
-mix_bool: false           # Enable mixing of different crosslink types
+mix_bool: false           # Enable mixing of different crosslink types and set geometry to false then 
 ratio_mix: "D:80 T:20"    # Ratio of each type (must sum to 100)
 # Format: "TypeLabel:percentage TypeLabel:percentage"
 # Example: "D:80 T:20" = 80% divalent, 20% trivalent
@@ -518,7 +518,7 @@ Then mix them:
 ```yaml
 # config_mixed_crosslinks.yaml
 sequence_generator: false
-geometry_generator: true
+geometry_generator: false
 contact_distance: 25
 fibril_length: 40.0
 mix_bool: true
@@ -534,7 +534,7 @@ colbuilder --config_file config_trivalent_molecule.yaml
 colbuilder --config_file config_mixed_crosslinks.yaml
 ```
 
-#### Generating a Coarse-Grained Topology File for MD Simulation -use colbuilder version from 28.08!! (all recent changes do not change CG creation) 
+#### Generating a Coarse-Grained Topology File for MD Simulation
 
 ```yaml
 # config_topology.yaml
