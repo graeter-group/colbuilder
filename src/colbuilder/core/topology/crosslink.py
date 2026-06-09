@@ -309,7 +309,7 @@ class Crosslink:
 
                 # LYX SC5 - LY3 SC1 crosslinks  
                 elif (clx[1] == 'LYX' and clx[2] == 'SC5' and 
-                      cly[1] == 'LY3' and cly[2] == 'SC1')
+                      cly[1] == 'LY3' and cly[2] == 'SC1'):
                     
                     self.crosslink_bonded['bonds'].append([
                         clx[0], cly[0], '1', self.dlyxly3, f"{self.klyxly3}\n"
