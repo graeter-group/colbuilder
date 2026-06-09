@@ -55,6 +55,7 @@ class Crosslink:
         self.crosslink_thresholds = {
             'LYX_LY2': 6.0,  # Maximum distance for LYX SC4 - LY2 SC1 crosslinks
             'LYX_LY3': 6.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
+            'LY2_LY3': 6.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
             'L4Y_L5Y': 6.0   # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
         }
         
@@ -68,16 +69,18 @@ class Crosslink:
         # PYD-crosslink parameters
         self.klyxly2: str = '9000'   # LYX-LY2 bond force constant (kJ/mol/nm^2)
         self.klyxly3: str = '12000'  # LYX-LY3 bond force constant (kJ/mol/nm^2)
+        self.klyx5ly2: str = '12000'  # LYX-LY2 bond force constant (kJ/mol/nm^2) (conserve ring)
         self.dlyxly2: str = '0.290'  # LYX-LY2 bond equilibrium distance (nm)
         self.dlyxly3: str = '0.230'  # LYX-LY3 bond equilibrium distance (nm)
+        self.dlyx5ly2: str = '0.370'  # LYX-LY2 bond equilibrium distance (nm) (added)
         
         # PYD-crosslink angle parameters (degrees)
-        self.al2yx_1: str = '100'    # LY2-LYX TP1q-TC6q-TC4 angle
-        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle
-        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle
-        self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle
-        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle
-        self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle
+        self.al2yx_1: str = '140'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
+        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
+        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
+        self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
+        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 R3/S3
+        self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
         
         LOG.debug(f"Initialized Crosslink for model counter {cnt_model}")
 
@@ -217,6 +220,15 @@ class Crosslink:
                 if dist <= self.crosslink_thresholds['LYX_LY2']:
                     self.crosslink_pairs.append((lyx_atom, ly2_atom))
                     LOG.info(f" Added LYX-LY2 pair: atoms {lyx_atom[0]} - {ly2_atom[0]} (distance: {dist:.3f} Å)")
+       
+        # Find LYX SC5 - LY2 SC1 pairs
+        for lyx_atom in lyx_sc5_atoms:
+            for ly2_atom in ly2_sc1_atoms:
+                dist = np.linalg.norm(np.array(lyx_atom[-3:]) - np.array(ly2_atom[-3:]))
+                LOG.debug(f"    Distance LYX SC5 (atom {lyx_atom[0]}) - LY2 SC1 (atom {ly2_atom[0]}): {dist:.3f} Å")
+                if dist <= self.crosslink_thresholds['LYX_LY2']:
+                    self.crosslink_pairs.append((lyx_atom, ly2_atom))
+                    LOG.info(f" Added LYX-LY2 pair: atoms {lyx_atom[0]} - {ly2_atom[0]} (distance: {dist:.3f} Å)")
         
         # Find LYX SC5 - LY3 SC1 pairs
         for lyx_atom in lyx_sc5_atoms:
@@ -283,7 +295,19 @@ class Crosslink:
                     ])
                     connections_found += 1
                     LOG.info(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+                
+                    # LYX SC5 - LY2 SC1 crosslinks
+                if (clx[1] == 'LYX' and clx[2] == 'SC5' and 
+                    cly[1] == 'LY2' and cly[2] == 'SC1'):
                     
+                    self.crosslink_bonded['bonds'].append([
+                        clx[0], cly[0], '1', self.dlyx5ly2, f"{self.klyx5ly2}\n"
+                    ])
+                    #angles check again
+                    connections_found += 1
+                    LOG.info(f"Added LYX-LY2 (SC5) crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+
+
                 # LYX SC5 - LY3 SC1 crosslinks  
                 elif (clx[1] == 'LYX' and clx[2] == 'SC5' and 
                       cly[1] == 'LY3' and cly[2] == 'SC1'):
@@ -338,6 +362,15 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f" Added LYX-LY2 crosslink between {cly[0]} and {clx[0]} (distance: {dist:.3f} Å)")
                     
+                elif (cly[1] == 'LYX' and cly[2] == 'SC5' and 
+                      clx[1] == 'LY2' and clx[2] == 'SC1'):
+                    
+                    self.crosslink_bonded['bonds'].append([
+                        cly[0], clx[0], '1', self.dlyx5ly2, f"{self.klyx5ly2}\n"
+                    ])
+                    connections_found += 1
+                    LOG.info(f" Added LYX-LY2 (SC5) crosslink between {cly[0]} and {clx[0]} (distance: {dist:.3f} Å)")
+
                 elif (cly[1] == 'LYX' and cly[2] == 'SC5' and 
                       clx[1] == 'LY3' and clx[2] == 'SC1'):
                     
