@@ -13,6 +13,7 @@ import asyncio
 import numpy as np
 from colorama import Fore, Style
 from typing import List, Any, Optional, Dict, Union, Tuple, Set
+import re
 
 from colbuilder.core.geometry.system import System
 from colbuilder.core.geometry.crosslink import read_crosslink, Crosslink
@@ -1032,7 +1033,12 @@ class Amber:
             pass
         
         output_file = itp_file.parent / str(itp_file.name).replace("top", "itp")
-        
+
+        # pdb2gmx writes a single moleculetype block. GROMACS <2023 names it
+        # "Protein_chain_A"; GROMACS >=2023 names it just "Protein". Match either,
+        # anchored so comments/other lines don't trigger.
+        molname_re = re.compile(r'^\s*Protein(?:_chain_\w+)?\s+\d+\s*$')
+
         with open(output_file, 'w') as f:
             write = False
             for line in itp_model:
@@ -1040,7 +1046,7 @@ class Amber:
                     break
                 if write:
                     f.write(line)
-                elif 'Protein_chain_A' in line:
+                elif molname_re.match(line):
                     f.write('[ moleculetype ]\n')
                     f.write(f'{molecule_name}  3\n')
                     write = True

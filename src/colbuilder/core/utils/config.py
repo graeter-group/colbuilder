@@ -259,7 +259,7 @@ class ColbuilderConfig(BaseModel):
         description="Automatically detect unpaired enzymatic crosslinks and replace them",
     )
     ratio_replace_scope: Literal["enzymatic", "non_enzymatic", "all"] = Field(
-        default="non_enzymatic",
+        default="enzymatic",
         description="Scope of residues considered for ratio-based replacement",
     )
     ratio_replace: Optional[float] = Field(

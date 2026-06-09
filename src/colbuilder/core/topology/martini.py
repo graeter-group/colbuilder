@@ -449,7 +449,10 @@ class Martini:
             return []
 
     def write_system_topology(
-        self, topology_file: str = "system.top", size: Optional[int] = None
+        self,
+        topology_file: str = "system.top",
+        size: Optional[int] = None,
+        processed_ids: Optional[List[int]] = None,
     ) -> None:
         """
         Write final topology file for the system.
@@ -459,10 +462,18 @@ class Martini:
         topology_file : str
             Path to the output topology file
         size : Optional[int]
-            Number of models to include
+            Number of models considered (fallback range when processed_ids is None).
+        processed_ids : Optional[List[int]]
+            col_{id} indices that actually produced an .itp. When given, only these
+            are #included, preventing GROMACS errors from missing files when some
+            models failed or were skipped.
         """
-        if not size:
-            LOG.warning("No size provided to write_system_topology")
+        if processed_ids is not None:
+            ids_for_includes = sorted({int(m) for m in processed_ids})
+        elif size:
+            ids_for_includes = list(range(size))
+        else:
+            LOG.warning("No size or processed_ids provided to write_system_topology")
             return
 
         try:
@@ -472,9 +483,15 @@ class Martini:
                 f.write('#include "martini_v3.0.0.itp"\n')
                 f.write('#include "go-sites.itp"\n\n')
 
-                for m in range(size):
-                    f.write(f'#include "col_{m}.itp"\n')
-                    f.write(f'#include "col_{m}_go-excl.itp"\n')
+                included = []
+                for m in ids_for_includes:
+                    # Belt-and-suspenders: never include a file that isn't on disk.
+                    if not Path(f"col_{int(m)}.itp").exists():
+                        LOG.warning(f"Skipping missing topology include: col_{int(m)}.itp")
+                        continue
+                    f.write(f'#include "col_{int(m)}.itp"\n')
+                    f.write(f'#include "col_{int(m)}_go-excl.itp"\n')
+                    included.append(int(m))
 
                 f.write('\n#include "martini_v3.0.0_solvents_v1.itp"\n')
                 f.write('#include "martini_v3.0.0_ions_v1.itp"\n')
@@ -483,8 +500,8 @@ class Martini:
                 f.write("Collagen, Martini 3 and Go-Potentials \n")
                 f.write("\n[ molecules ]\n")
 
-                for t in range(size):
-                    f.write(f"col_{t}     1\n")
+                for t in included:
+                    f.write(f"col_{int(t)}     1\n")
 
             self.write_go_topology(name_type="sites.itp")
 
@@ -736,6 +753,7 @@ async def build_martini3(
 
         LOG.info(f"Step 3/{steps} Processing models with Martinize2")
         processed_models = []
+        written_itp_ids: List[int] = []   # col_{cnt_model} indices actually written
 
         try:
             martinize2_command = getattr(config, "martinize2_command", None)
@@ -906,6 +924,7 @@ async def build_martini3(
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
                         processed_models.append(model_id)
+                        written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists                        
 
                         # Track what we processed
                         for connect_id in connect_ids:
@@ -963,7 +982,11 @@ async def build_martini3(
 
         try:
             final_topology_file = f"collagen_fibril_{config.species}.top"
-            martini.write_system_topology(topology_file=final_topology_file, size=cnt_model)
+            martini.write_system_topology(
+                topology_file=final_topology_file,
+                size=cnt_model,
+                processed_ids=written_itp_ids,
+            )
 
             topology_file_path = Path(final_topology_file)
             if topology_file_path.exists():
