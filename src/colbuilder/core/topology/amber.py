@@ -226,7 +226,7 @@ class Amber:
         atom_by_index = {a['index']: a for a in atom_data}
 
         # Read coordinates from GRO file
-        gro_file = itp_file.replace('.itp', '.gro')
+        gro_file = str(Path(itp_file).with_suffix('.gro'))
         gro_coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
             with open(gro_file, 'r') as f:
@@ -628,7 +628,7 @@ class Amber:
                     res_atoms.setdefault(key, []).append(idx)
 
         # Coordinates (Angstrom) from the matching GRO, if present
-        gro_file = itp_file.replace(".itp", ".gro")
+        gro_file = str(Path(itp_file).with_suffix(".gro"))
         coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
             with open(gro_file, "r") as f:
@@ -1032,7 +1032,7 @@ class Amber:
         except Exception:
             pass
         
-        output_file = itp_file.parent / str(itp_file.name).replace("top", "itp")
+        output_file = itp_file.with_suffix(".itp")
 
         # pdb2gmx writes a single moleculetype block. GROMACS <2023 names it
         # "Protein_chain_A"; GROMACS >=2023 names it just "Protein". Match either,

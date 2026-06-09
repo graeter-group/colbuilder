@@ -257,6 +257,13 @@ class Itp:
                         elif bonded_type == "dihedrals":
                             self.dihedrals[cnt_con].append(tokens)
 
+            # Atom-count offset: derive the connection's last atom index
+            # from the parsed atoms section, so merge offsets stay correct even if
+            # martinize2 emitted no [ position_restraints ] block. Equivalent to the
+            # posres-derived value when posres is present.
+            if cnt_con is not None and self.atoms[cnt_con]:
+                self.mol_ends[cnt_con] = [int(self.atoms[cnt_con][-1][0])]
+
         except FileNotFoundError:
             LOG.error(f"ITP file not found: {itp_path}")
             raise

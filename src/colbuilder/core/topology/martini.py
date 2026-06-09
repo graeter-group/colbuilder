@@ -326,17 +326,26 @@ class Martini:
             firsts = set(first_res.values()) if first_res else set()
             lasts  = {name for _, name in last_res.values()} if last_res else set()
 
-            # Anything here means "don't ask martinize2 to apply a terminal mod":
+            # Residues meaning "this terminus is already capped / is a crosslink
+            # block", so martinize2 must NOT add another terminal modification.
             special_first = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX"}
             special_last  = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "NME"}
 
-            # N-terminus: conservative (ACE often causes issues on GLN etc. in some FF)
-            nter_flag = "none" if (not firsts or (firsts & special_first)) else "none"
+            # N-terminus: the geometry stage (caps.py) pre-caps every chain with an
+            # ACE residue, so the first residue is normally ACE and needs no -nter
+            # modification. We always use 'none' (martinize2's ACE modification is
+            # also known to fail on some first residues, e.g. GLN). Warn if a chain
+            # is unexpectedly NOT pre-capped so it isn't silently left uncapped.
+            if firsts and not (firsts & special_first):
+                LOG.warning(
+                    f"N-terminus not pre-capped (first residues={sorted(firsts)}); "
+                    f"using -nter none. Check the geometry capping stage if unexpected."
+                )
+            nter_flag = "none"
 
-            # C-terminus: allow NME only if all chains end on standard residues (not special, not NME)
-            cter_flag = "NME"
-            if not lasts or (lasts & special_last):
-                cter_flag = "none"
+            # C-terminus: apply the NME cap unless the chain already ends in a
+            # cap/crosslink block, in which case use 'none'.
+            cter_flag = "none" if (not lasts or (lasts & special_last)) else "NME"
 
             # LOG.debug(f"cap_pdb decided: -nter {nter_flag}, -cter {cter_flag} (first={firsts}, last={lasts})")
             return pdb, cter_flag, nter_flag
@@ -752,7 +761,8 @@ async def build_martini3(
             )
 
         LOG.info(f"Step 3/{steps} Processing models with Martinize2")
-        processed_models = []
+        processed_models = []             # fibril model_ids that succeeded — for counts/logging ONLY
+                                          # (col_N.itp file indices live in written_itp_ids)
         written_itp_ids: List[int] = []   # col_{cnt_model} indices actually written
 
         try:
@@ -1017,7 +1027,9 @@ async def build_martini3(
             )
 
         try:
-            if not config.debug:
+            # Gate intermediate-file cleanup on topology_debug (the flag meant for
+            # keeping topology intermediates), not the general logging `debug` flag.
+            if not getattr(config, "topology_debug", False):
                 subprocess.run(r"rm \#*", shell=True, check=False)
         except Exception as e:
             LOG.warning(f"Error cleaning up temporary files: {str(e)}")

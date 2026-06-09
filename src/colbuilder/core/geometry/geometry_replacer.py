@@ -41,7 +41,7 @@ PAIRING_RULES = [
     (["LZS"], ["LZD"]),  # MOLD
     # Enzymatic divalent crosslinks
     (["L5Y"], ["L4Y"]),  # HLKNL
-    (["L5X"], ["L4Y"]),  # LKNL
+    (["L5X"], ["L4X"]),  # LKNL
     (["LY5"], ["LY4"]),  # deH-HLNL
     (["LX5"], ["LX4"]),  # deH-LNL
 ]
@@ -65,6 +65,7 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "L5Y": "LYS",
     "L4Y": "LYS",
     "L5X": "LYS",
+    "L4X": "LYS",
     "LY5": "LYS",
     "LX5": "LYS",
     "LY4": "LYS",
@@ -77,7 +78,7 @@ REPLACEMENT_MAP: Dict[str, str] = {
 DEFAULT_REPLACEMENT = "LYS"
 PAIR_DISTANCE_CUTOFF = 5.0
 
-PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "LY5", "LX5", "LY4", "LX4"}
+PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4"}
 NON_ENZYMATIC_PAIRED: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD"}
 ENZYMATIC_SINGLETONS: Set[str] = {
     "LYX",
@@ -95,6 +96,7 @@ ENZYMATIC_SINGLETONS: Set[str] = {
     "L5Y",
     "L4Y",
     "L5X",
+    "L4X",
     "LY5",
     "LX5",
     "LY4",
@@ -738,8 +740,8 @@ class CrosslinkReplacer:
 
                 fibril_length_angstroms = fibril_length * 10.0
 
-                z_min = z_center - fibril_length_angstroms * 5
-                z_max = z_center + fibril_length_angstroms * 5
+                z_min = z_center - fibril_length_angstroms / 2
+                z_max = z_center + fibril_length_angstroms / 2
             else:
                 z_min = min_z
                 z_max = max_z
@@ -1740,6 +1742,25 @@ class CrosslinkReplacer:
 
         return (z_min, z_max)
 
+    @staticmethod
+    def _extract_position(item: Any) -> Any:
+        """
+        Return the 'position' of a crosslink entry regardless of how it is stored.
+
+        Entries may be a plain dict ({'position': ...}), a dict whose 'crosslink'
+        value is itself a dict, or a dict whose 'crosslink' value is a Crosslink
+        object (the system-based path). Using getattr for objects avoids the
+        AttributeError that previously caused PYD trios to be silently dropped.
+        """
+        if item is None:
+            return None
+        if isinstance(item, dict):
+            if "crosslink" in item:
+                cl = item["crosslink"]
+                return cl.get("position") if isinstance(cl, dict) else getattr(cl, "position", None)
+            return item.get("position")
+        return getattr(item, "position", None)
+
     def _build_pyd_trios(
         self,
         lyx_list: List[Dict[str, Any]],
@@ -1760,8 +1781,8 @@ class CrosslinkReplacer:
                 if idx in used_ly2:
                     continue
                 try:
-                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
-                    ly2_pos = ly2.get("crosslink", {}).get("position") if "crosslink" in ly2 else ly2.get("position")
+                    lyx_pos = self._extract_position(lyx)
+                    ly2_pos = self._extract_position(ly2)
                     if not lyx_pos or not ly2_pos:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly2_pos)
@@ -1777,8 +1798,8 @@ class CrosslinkReplacer:
                 if jdx in used_ly3:
                     continue
                 try:
-                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
-                    ly3_pos = ly3.get("crosslink", {}).get("position") if "crosslink" in ly3 else ly3.get("position")
+                    lyx_pos = self._extract_position(lyx)
+                    ly3_pos = self._extract_position(ly3)
                     if not lyx_pos or not ly3_pos:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly3_pos)

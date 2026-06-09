@@ -460,6 +460,13 @@ class SequenceGenerator:
                 )
 
             self._crosslinks = []
+            missing: List[str] = []
+
+            def _is_real_type(t: Optional[str]) -> bool:
+                return bool(t) and str(t).strip().upper() not in {"NONE", "NOCROSS"}
+
+            def _is_explicit_none(t: Optional[str]) -> bool:
+                return bool(t) and str(t).strip().upper() in {"NONE", "NOCROSS"}
 
             if self.config.n_term_type:
                 LOG.debug(f"Loading N-terminal crosslinks of type: {self.config.n_term_type}")
@@ -472,6 +479,11 @@ class SequenceGenerator:
                 if n_crosslinks:
                     self._crosslinks.extend(n_crosslinks)
                     LOG.debug(f"Loaded {len(n_crosslinks)} N-terminal crosslinks")
+                elif _is_real_type(self.config.n_term_type):
+                    missing.append(
+                        f"N-terminal type '{self.config.n_term_type}' "
+                        f"(combination '{self.config.n_term_combination}')"
+                    )
 
             if self.config.c_term_type:
                 LOG.debug(f"Loading C-terminal crosslinks of type: {self.config.c_term_type}")
@@ -484,6 +496,54 @@ class SequenceGenerator:
                 if c_crosslinks:
                     self._crosslinks.extend(c_crosslinks)
                     LOG.debug(f"Loaded {len(c_crosslinks)} C-terminal crosslinks")
+                elif _is_real_type(self.config.c_term_type):
+                    missing.append(
+                        f"C-terminal type '{self.config.c_term_type}' "
+                        f"(combination '{self.config.c_term_combination}')"
+                    )
+
+            # Crosslinking is enabled (we returned early otherwise). If a real
+            # crosslink type was requested but nothing matched, fail loudly instead
+            # of silently building an uncrosslinked structure. Setting a terminal
+            # type to "NONE" is the explicit, accepted way to request no crosslink.
+            if missing:
+                available = sorted(species_crosslinks["type"].unique().tolist())
+                raise SequenceGenerationError(
+                    "Crosslinking is enabled but no matching crosslinks were found for: "
+                    + "; ".join(missing)
+                    + f". Available types for '{self.config.species}': {available}. "
+                    "Check the type name (case-sensitive), the combination, and the "
+                    "species — or set the terminal type to 'NONE' for no crosslink.",
+                    error_code="SEQ_ERR_002",
+                    context={
+                        "species": self.config.species,
+                        "n_term_type": self.config.n_term_type,
+                        "c_term_type": self.config.c_term_type,
+                        "missing": missing,
+                    },
+                )
+
+            # Enabled, but neither terminus requested a real type or an explicit
+            # 'NONE' — i.e. crosslinking was intended but never specified.
+            if (
+                not self._crosslinks
+                and not _is_real_type(self.config.n_term_type)
+                and not _is_real_type(self.config.c_term_type)
+                and not _is_explicit_none(self.config.n_term_type)
+                and not _is_explicit_none(self.config.c_term_type)
+            ):
+                raise SequenceGenerationError(
+                    "Crosslinking is enabled (crosslink: true) but no crosslink type was "
+                    "specified. Set n_term_type/c_term_type to a valid type, or set them "
+                    "to 'NONE' (or crosslink: false) to build without crosslinks.",
+                    error_code="SEQ_ERR_002",
+                    context={
+                        "species": self.config.species,
+                        "n_term_type": self.config.n_term_type,
+                        "c_term_type": self.config.c_term_type,
+                    },
+                )
+
 
             if not self._crosslinks:
                 LOG.warning("No crosslinks were loaded despite crosslinks being enabled")
