@@ -307,8 +307,8 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f"Added LYX-LY2 (SC5) crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
-                # LYX SC5 - LY3 SC1 crosslinks  
-                elif (clx[1] == 'LYX' and clx[2] == 'SC5' and 
+                # LYX SC5 - LY3 SC1 crosslinks
+                elif (clx[1] == 'LYX' and clx[2] == 'SC5' and
                       cly[1] == 'LY3' and cly[2] == 'SC1'):
                     
                     self.crosslink_bonded['bonds'].append([
@@ -413,3 +413,4 @@ class Crosslink:
             LOG.error(f"Error setting up crosslink bonded parameters: {str(e)}")
             
         return self.crosslink_bonded
+                               
