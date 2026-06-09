@@ -296,9 +296,9 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
                 
-                    # LYX SC5 - LY2 SC1 crosslinks
-                if (clx[1] == 'LYX' and clx[2] == 'SC5' and 
-                    cly[1] == 'LY2' and cly[2] == 'SC1'):
+                # LYX SC5 - LY2 SC1 crosslinks
+                elif (clx[1] == 'LYX' and clx[2] == 'SC5' and 
+                      cly[1] == 'LY2' and cly[2] == 'SC1'):
                     
                     self.crosslink_bonded['bonds'].append([
                         clx[0], cly[0], '1', self.dlyx5ly2, f"{self.klyx5ly2}\n"
@@ -307,10 +307,9 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f"Added LYX-LY2 (SC5) crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
-
                 # LYX SC5 - LY3 SC1 crosslinks  
                 elif (clx[1] == 'LYX' and clx[2] == 'SC5' and 
-                      cly[1] == 'LY3' and cly[2] == 'SC1'):
+                      cly[1] == 'LY3' and cly[2] == 'SC1')
                     
                     self.crosslink_bonded['bonds'].append([
                         clx[0], cly[0], '1', self.dlyxly3, f"{self.klyxly3}\n"
