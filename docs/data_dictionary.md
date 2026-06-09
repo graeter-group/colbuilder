@@ -174,6 +174,7 @@ The most commonly used parameters for ColBuilder configuration:
 | files_mix | List of Paths | PDB files with different crosslink types | Valid PDB file paths (≥2 files) | [] |
 | replace_bool | boolean | Replace crosslinks with lysines | true/false | false |
 | ratio_replace | float | Percentage of crosslinks to replace | 0-100 | None |
+| ratio_replace_scope | string | Which crosslinks are eligible for ratio-based replacement | "enzymatic", "non_enzymatic", "all" | "enzymatic" |
 | replace_file | Path/null | Input PDB file of fibril with crosslinks | Valid file path or null | null |
 
 **Validation Rules**:
@@ -186,10 +187,12 @@ The most commonly used parameters for ColBuilder configuration:
   - `ratio_replace` must be between 0 and 100
   - Either `geometry_generator=true` OR `replace_file` must be provided
   - If `geometry_generator=false`, must provide `replace_file`
+  - `ratio_replace_scope` must be one of `enzymatic`, `non_enzymatic`, or `all`
 
 **Notes**:
 - **Mixing** creates heterogeneous microfibrils with different crosslink types (e.g., 80% divalent + 20% trivalent)
 - **Replacement** simulates partial crosslinking or aged collagen by replacing some crosslinks with unmodified lysine residues
+- `ratio_replace_scope` selects which crosslinks may be replaced. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues); `non_enzymatic` targets AGE crosslinks (Glucosepane, Pentosidine, MOLD); `all` considers both
 - Set `replace_file: null` to use geometry generation output for replacement
 
 ### Topology Generation Parameters

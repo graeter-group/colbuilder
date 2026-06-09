@@ -69,6 +69,7 @@ files_mix:
 # Replacement Options
 replace_bool: false
 ratio_replace: 30
+ratio_replace_scope: "enzymatic"   # enzymatic | non_enzymatic | all
 replace_file: null
 
 # Topology Options
@@ -182,6 +183,10 @@ These parameters control the sequence generation stage (homology modeling).
 - A complete list of available species and combinations can be found at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv).
 - When using the mutated PDB workflow, run sequence generation separately first, then use the output in geometry generation.
 
+**Crosslink type validation**:
+- When you provide an input `pdb_file` together with `n_term_type`/`c_term_type`, ColBuilder checks that the crosslink residues present in the PDB are consistent with the specified types. Divalent types (HLKNL, LKNL, deHLNL, deHHLNL) expect a divalent structure, and trivalent types (PYD, DPD, PYL, DPL) expect a trivalent structure.
+- If the PDB contains crosslinks of a category that was not requested (for example, a trivalent PDB while `n_term_type: "HLKNL"` is set), generation stops with error `GEO_ERR_008` and a message listing the detected crosslink residues. Update `n_term_type`/`c_term_type` to match the structure, or supply a PDB whose crosslinks match the specified types.
+
 ## Geometry Generation Parameters
 
 These parameters control the generation of the microfibril structure.
@@ -213,6 +218,7 @@ These parameters control advanced features for creating mixed crosslinked microf
 | `files_mix` | list of strings | | Required if mix_bool is true, paths to PDB files with different crosslink types |
 | `replace_bool` | boolean | false | Enable crosslink replacement (with lysines) |
 | `ratio_replace` | integer | 30 | Percentage of crosslinks to replace (0-100) |
+| `ratio_replace_scope` | string | "enzymatic" | Which crosslinks are eligible for ratio-based replacement: `enzymatic`, `non_enzymatic`, or `all` |
 | `replace_file` | string, null | null | File with crosslinks to be replaced |
 
 **Notes**:
@@ -221,6 +227,7 @@ These parameters control advanced features for creating mixed crosslinked microf
 - The `files_mix` parameter specifies paths to PDB files of collagen molecules, each with a different crosslink type.
 - The `replace_bool` feature simulates partial crosslinking or aged collagen by replacing some crosslinks with unmodified lysine residues.
 - The `ratio_replace` parameter controls what percentage of crosslinks should be replaced.
+- The `ratio_replace_scope` parameter selects which crosslinks may be replaced. **The default is `enzymatic`**, so ratio-based replacement targets enzymatic crosslinks (e.g. HLKNL/PYD-derived residues) unless you choose otherwise. Use `non_enzymatic` to target advanced glycation end-product (AGE) crosslinks (Glucosepane, Pentosidine, MOLD), or `all` to consider both.
 - The `replace_file` parameter specifies the path to a PDB file of a previously generated collagen microfibril. Set to null to use the geometry generation output.
 
 ## Topology Generation Parameters
@@ -399,6 +406,7 @@ Understanding how parameters interact is important for successful use of ColBuil
    - Ratios in `ratio_mix` must sum to 100.
    - If `replace_bool` is true, you must specify a valid percentage in `ratio_replace` (0-100).
    - If `replace_bool` is true and `geometry_generator` is false, you must provide a `replace_file`.
+   - `ratio_replace_scope` must be one of `enzymatic` (default), `non_enzymatic`, or `all`.
 
 5. **Geometry Generation Dependencies**:
    - If `crystalcontacts_optimize` is true, the geometry generation will take longer but may produce better-packed microfibrils.

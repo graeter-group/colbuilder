@@ -511,6 +511,21 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                     f"Using generated sequence PDB for further processing: {sequence_pdb}"
                 )
 
+        # Validate that the crosslinks present in an input PDB are consistent
+        # with the crosslink types requested in the configuration. This catches
+        # the common mistake of, e.g., specifying a divalent type (HLKNL) for a
+        # trivalent (PYD) structure. Generated PDBs match by construction, so
+        # this only meaningfully guards user-provided structures.
+        if config.pdb_file and (config.n_term_type or config.c_term_type):
+            from colbuilder.core.utils.crosslink_detector import CrosslinkDetector
+
+            pdb_to_check = Path(config.pdb_file).resolve()
+            if pdb_to_check.exists():
+                CrosslinkDetector.validate_against_specified_types(
+                    pdb_to_check,
+                    [config.n_term_type, config.c_term_type],
+                )
+
         # Topology-only mode
         if (config.topology_generator and 
             not config.geometry_generator and 

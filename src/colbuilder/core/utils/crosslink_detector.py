@@ -41,7 +41,22 @@ class CrosslinkDetector:
     }
     
     ALL_CROSSLINK_RESIDUES = DIVALENT_RESIDUES | TRIVALENT_RESIDUES
-    
+
+    # Map user-facing crosslink type names (as specified in the config via
+    # n_term_type / c_term_type) to the expected structure category.
+    # 'D' = divalent (two participating residues), 'T' = trivalent (three).
+    DIVALENT_TYPES = {
+        'HLKNL', 'LKNL', 'deHLNL', 'deHHLNL',
+        'Pentosidine', 'Glucosepane', 'MOLD',
+    }
+    TRIVALENT_TYPES = {
+        'PYD', 'DPD', 'PYL', 'DPL',
+    }
+
+    # Type names that explicitly mean "no crosslink" and should be skipped
+    # when validating against the structure.
+    NO_CROSSLINK_TYPES = {'NONE', 'NOCROSS'}
+
     @classmethod
     def detect_structure_type(cls, pdb_path: Path) -> str:
         """
@@ -78,7 +93,136 @@ class CrosslinkDetector:
             # No crosslinks found - could be a non-crosslinked structure
             LOG.info("No crosslinks detected, using default type D")
             return 'D'  # Default to divalent
-    
+
+    @classmethod
+    def categorize_type(cls, type_name: Optional[str]) -> Optional[str]:
+        """
+        Map a user-facing crosslink type name to a structure category.
+
+        Args:
+            type_name: Crosslink type as specified in the config (e.g. "HLKNL",
+                "PYD"). May be None or a "no crosslink" placeholder.
+
+        Returns:
+            'D' for divalent types, 'T' for trivalent types, or None when the
+            type is empty, a "no crosslink" placeholder, or unrecognized.
+        """
+        if not type_name:
+            return None
+        name = str(type_name).strip()
+        if name.upper() in cls.NO_CROSSLINK_TYPES:
+            return None
+        if name in cls.DIVALENT_TYPES:
+            return 'D'
+        if name in cls.TRIVALENT_TYPES:
+            return 'T'
+        return None
+
+    @classmethod
+    def validate_against_specified_types(
+        cls,
+        pdb_path: Path,
+        specified_types: List[Optional[str]],
+    ) -> None:
+        """
+        Check that the crosslinks present in a PDB match the specified types.
+
+        This guards against a common mistake where a user supplies a PDB that
+        contains, for example, trivalent (PYD) crosslinks while specifying a
+        divalent crosslink type (e.g. HLKNL) in the configuration, or vice
+        versa.
+
+        Validation is skipped (no error raised) when:
+          - no crosslink types are specified (or all are "NONE"/"NOCROSS"),
+          - none of the specified types are recognized,
+          - the PDB contains no crosslink residues at all.
+
+        Args:
+            pdb_path: Path to the input PDB file.
+            specified_types: Crosslink type names from the config, e.g.
+                ``[config.n_term_type, config.c_term_type]``.
+
+        Raises:
+            GeometryGenerationError: If the structure contains crosslink
+                residues whose category was not requested by the specified
+                types (error code ``GEO_ERR_008``).
+        """
+        # Import here to avoid a circular import at module load time.
+        from colbuilder.core.utils.exceptions import GeometryGenerationError
+
+        expected_categories: Set[str] = set()
+        recognized_types: List[str] = []
+        for type_name in specified_types:
+            category = cls.categorize_type(type_name)
+            if category is not None:
+                expected_categories.add(category)
+                recognized_types.append(str(type_name).strip())
+
+        # Nothing meaningful to validate against.
+        if not expected_categories:
+            LOG.debug(
+                "Skipping crosslink type validation: no recognized crosslink "
+                "types were specified"
+            )
+            return
+
+        residues = cls.get_all_residues(pdb_path)
+        divalent_found = sorted(residues & cls.DIVALENT_RESIDUES)
+        trivalent_found = sorted(residues & cls.TRIVALENT_RESIDUES)
+
+        detected_categories: Set[str] = set()
+        if divalent_found:
+            detected_categories.add('D')
+        if trivalent_found:
+            detected_categories.add('T')
+
+        # No crosslinks in the structure: cannot (and need not) validate types.
+        if not detected_categories:
+            LOG.debug(
+                "Skipping crosslink type validation: no crosslink residues "
+                "found in %s", pdb_path
+            )
+            return
+
+        # The PDB contains a category of crosslink that was not requested.
+        if not detected_categories.issubset(expected_categories):
+            category_labels = {'D': 'divalent', 'T': 'trivalent'}
+            detected_label = ", ".join(
+                category_labels[c] for c in sorted(detected_categories)
+            )
+            expected_label = ", ".join(
+                category_labels[c] for c in sorted(expected_categories)
+            )
+            detected_residues = sorted(set(divalent_found) | set(trivalent_found))
+
+            message = (
+                f"The crosslinks found in '{pdb_path}' do not match the "
+                f"specified crosslink types.\n"
+                f"  Specified types: {', '.join(recognized_types)} "
+                f"(expected {expected_label} crosslinks)\n"
+                f"  Detected in PDB: {detected_label} crosslink residues "
+                f"{detected_residues}\n"
+                f"Update n_term_type/c_term_type to match the structure, or "
+                f"provide a PDB whose crosslinks match the specified types."
+            )
+            LOG.error(message)
+            raise GeometryGenerationError(
+                message=message,
+                error_code="GEO_ERR_008",
+                context={
+                    "pdb_file": str(pdb_path),
+                    "specified_types": recognized_types,
+                    "expected_categories": sorted(expected_categories),
+                    "detected_categories": sorted(detected_categories),
+                    "detected_residues": detected_residues,
+                },
+            )
+
+        LOG.debug(
+            "Crosslink type validation passed: specified %s, detected %s",
+            sorted(expected_categories), sorted(detected_categories),
+        )
+
     @classmethod
     def get_all_residues(cls, pdb_path: Path) -> Set[str]:
         """

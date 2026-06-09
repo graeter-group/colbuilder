@@ -529,7 +529,10 @@ class Martini:
 
         translated = []
         for line in pdb:
-            if line[0:6] in self.is_line:
+            # Only ATOM/HETATM carry coordinates. TER/ANISOU lines have no
+            # parseable x/y/z, so don't try (and don't emit a spurious
+            # "Bad coord formatting" warning for every TER record).
+            if line[0:6] in ("ATOM  ", "HETATM"):
                 try:
                     # Columns: x[30:38], y[38:46], z[46:54]
                     x = float(line[30:38])

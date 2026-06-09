@@ -359,7 +359,7 @@ class CrosslinkReplacer:
                         records=records,
                         connect_groups=connect_groups,
                         ratio_replace=float(config.ratio_replace),
-                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                         config=config,
                     )
                     generated_from_ratio = bool(manual_list)
@@ -370,7 +370,7 @@ class CrosslinkReplacer:
                         system=system,
                         ratio_replace=float(config.ratio_replace),
                         fibril_length=config.fibril_length,
-                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                     )
                     generated_from_ratio = bool(manual_list)
                     LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from system")
@@ -382,7 +382,7 @@ class CrosslinkReplacer:
                         "No replacement instructions generated (ratio=%s%%, scope=%s). "
                         "No matching markers found.",
                         config.ratio_replace,
-                        getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        getattr(config, "ratio_replace_scope", "enzymatic"),
                     )
                 else:
                     LOG.debug("No replacement instructions provided")
@@ -608,7 +608,7 @@ class CrosslinkReplacer:
                     records=records,
                     ratio_replace=float(config.ratio_replace),
                     fibril_length=getattr(config, "fibril_length", 0.0),
-                    scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                    scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                 )
                 generated_from_ratio = bool(manual_list)
 
@@ -882,7 +882,7 @@ class CrosslinkReplacer:
     # ==================================================================================
 
     def _build_ratio_replacements(
-        self, system: Any, ratio_replace: float, fibril_length: float, scope: str = "non_enzymatic"
+        self, system: Any, ratio_replace: float, fibril_length: float, scope: str = "enzymatic"
     ) -> List[str]:
         """
         Select crosslinks to mutate based on a density (ratio_replace) value.
@@ -897,11 +897,11 @@ class CrosslinkReplacer:
             return []
 
         try:
-            scope = scope or "non_enzymatic"
+            scope = scope or "enzymatic"
             scope = str(scope).strip().lower()
             if scope not in {"enzymatic", "non_enzymatic", "all"}:
-                LOG.warning("Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope)
-                scope = "non_enzymatic"
+                LOG.warning("Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope)
+                scope = "enzymatic"
 
             z_bounds = self._calculate_fibril_bounds(system, fibril_length)
         except Exception as e:
@@ -1337,19 +1337,19 @@ class CrosslinkReplacer:
         records: List[Dict[str, Any]],
         connect_groups: List[List[int]],
         ratio_replace: float,
-        scope: str = "non_enzymatic",
+        scope: str = "enzymatic",
         config: Optional[ColbuilderConfig] = None,
     ) -> List[str]:
         """Generate replacement instructions using connect groups and parsed caps records."""
         if not records or not connect_groups or ratio_replace <= 0:
             return []
 
-        scope = (scope or "non_enzymatic").strip().lower()
+        scope = (scope or "enzymatic").strip().lower()
         if scope not in {"enzymatic", "non_enzymatic", "all"}:
             LOG.warning(
-                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+                "Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope
             )
-            scope = "non_enzymatic"
+            scope = "enzymatic"
 
         records_by_model: Dict[int, List[Dict[str, Any]]] = {}
         for rec in records:
@@ -1540,18 +1540,18 @@ class CrosslinkReplacer:
         records: List[Dict[str, Any]],
         ratio_replace: float,
         fibril_length: float,
-        scope: str = "non_enzymatic",
+        scope: str = "enzymatic",
     ) -> List[str]:
         """Generate replacement instructions using parsed crosslink records."""
         if not records or ratio_replace <= 0:
             return []
 
-        scope = (scope or "non_enzymatic").strip().lower()
+        scope = (scope or "enzymatic").strip().lower()
         if scope not in {"enzymatic", "non_enzymatic", "all"}:
             LOG.warning(
-                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+                "Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope
             )
-            scope = "non_enzymatic"
+            scope = "enzymatic"
 
         if scope == "enzymatic":
             target_resnames = ENZYMATIC_SINGLETONS.copy()

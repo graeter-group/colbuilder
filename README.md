@@ -425,6 +425,7 @@ files_mix:  # PDB files for each crosslink type (required if mix_bool=true)
 
 replace_bool: false      # Enable crosslink replacement
 ratio_replace: 30        # Percentage of crosslinks to replace (0-100)
+ratio_replace_scope: "enzymatic"  # Crosslinks to replace: "enzymatic" (default), "non_enzymatic" (AGEs), or "all"
 replace_file: null       # Input file, or null to use geometry output
 
 # ================================================================================
@@ -620,9 +621,12 @@ n_term_combination: "9.C - 947.A"
 c_term_combination: "1047.C - 104.C"
 replace_bool: true
 ratio_replace: 30  # Replace 30% of crosslinks
+ratio_replace_scope: "enzymatic"  # "enzymatic" (default), "non_enzymatic" (AGEs), or "all"
 fibril_length: 40.0
 contact_distance: 20
 ```
+
+> **Note:** When you supply an input `pdb_file` together with `n_term_type`/`c_term_type`, ColBuilder verifies that the crosslinks in the PDB match the specified types. Mismatches (e.g. a trivalent PDB with `n_term_type: "HLKNL"`) stop generation with error `GEO_ERR_008`.
 
 ```bash
 colbuilder --config_file config_replace_crosslinks.yaml

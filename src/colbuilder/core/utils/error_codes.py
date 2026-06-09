@@ -276,6 +276,17 @@ GEOMETRY_ERRORS: Dict[str, ErrorInfo] = {
             "Verify chain terminations match chain count",
         ],
     ),
+    "GEO_ERR_008": ErrorInfo(
+        code="GEO_ERR_008",
+        message="Crosslinks in PDB do not match the specified crosslink types",
+        suggestions=[
+            "Ensure n_term_type/c_term_type match the crosslinks present in the PDB",
+            "Divalent types (HLKNL, LKNL, deHLNL, deHHLNL) require a divalent PDB",
+            "Trivalent types (PYD, DPD, PYL, DPL) require a trivalent PDB",
+            "Set the crosslink types to match the input structure, or provide a matching PDB",
+        ],
+        docs_url="https://colbuilder.readthedocs.io/en/latest/geometry.html#input-requirements",
+    ),
 }
 
 # Topology-related errors
