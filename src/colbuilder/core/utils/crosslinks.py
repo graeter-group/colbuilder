@@ -87,7 +87,7 @@ LOG = setup_logger(__name__)
 
 
 def parse_crosslink_position(
-    position_str: str, residue_type: str, atom_name: str
+    position_str: str, residue_type: str, atom_name: str, atom_name2: Optional[str] = None
 ) -> Optional[CrosslinkPosition]:
     """
     Parse a position string into a CrosslinkPosition object.
@@ -116,6 +116,7 @@ def parse_crosslink_position(
             chain_id=parts[1],
             residue_type=residue_type,
             atom_name=atom_name,
+            atom_name2=(atom_name2 if atom_name2 and atom_name2 != "NONE" else None),
         )
     except (ValueError, IndexError) as e:
         raise SequenceGenerationError(
@@ -174,7 +175,9 @@ def extract_crosslinks_from_dataframe(
 
             pos3 = None
             if "P3" in row and row["P3"] != "NONE":
-                pos3 = parse_crosslink_position(row["P3"], row["R3"], row["A31"])
+                pos3 = parse_crosslink_position(
+                    row["P3"], row["R3"], row["A31"], row.get("A32")
+                )
 
             crosslinks.append(
                 CrosslinkPair(
@@ -429,7 +432,13 @@ class CrosslinkOptimizer:
                     pair.position3.residue_type if pair.position3 else "NONE"
                 ),
                 "atom31": pair.position3.atom_name if pair.position3 else "NONE",
-                "atom32": pair.position3.atom_name if pair.position3 else "NONE",
+                # Second bond of the trivalent third residue uses A32 (atom_name2);
+                # fall back to A31 only if A32 is absent.
+                "atom32": (
+                    (pair.position3.atom_name2 or pair.position3.atom_name)
+                    if pair.position3
+                    else "NONE"
+                ),
             }
             for pair in self.crosslink_pairs
         ]

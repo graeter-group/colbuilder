@@ -41,7 +41,7 @@ PAIRING_RULES = [
     (["LZS"], ["LZD"]),  # MOLD
     # Enzymatic divalent crosslinks
     (["L5Y"], ["L4Y"]),  # HLKNL
-    (["L5X"], ["L4Y"]),  # LKNL
+    (["L5X"], ["L4X"]),  # LKNL
     (["LY5"], ["LY4"]),  # deH-HLNL
     (["LX5"], ["LX4"]),  # deH-LNL
 ]
@@ -65,6 +65,7 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "L5Y": "LYS",
     "L4Y": "LYS",
     "L5X": "LYS",
+    "L4X": "LYS",
     "LY5": "LYS",
     "LX5": "LYS",
     "LY4": "LYS",
@@ -77,7 +78,7 @@ REPLACEMENT_MAP: Dict[str, str] = {
 DEFAULT_REPLACEMENT = "LYS"
 PAIR_DISTANCE_CUTOFF = 5.0
 
-PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "LY5", "LX5", "LY4", "LX4"}
+PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4"}
 NON_ENZYMATIC_PAIRED: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD"}
 ENZYMATIC_SINGLETONS: Set[str] = {
     "LYX",
@@ -95,6 +96,7 @@ ENZYMATIC_SINGLETONS: Set[str] = {
     "L5Y",
     "L4Y",
     "L5X",
+    "L4X",
     "LY5",
     "LX5",
     "LY4",
@@ -269,11 +271,14 @@ class CrosslinkReplacer:
                 source_dir = Path.cwd()
 
             # Determine system type and setup type directory
-            type_dir_candidates = [source_dir]
+            # Prefer canonical typed caps in subdirs; check the source root LAST so a
+            # stale root copy cannot shadow the correct typed file (first-match-wins).
+            type_dir_candidates = []
             for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
                 cand = source_dir / sub
                 if cand.exists():
                     type_dir_candidates.append(cand)
+            type_dir_candidates.append(source_dir)
 
             model_zero = system.get_model(model_id=0.0)
             system_type = model_zero.type if hasattr(model_zero, "type") else "D"
@@ -356,7 +361,7 @@ class CrosslinkReplacer:
                         records=records,
                         connect_groups=connect_groups,
                         ratio_replace=float(config.ratio_replace),
-                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                         config=config,
                     )
                     generated_from_ratio = bool(manual_list)
@@ -367,7 +372,7 @@ class CrosslinkReplacer:
                         system=system,
                         ratio_replace=float(config.ratio_replace),
                         fibril_length=config.fibril_length,
-                        scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                     )
                     generated_from_ratio = bool(manual_list)
                     LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from system")
@@ -379,7 +384,7 @@ class CrosslinkReplacer:
                         "No replacement instructions generated (ratio=%s%%, scope=%s). "
                         "No matching markers found.",
                         config.ratio_replace,
-                        getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                        getattr(config, "ratio_replace_scope", "enzymatic"),
                     )
                 else:
                     LOG.debug("No replacement instructions provided")
@@ -605,7 +610,7 @@ class CrosslinkReplacer:
                     records=records,
                     ratio_replace=float(config.ratio_replace),
                     fibril_length=getattr(config, "fibril_length", 0.0),
-                    scope=getattr(config, "ratio_replace_scope", "non_enzymatic"),
+                    scope=getattr(config, "ratio_replace_scope", "enzymatic"),
                 )
                 generated_from_ratio = bool(manual_list)
 
@@ -735,8 +740,8 @@ class CrosslinkReplacer:
 
                 fibril_length_angstroms = fibril_length * 10.0
 
-                z_min = z_center - fibril_length_angstroms * 5
-                z_max = z_center + fibril_length_angstroms * 5
+                z_min = z_center - fibril_length_angstroms / 2
+                z_max = z_center + fibril_length_angstroms / 2
             else:
                 z_min = min_z
                 z_max = max_z
@@ -879,7 +884,7 @@ class CrosslinkReplacer:
     # ==================================================================================
 
     def _build_ratio_replacements(
-        self, system: Any, ratio_replace: float, fibril_length: float, scope: str = "non_enzymatic"
+        self, system: Any, ratio_replace: float, fibril_length: float, scope: str = "enzymatic"
     ) -> List[str]:
         """
         Select crosslinks to mutate based on a density (ratio_replace) value.
@@ -894,11 +899,11 @@ class CrosslinkReplacer:
             return []
 
         try:
-            scope = scope or "non_enzymatic"
+            scope = scope or "enzymatic"
             scope = str(scope).strip().lower()
             if scope not in {"enzymatic", "non_enzymatic", "all"}:
-                LOG.warning("Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope)
-                scope = "non_enzymatic"
+                LOG.warning("Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope)
+                scope = "enzymatic"
 
             z_bounds = self._calculate_fibril_bounds(system, fibril_length)
         except Exception as e:
@@ -1254,11 +1259,14 @@ class CrosslinkReplacer:
             except Exception:
                 pass
 
-        type_dir_candidates = [source_dir]
+        # Prefer canonical typed caps in subdirs; check the source root LAST so a
+        # stale root copy cannot shadow the correct typed file (first-match-wins).
+        type_dir_candidates = []
         for sub in ["DT", "TD", "D", "T", "M", "NC", "DY"]:
             cand = source_dir / sub
             if cand.exists():
                 type_dir_candidates.append(cand)
+        type_dir_candidates.append(source_dir)
 
         try:
             model_zero = system.get_model(model_id=0.0)
@@ -1331,19 +1339,19 @@ class CrosslinkReplacer:
         records: List[Dict[str, Any]],
         connect_groups: List[List[int]],
         ratio_replace: float,
-        scope: str = "non_enzymatic",
+        scope: str = "enzymatic",
         config: Optional[ColbuilderConfig] = None,
     ) -> List[str]:
         """Generate replacement instructions using connect groups and parsed caps records."""
         if not records or not connect_groups or ratio_replace <= 0:
             return []
 
-        scope = (scope or "non_enzymatic").strip().lower()
+        scope = (scope or "enzymatic").strip().lower()
         if scope not in {"enzymatic", "non_enzymatic", "all"}:
             LOG.warning(
-                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+                "Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope
             )
-            scope = "non_enzymatic"
+            scope = "enzymatic"
 
         records_by_model: Dict[int, List[Dict[str, Any]]] = {}
         for rec in records:
@@ -1534,18 +1542,18 @@ class CrosslinkReplacer:
         records: List[Dict[str, Any]],
         ratio_replace: float,
         fibril_length: float,
-        scope: str = "non_enzymatic",
+        scope: str = "enzymatic",
     ) -> List[str]:
         """Generate replacement instructions using parsed crosslink records."""
         if not records or ratio_replace <= 0:
             return []
 
-        scope = (scope or "non_enzymatic").strip().lower()
+        scope = (scope or "enzymatic").strip().lower()
         if scope not in {"enzymatic", "non_enzymatic", "all"}:
             LOG.warning(
-                "Unknown ratio_replace scope '%s'; defaulting to 'non_enzymatic'", scope
+                "Unknown ratio_replace scope '%s'; defaulting to 'enzymatic'", scope
             )
-            scope = "non_enzymatic"
+            scope = "enzymatic"
 
         if scope == "enzymatic":
             target_resnames = ENZYMATIC_SINGLETONS.copy()
@@ -1734,6 +1742,25 @@ class CrosslinkReplacer:
 
         return (z_min, z_max)
 
+    @staticmethod
+    def _extract_position(item: Any) -> Any:
+        """
+        Return the 'position' of a crosslink entry regardless of how it is stored.
+
+        Entries may be a plain dict ({'position': ...}), a dict whose 'crosslink'
+        value is itself a dict, or a dict whose 'crosslink' value is a Crosslink
+        object (the system-based path). Using getattr for objects avoids the
+        AttributeError that previously caused PYD trios to be silently dropped.
+        """
+        if item is None:
+            return None
+        if isinstance(item, dict):
+            if "crosslink" in item:
+                cl = item["crosslink"]
+                return cl.get("position") if isinstance(cl, dict) else getattr(cl, "position", None)
+            return item.get("position")
+        return getattr(item, "position", None)
+
     def _build_pyd_trios(
         self,
         lyx_list: List[Dict[str, Any]],
@@ -1754,8 +1781,8 @@ class CrosslinkReplacer:
                 if idx in used_ly2:
                     continue
                 try:
-                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
-                    ly2_pos = ly2.get("crosslink", {}).get("position") if "crosslink" in ly2 else ly2.get("position")
+                    lyx_pos = self._extract_position(lyx)
+                    ly2_pos = self._extract_position(ly2)
                     if not lyx_pos or not ly2_pos:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly2_pos)
@@ -1771,8 +1798,8 @@ class CrosslinkReplacer:
                 if jdx in used_ly3:
                     continue
                 try:
-                    lyx_pos = lyx.get("crosslink", {}).get("position") if "crosslink" in lyx else lyx.get("position")
-                    ly3_pos = ly3.get("crosslink", {}).get("position") if "crosslink" in ly3 else ly3.get("position")
+                    lyx_pos = self._extract_position(lyx)
+                    ly3_pos = self._extract_position(ly3)
                     if not lyx_pos or not ly3_pos:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly3_pos)
@@ -1951,17 +1978,29 @@ class CrosslinkReplacer:
         atom_lines = [ln for ln in all_lines if ln.startswith(("ATOM", "HETATM", "TER"))]
         models: List[List[str]] = []
         current: List[str] = []
-        chain_sequence: List[str] = []
+        current_chains: List[str] = []   # ordered chain ids seen in the current model
+        first_chain: Optional[str] = None
 
         for line in atom_lines:
             if line.startswith(("ATOM", "HETATM")):
                 chain = line[21]
-                if not chain_sequence or chain != chain_sequence[-1]:
-                    chain_sequence.append(chain)
-                    if len(chain_sequence) > 3 and chain_sequence[-4:] == ["A", "B", "C", "A"]:
+                # Chains are written contiguously; act only on a chain transition.
+                if not current_chains or chain != current_chains[-1]:
+                    # A new triple helix begins when we return to the model's first
+                    # chain after a full set of >=3 distinct chains. This does not
+                    # hardcode A/B/C ordering, so non-standard chain labels still split.
+                    if (
+                        first_chain is not None
+                        and chain == first_chain
+                        and len(set(current_chains)) >= 3
+                    ):
                         models.append(current)
                         current = []
-                        chain_sequence = ["A"]
+                        current_chains = []
+                        first_chain = None
+                    if first_chain is None:
+                        first_chain = chain
+                    current_chains.append(chain)
             current.append(line)
 
         if current:

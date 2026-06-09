@@ -142,12 +142,16 @@ class Connect:
             Any: Updated system object.
         """
         if connect_file:
-            self.external_connect = [
-                float(l.split(" ")[0].replace(".caps.pdb", ""))
-                for l in open(connect_file.with_suffix(".txt"), "r")
-            ]
-        if np.min(self.external_connect) > 0:
-            self.external_connect = [i - 1 for i in self.external_connect]
+            with open(connect_file.with_suffix(".txt"), "r") as fh:
+                self.external_connect = [
+                    float(l.split(" ")[0].replace(".caps.pdb", ""))
+                    for l in fh
+                ]
+        # Connect files are written by write_connect() using the system's own
+        # (0-based) model ids, so they are already aligned with system.get_connect().
+        # The previous "if min > 0: subtract 1" heuristic wrongly shifted every id
+        # whenever model 0 happened to be absent from the file, mis-mapping
+        # connectivity. No shift is applied.
 
         for model_id in system.get_connect().keys():
             if model_id not in self.external_connect:

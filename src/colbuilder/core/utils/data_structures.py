@@ -102,6 +102,7 @@ class CrosslinkPosition:
     chain_id: str
     residue_type: str
     atom_name: str
+    atom_name2: Optional[str] = None  # second atom (CSV A32) for the third residue of a trivalent crosslink
 
     def __post_init__(self):
         if self.chain_id not in {"A", "B", "C"}:

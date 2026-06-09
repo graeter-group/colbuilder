@@ -234,9 +234,15 @@ class UnpairedCrosslinkFinder:
                     continue
                 if res_name not in crosslinks_by_type:
                     continue
-                chain_id, resid = residues[-1]
-                line = f"{fname} {res_name} {resid} {chain_id}"
-                crosslinks_by_type[res_name][fname] = line
+                # Emit EVERY unpaired marker of this type in the model, not just the
+                # last one. A fragment can legitimately carry multiple same-type
+                # markers; dropping all but one leaves non-standard residues behind
+                # (which then break topology generation / simulation).
+                lines = [
+                    f"{fname} {res_name} {resid} {chain_id}"
+                    for (chain_id, resid) in residues
+                ]
+                crosslinks_by_type[res_name][fname] = lines
                 types_by_model.setdefault(fname, set()).add(res_name)
 
         crosslinks_by_type = {r: m for r, m in crosslinks_by_type.items() if m}
@@ -310,13 +316,16 @@ class UnpairedCrosslinkFinder:
             all_models = set(mapping.keys())
             unpaired = all_models - paired_models.get(res_type, set())
             for model in unpaired:
-                parts = mapping[model].split()
-                if len(parts) < 4:
-                    LOG.warning("Malformed mapping for %s: %s", model, mapping[model])
-                    continue
-                pdb_file, orig_res, resid, chain = parts[:4]
-                new_res = RESIDUE_TO_MUTATION.get(orig_res, DEFAULT_MUTATION)
-                entries.append((pdb_file, new_res, resid, chain, orig_res))
+                raw = mapping[model]
+                model_lines = raw if isinstance(raw, list) else [raw]
+                for entry_line in model_lines:
+                    parts = entry_line.split()
+                    if len(parts) < 4:
+                        LOG.warning("Malformed mapping for %s: %s", model, entry_line)
+                        continue
+                    pdb_file, orig_res, resid, chain = parts[:4]
+                    new_res = RESIDUE_TO_MUTATION.get(orig_res, DEFAULT_MUTATION)
+                    entries.append((pdb_file, new_res, resid, chain, orig_res))
 
         def sort_key(entry: Tuple[str, str, str, str, str]):
             pdb_file, _, resid, chain, orig_res = entry

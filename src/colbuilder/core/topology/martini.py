@@ -15,6 +15,7 @@ The module requires the Martinize2 tool and custom contact map utilities.
 
 import cmd
 import os
+import sys
 import subprocess
 import shutil
 from pathlib import Path
@@ -33,6 +34,7 @@ from colbuilder.core.utils.martinize_finder import (
     get_active_conda_env,
     find_and_install_custom_force_field,
     get_conda_command_with_path,
+    find_martinize2_executable,
 )
 from colbuilder.core.utils.logger import setup_logger
 from colbuilder.core.utils.files import FileManager
@@ -324,17 +326,26 @@ class Martini:
             firsts = set(first_res.values()) if first_res else set()
             lasts  = {name for _, name in last_res.values()} if last_res else set()
 
-            # Anything here means "don't ask martinize2 to apply a terminal mod":
+            # Residues meaning "this terminus is already capped / is a crosslink
+            # block", so martinize2 must NOT add another terminal modification.
             special_first = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX"}
             special_last  = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "NME"}
 
-            # N-terminus: conservative (ACE often causes issues on GLN etc. in some FF)
-            nter_flag = "none" if (not firsts or (firsts & special_first)) else "none"
+            # N-terminus: the geometry stage (caps.py) pre-caps every chain with an
+            # ACE residue, so the first residue is normally ACE and needs no -nter
+            # modification. We always use 'none' (martinize2's ACE modification is
+            # also known to fail on some first residues, e.g. GLN). Warn if a chain
+            # is unexpectedly NOT pre-capped so it isn't silently left uncapped.
+            if firsts and not (firsts & special_first):
+                LOG.warning(
+                    f"N-terminus not pre-capped (first residues={sorted(firsts)}); "
+                    f"using -nter none. Check the geometry capping stage if unexpected."
+                )
+            nter_flag = "none"
 
-            # C-terminus: allow NME only if all chains end on standard residues (not special, not NME)
-            cter_flag = "NME"
-            if not lasts or (lasts & special_last):
-                cter_flag = "none"
+            # C-terminus: apply the NME cap unless the chain already ends in a
+            # cap/crosslink block, in which case use 'none'.
+            cter_flag = "none" if (not lasts or (lasts & special_last)) else "NME"
 
             # LOG.debug(f"cap_pdb decided: -nter {nter_flag}, -cter {cter_flag} (first={firsts}, last={lasts})")
             return pdb, cter_flag, nter_flag
@@ -447,7 +458,10 @@ class Martini:
             return []
 
     def write_system_topology(
-        self, topology_file: str = "system.top", size: Optional[int] = None
+        self,
+        topology_file: str = "system.top",
+        size: Optional[int] = None,
+        processed_ids: Optional[List[int]] = None,
     ) -> None:
         """
         Write final topology file for the system.
@@ -457,10 +471,18 @@ class Martini:
         topology_file : str
             Path to the output topology file
         size : Optional[int]
-            Number of models to include
+            Number of models considered (fallback range when processed_ids is None).
+        processed_ids : Optional[List[int]]
+            col_{id} indices that actually produced an .itp. When given, only these
+            are #included, preventing GROMACS errors from missing files when some
+            models failed or were skipped.
         """
-        if not size:
-            LOG.warning("No size provided to write_system_topology")
+        if processed_ids is not None:
+            ids_for_includes = sorted({int(m) for m in processed_ids})
+        elif size:
+            ids_for_includes = list(range(size))
+        else:
+            LOG.warning("No size or processed_ids provided to write_system_topology")
             return
 
         try:
@@ -470,9 +492,15 @@ class Martini:
                 f.write('#include "martini_v3.0.0.itp"\n')
                 f.write('#include "go-sites.itp"\n\n')
 
-                for m in range(size):
-                    f.write(f'#include "col_{m}.itp"\n')
-                    f.write(f'#include "col_{m}_go-excl.itp"\n')
+                included = []
+                for m in ids_for_includes:
+                    # Belt-and-suspenders: never include a file that isn't on disk.
+                    if not Path(f"col_{int(m)}.itp").exists():
+                        LOG.warning(f"Skipping missing topology include: col_{int(m)}.itp")
+                        continue
+                    f.write(f'#include "col_{int(m)}.itp"\n')
+                    f.write(f'#include "col_{int(m)}_go-excl.itp"\n')
+                    included.append(int(m))
 
                 f.write('\n#include "martini_v3.0.0_solvents_v1.itp"\n')
                 f.write('#include "martini_v3.0.0_ions_v1.itp"\n')
@@ -481,8 +509,8 @@ class Martini:
                 f.write("Collagen, Martini 3 and Go-Potentials \n")
                 f.write("\n[ molecules ]\n")
 
-                for t in range(size):
-                    f.write(f"col_{t}     1\n")
+                for t in included:
+                    f.write(f"col_{int(t)}     1\n")
 
             self.write_go_topology(name_type="sites.itp")
 
@@ -527,7 +555,10 @@ class Martini:
 
         translated = []
         for line in pdb:
-            if line[0:6] in self.is_line:
+            # Only ATOM/HETATM carry coordinates. TER/ANISOU lines have no
+            # parseable x/y/z, so don't try (and don't emit a spurious
+            # "Bad coord formatting" warning for every TER record).
+            if line[0:6] in ("ATOM  ", "HETATM"):
                 try:
                     # Columns: x[30:38], y[38:46], z[46:54]
                     x = float(line[30:38])
@@ -559,6 +590,47 @@ class Martini:
         """
         LOG.debug("Write_gro called but not implemented for Martini - using PDB format instead")
         return None
+
+
+def _build_connected_groups(system: System) -> List[List[Any]]:
+    """
+    Collapse crosslink-connected models into transitive groups.
+
+    Mirrors Amber.get_connected_groups so that each physically connected set
+    of triple helices is emitted exactly once. model.connect is symmetric and
+    self-inclusive (e.g. {self} + direct neighbors); a BFS gives the full group.
+    """
+    all_models = list(system.get_models())
+    processed: set = set()
+    groups: List[List[Any]] = []
+
+    for model_id in all_models:
+        if model_id in processed:
+            continue
+
+        model = system.get_model(model_id=model_id)
+        if not model or not getattr(model, "connect", None):
+            groups.append([model_id])
+            processed.add(model_id)
+            continue
+
+        group: set = set()
+        stack = [model_id]
+        while stack:
+            cur = stack.pop()
+            if cur in group:
+                continue
+            group.add(cur)
+            cur_model = system.get_model(model_id=cur)
+            if cur_model and getattr(cur_model, "connect", None):
+                for nb in cur_model.connect:
+                    if nb not in group:
+                        stack.append(nb)
+
+        groups.append(sorted(group))
+        processed.update(group)
+
+    return groups
 
 
 def check_output_files(topology_dir: Path, expected_models: int):
@@ -689,7 +761,9 @@ async def build_martini3(
             )
 
         LOG.info(f"Step 3/{steps} Processing models with Martinize2")
-        processed_models = []
+        processed_models = []             # fibril model_ids that succeeded — for counts/logging ONLY
+                                          # (col_N.itp file indices live in written_itp_ids)
+        written_itp_ids: List[int] = []   # col_{cnt_model} indices actually written
 
         try:
             martinize2_command = getattr(config, "martinize2_command", None)
@@ -715,27 +789,38 @@ async def build_martini3(
             type_dir.mkdir(exist_ok=True, parents=True)
 
         models_list = [model_id for model_id in system.get_models()]
+
+        # Group crosslink-connected models so each physical triple helix is
+        # written exactly once. Without this, every model re-merges its whole
+        # neighborhood and connected helices are emitted multiple times,
+        # producing duplicate beads (0 A overlaps) and inflated particle counts.
+        connected_groups = _build_connected_groups(system)
+        LOG.debug(
+            f"Martini: collapsed {len(models_list)} models into "
+            f"{len(connected_groups)} connected group(s)"
+        )
+
         model_status = {}
         failed_martinize, failed_contact, failed_go, failed_itp = [], [], [], []
         processed_in_topology: set = set()
 
-        for model_id in tqdm(models_list, desc="Building topology", unit="%"):
+        for group in tqdm(connected_groups, desc="Building topology", unit="grp"):
+            # Representative model id drives all file naming for this group.
+            model_id = group[0]
             model = system.get_model(model_id=model_id)
             if model is None:
-                LOG.warning(f"Skipping model {model_id}: model not found in System")
+                LOG.warning(f"Skipping group {group}: representative model not found in System")
                 model_status[model_id] = "no_model"
                 continue
 
-            # build connect_ids fallback
-            sys_connect = getattr(model, "connect", None)
-            if sys_connect:
-                connect_ids = list(sys_connect)
-            else:
-                connect_ids = [model_id]  # self-connection
-                LOG.debug(f"Model {model_id}: no connections in System; processing as self-connection")
+            # Process every member of the group exactly once, and make sure the
+            # downstream helpers that read connectivity from the System
+            # (merge_pdbs, Itp.allocate/read_model) see the full group.
+            connect_ids = list(group)
+            model.connect = list(group)
 
             if not connect_ids:
-                LOG.warning(f"Skipping model {model_id}: no connections and no fallback")
+                LOG.warning(f"Skipping group {group}: no members")
                 model_status[model_id] = "no_connections"
                 continue
 
@@ -762,7 +847,30 @@ async def build_martini3(
                                 f"-nter {nter_flag} -cter {cter_flag} "
                                 f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
                             )
-                            return get_conda_command_with_path("martinize2", args)
+                            # An explicit user override wins.
+                            configured = getattr(config, "martinize2_command", None)
+                            if configured and configured not in ("martinize2", "auto"):
+                                return f"{configured} {args}"
+                            # Prefer the martinize2 that lives in the SAME environment
+                            # as the running interpreter: that is the vermouth into
+                            # which the custom martini300C force field was just
+                            # installed. This avoids picking a martinize2 from another
+                            # Python (e.g. a pyenv shim ahead on PATH) whose vermouth
+                            # does not know the custom force field ("Unknown force
+                            # field martini300C").
+                            local_exe = Path(sys.executable).parent / "martinize2"
+                            if local_exe.exists():
+                                return f"{local_exe} {args}"
+                            # Otherwise fall back to a direct martinize2 on PATH, and
+                            # only wrap in `conda run` when it is reachable solely via
+                            # a conda env.
+                            try:
+                                exe, use_conda, _env = find_martinize2_executable()
+                            except Exception:
+                                exe, use_conda = "martinize2", True
+                            if use_conda:
+                                return get_conda_command_with_path("martinize2", args)
+                            return f"{exe} {args}"
 
                         cmd = _martinize_cmd(nter, cter)
                         process = await asyncio.create_subprocess_shell(
@@ -799,7 +907,7 @@ async def build_martini3(
                             continue
 
                         go_cmd = (
-                            f"python create_goVirt.py -s {int(model_id)}.{int(connect_id)}.CG.pdb "
+                            f"{sys.executable} create_goVirt.py -s {int(model_id)}.{int(connect_id)}.CG.pdb "
                             f"-f map.out --moltype col_{int(model_id)}.{int(connect_id)} --go_eps {go_epsilon}"
                         )
                         go_process = await asyncio.create_subprocess_shell(
@@ -826,6 +934,7 @@ async def build_martini3(
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
                         processed_models.append(model_id)
+                        written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists                        
 
                         # Track what we processed
                         for connect_id in connect_ids:
@@ -883,7 +992,11 @@ async def build_martini3(
 
         try:
             final_topology_file = f"collagen_fibril_{config.species}.top"
-            martini.write_system_topology(topology_file=final_topology_file, size=cnt_model)
+            martini.write_system_topology(
+                topology_file=final_topology_file,
+                size=cnt_model,
+                processed_ids=written_itp_ids,
+            )
 
             topology_file_path = Path(final_topology_file)
             if topology_file_path.exists():
@@ -914,7 +1027,9 @@ async def build_martini3(
             )
 
         try:
-            if not config.debug:
+            # Gate intermediate-file cleanup on topology_debug (the flag meant for
+            # keeping topology intermediates), not the general logging `debug` flag.
+            if not getattr(config, "topology_debug", False):
                 subprocess.run(r"rm \#*", shell=True, check=False)
         except Exception as e:
             LOG.warning(f"Error cleaning up temporary files: {str(e)}")

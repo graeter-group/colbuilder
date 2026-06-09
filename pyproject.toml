@@ -20,21 +20,19 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "numpy==1.25",
-    "vermouth==0.9.1", 
+    # <2 keeps the numpy 1.x ABI (vermouth 0.9.1); >=1.25 lets pip pick a wheel
+    # that exists for the running Python (e.g. 1.26 on 3.12, where 1.25 has none).
+    "numpy>=1.25,<2",
+    "vermouth==0.9.1",
     "pandas==2.2.2",
     "biopython==1.84",
     "scikit-learn",
-    "h5py",
-    "libnetcdf",
-    "threadpoolctl",
     "PyYAML",
-    "click",
     "pydantic>=2.0",
     "tqdm",
-    "asyncio",
     "colorama>=0.4.4",
     "click>=8.0.0",
 ]

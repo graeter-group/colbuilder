@@ -13,6 +13,7 @@ import asyncio
 import numpy as np
 from colorama import Fore, Style
 from typing import List, Any, Optional, Dict, Union, Tuple, Set
+import re
 
 from colbuilder.core.geometry.system import System
 from colbuilder.core.geometry.crosslink import read_crosslink, Crosslink
@@ -171,8 +172,8 @@ class Amber:
             True if crosslinks can form a bond
         """
         # Divalent crosslinks (D-type)
-        divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS'}
-        divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD'}
+        divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS', 'LZD'}
+        divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD', 'LZS'}
         
         # Trivalent crosslinks (T-type)
         trivalent_aldehyde = {'LYX', 'LXY', 'LYY', 'LXX'}
@@ -225,7 +226,7 @@ class Amber:
         atom_by_index = {a['index']: a for a in atom_data}
 
         # Read coordinates from GRO file
-        gro_file = itp_file.replace('.itp', '.gro')
+        gro_file = str(Path(itp_file).with_suffix('.gro'))
         gro_coords: Dict[int, np.ndarray] = {}
         if os.path.exists(gro_file):
             with open(gro_file, 'r') as f:
@@ -467,6 +468,20 @@ class Amber:
 
         try:
             mapped_pairs = self.find_atom_indices_for_crosslinks(itp_file, crosslink_pairs, merged_pdb_file)
+
+            # Surface mapping failures: a dropped pair means NO bond and NO
+            # exclusions for that crosslink -> close contacts that crash MD.
+            total = len(crosslink_pairs)
+            n_mapped = len(mapped_pairs)
+            if n_mapped < total:
+                LOG.error(
+                    f"Crosslink mapping incomplete in {os.path.basename(itp_file)}: "
+                    f"{n_mapped}/{total} pair(s) mapped, {total - n_mapped} dropped. "
+                    f"Dropped crosslinks get no bond and no exclusions (likely clashes "
+                    f"during equilibration). Check residue/atom-name coverage in "
+                    f"_is_crosslink_atom and the 5 A marker cutoff."
+                )
+
             if not mapped_pairs:
                 LOG.warning(f"No atom indices found for crosslink topology in {itp_file}")
                 return
@@ -497,6 +512,11 @@ class Amber:
                 self._add_crosslink_angles_and_dihedrals(itp_file, valid_bond_data)
             except Exception as e:
                 LOG.warning(f"Failed to add angles/dihedrals, but bonds were added successfully: {str(e)}")
+
+            try:
+                self._add_crosslink_exclusions(itp_file, valid_bond_data)
+            except Exception as e:
+                LOG.warning(f"Failed to add crosslink exclusions, bonds/angles still added: {str(e)}")
 
             LOG.debug(f"    Successfully added crosslink topology to {itp_file}")
 
@@ -567,6 +587,118 @@ class Amber:
         with open(itp_file, 'w') as f:
             f.writelines(lines)
             
+    def _add_crosslink_exclusions(
+        self,
+        itp_file: str,
+        valid_bond_data: List[Dict],
+        cutoff: float = 4.5,
+    ) -> None:
+        """Write explicit [ exclusions ] between each pair of crosslinked residues.
+
+        nrexcl=3 only excludes atoms within 3 bonds along the bond graph. Covalently
+        joining two residues (e.g. HLKNL: L4Y CE - L5Y NZ) brings several heavy atoms
+        into close contact that are more than 3 bonds apart through the new bond, so
+        they are NOT auto-excluded and clash during equilibration. Here we exclude all
+        atom pairs between the two joined residues that lie within `cutoff` Angstrom
+        (falling back to excluding every inter-residue pair if no coordinates exist).
+        """
+        if not valid_bond_data:
+            return
+
+        with open(itp_file, "r") as f:
+            lines = f.readlines()
+
+        # Map atom index -> (residue_nr, residue_name) and residue -> [indices]
+        atom_res: Dict[int, Tuple[int, str]] = {}
+        res_atoms: Dict[Tuple[int, str], List[int]] = {}
+        atoms_section = False
+        for line in lines:
+            s = line.strip()
+            if s.startswith("[ atoms ]"):
+                atoms_section = True
+                continue
+            if atoms_section and s.startswith("["):
+                break
+            if atoms_section and s and not s.startswith(";"):
+                parts = s.split()
+                if len(parts) >= 8:
+                    idx = int(parts[0])
+                    key = (int(parts[2]), parts[3])
+                    atom_res[idx] = key
+                    res_atoms.setdefault(key, []).append(idx)
+
+        # Coordinates (Angstrom) from the matching GRO, if present
+        gro_file = str(Path(itp_file).with_suffix(".gro"))
+        coords: Dict[int, np.ndarray] = {}
+        if os.path.exists(gro_file):
+            with open(gro_file, "r") as f:
+                glines = f.readlines()
+            for line in glines[2:-1]:
+                if len(line) >= 44:
+                    try:
+                        aidx = int(line[15:20].strip())
+                        coords[aidx] = np.array([
+                            float(line[20:28]) * 10,
+                            float(line[28:36]) * 10,
+                            float(line[36:44]) * 10,
+                        ])
+                    except (ValueError, IndexError):
+                        continue
+
+        # Build exclusion sets between each crosslinked residue pair
+        excl: Dict[int, Set[int]] = {}
+        pairs_added = 0
+        for bond_data in valid_bond_data:
+            a1, a2 = bond_data["atoms"]
+            r1 = atom_res.get(a1)
+            r2 = atom_res.get(a2)
+            if not r1 or not r2 or r1 == r2:
+                continue
+            for i in res_atoms.get(r1, []):
+                for j in res_atoms.get(r2, []):
+                    if i == j:
+                        continue
+                    if coords:
+                        pi, pj = coords.get(i), coords.get(j)
+                        if pi is not None and pj is not None and np.linalg.norm(pi - pj) > cutoff:
+                            continue
+                    lo, hi = (i, j) if i < j else (j, i)
+                    if hi not in excl.setdefault(lo, set()):
+                        excl[lo].add(hi)
+                        pairs_added += 1
+
+        if not pairs_added:
+            return
+
+        # Locate an existing [ exclusions ] section (amber pdb2gmx output has none)
+        start = end = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith("[ exclusions ]"):
+                start = i
+            elif start >= 0 and line.strip().startswith("[") and not line.strip().startswith("[ exclusions ]"):
+                end = i
+                break
+
+        body = [f"{ai} " + " ".join(str(x) for x in sorted(excl[ai])) + "\n" for ai in sorted(excl)]
+
+        if start >= 0:
+            insert_at = end if end >= 0 else len(lines)
+            for entry in reversed(body):
+                lines.insert(insert_at, entry)
+        else:
+            lines.append("\n[ exclusions ]\n")
+            lines.append("; crosslink through-space exclusions (beyond nrexcl)\n")
+            lines.extend(body)
+
+        with open(itp_file, "w") as f:
+            f.writelines(lines)
+
+        LOG.debug(
+            f"Added {pairs_added} crosslink exclusion pair(s) "
+            f"({'distance-filtered' if coords else 'all inter-residue'}) "
+            f"to {os.path.basename(itp_file)}"
+        )
+
     def _filter_angles_by_bonds(
         self,
         angles: List[Tuple[int, int, int]],
@@ -900,8 +1032,13 @@ class Amber:
         except Exception:
             pass
         
-        output_file = itp_file.parent / str(itp_file.name).replace("top", "itp")
-        
+        output_file = itp_file.with_suffix(".itp")
+
+        # pdb2gmx writes a single moleculetype block. GROMACS <2023 names it
+        # "Protein_chain_A"; GROMACS >=2023 names it just "Protein". Match either,
+        # anchored so comments/other lines don't trigger.
+        molname_re = re.compile(r'^\s*Protein(?:_chain_\w+)?\s+\d+\s*$')
+
         with open(output_file, 'w') as f:
             write = False
             for line in itp_model:
@@ -909,7 +1046,7 @@ class Amber:
                     break
                 if write:
                     f.write(line)
-                elif 'Protein_chain_A' in line:
+                elif molname_re.match(line):
                     f.write('[ moleculetype ]\n')
                     f.write(f'{molecule_name}  3\n')
                     write = True

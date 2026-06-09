@@ -352,13 +352,22 @@ class System:
                 if crystal_header:
                     f.write(crystal_header)
                 
-                # Write model files if they exist (typically for initial crystal structures)
+                # Write model files if they exist (typically for initial crystal structures).
+                # Skip any model that will also be written from its caps file below, otherwise
+                # the same atoms are emitted twice (uncapped body + caps) -> 0 A overlaps.
                 for model_id, model in self.system.items():
                     if hasattr(model, 'pdb_file') and Path(model.pdb_file).exists():
+                        model_type = getattr(model, 'type', None)
+                        if model_type is not None and (model_type, float(model_id)) in caps_by_model:
+                            LOG.debug(
+                                f"Skipping pdb_file body for model {model_id}; "
+                                f"caps file will be written instead (avoid duplicate atoms)"
+                            )
+                            continue
                         LOG.debug(f"Writing model {model_id} from pdb_file")
                         self._write_model_file_content(f, model.pdb_file)
                         written_models += 1
-                        model_type = getattr(model, 'type', 'unknown')
+                        model_type = model_type if model_type is not None else 'unknown'
                         written_by_type[model_type] = written_by_type.get(model_type, 0) + 1
                 
                 # Write caps files: one per model ID, respecting assigned type

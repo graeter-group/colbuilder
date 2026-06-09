@@ -152,7 +152,7 @@ CONFIGURATION_ERRORS: Dict[str, ErrorInfo] = {
             "Contact distance must be a positive number",
             "Fibril length must be a positive number less than 334",
             "Terminal combinations must follow format 'ResidueNumber.Chain - ResidueNumber.Chain'",
-            "Force field must be either 'amber99' or 'martini'",
+            "Force field must be either 'amber99' or 'martini3'",
         ],
     ),
 }
@@ -276,6 +276,17 @@ GEOMETRY_ERRORS: Dict[str, ErrorInfo] = {
             "Verify chain terminations match chain count",
         ],
     ),
+    "GEO_ERR_008": ErrorInfo(
+        code="GEO_ERR_008",
+        message="Crosslinks in PDB do not match the specified crosslink types",
+        suggestions=[
+            "Ensure n_term_type/c_term_type match the crosslinks present in the PDB",
+            "Divalent types (HLKNL, LKNL, deHLNL, deHHLNL) require a divalent PDB",
+            "Trivalent types (PYD, DPD, PYL, DPL) require a trivalent PDB",
+            "Set the crosslink types to match the input structure, or provide a matching PDB",
+        ],
+        docs_url="https://colbuilder.readthedocs.io/en/latest/geometry.html#input-requirements",
+    ),
 }
 
 # Topology-related errors
@@ -284,7 +295,7 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
         code="TOP_ERR_001",
         message="Invalid force field specification",
         suggestions=[
-            "Use a supported force field (currently only amber99)",
+            "Use a supported force field ('amber99' or 'martini3')",
             "Check force field spelling",
             "Verify force field is properly configured",
             "Ensure force field files are available in the expected location",
