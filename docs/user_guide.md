@@ -272,8 +272,13 @@ files_mix:                  # Required if mix_bool is true
 ```yaml
 replace_bool: false         # Enable replacement of crosslinks with lysines
 ratio_replace: 30           # Percentage of crosslinks to replace
+ratio_replace_scope: "enzymatic"  # Crosslinks to replace: "enzymatic" (default), "non_enzymatic" (AGEs), or "all"
 replace_file: null          # File with crosslinks to be replaced
 ```
+
+The `ratio_replace_scope` parameter controls which crosslinks are eligible for ratio-based
+replacement. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues);
+use `non_enzymatic` to target AGE crosslinks (Glucosepane, Pentosidine, MOLD), or `all` for both.
 
 ### Topology Options
 
