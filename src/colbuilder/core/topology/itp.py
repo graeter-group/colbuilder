@@ -501,43 +501,18 @@ class Itp:
         ]
         self.final_angles.extend(merged_angles)
 
-        # Process dihedrals based on entry length
+        # Process dihedrals. A single [ dihedrals ] section can mix entry widths
+        # (proper vs improper, with/without explicit params), so offset the first
+        # four atom-index columns per entry rather than assuming the whole section
+        # has the width of its first row. Rows too short to be a dihedral are kept
+        # verbatim so nothing is silently dropped.
         merged_dihedrals = []
-        if self.dihedrals[cnt_con]:  # Check if not empty
-            dihedral_length = len(self.dihedrals[cnt_con][0])
-
-            if dihedral_length == 8:
-                for dih in self.dihedrals[cnt_con]:
-                    indices = [int(idx) + self.delta_merge for idx in dih[:4]]
-                    merged_dih = [*indices, *dih[4:]]
-                    merged_dihedrals.append(merged_dih)
-
-            elif dihedral_length == 7:
-                merged_dihedrals = [
-                    [
-                        int(d[0]) + self.delta_merge,
-                        int(d[1]) + self.delta_merge,
-                        int(d[2]) + self.delta_merge,
-                        int(d[3]) + self.delta_merge,
-                        d[4],
-                        d[5],
-                        d[6],
-                    ]
-                    for d in self.dihedrals[cnt_con]
-                ]
-
-            elif dihedral_length == 6:
-                merged_dihedrals = [
-                    [
-                        int(d[0]) + self.delta_merge,
-                        int(d[1]) + self.delta_merge,
-                        int(d[2]) + self.delta_merge,
-                        int(d[3]) + self.delta_merge,
-                        d[4],
-                        d[5],
-                    ]
-                    for d in self.dihedrals[cnt_con]
-                ]
+        for dih in self.dihedrals[cnt_con]:
+            if len(dih) >= 4:
+                indices = [int(idx) + self.delta_merge for idx in dih[:4]]
+                merged_dihedrals.append([*indices, *dih[4:]])
+            else:
+                merged_dihedrals.append(dih)
 
         self.final_dihedrals.extend(merged_dihedrals)
 
