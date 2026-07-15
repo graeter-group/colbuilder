@@ -67,7 +67,7 @@ class Crosslink:
         self.k_angle: str = '153'    # Universal angle force constant (kJ/mol/rad^2)
         
         # PYD-crosslink parameters
-        self.klyxly2: str = '9000'   # LYX-LY2 bond force constant (kJ/mol/nm^2)
+        self.klyxly2: str = '11000'   # LYX-LY2 bond force constant (kJ/mol/nm^2)
         self.klyxly3: str = '12000'  # LYX-LY3 bond force constant (kJ/mol/nm^2)
         self.klyx5ly2: str = '12000'  # LYX-LY2 bond force constant (kJ/mol/nm^2) (conserve ring)
         self.dlyxly2: str = '0.290'  # LYX-LY2 bond equilibrium distance (nm)
