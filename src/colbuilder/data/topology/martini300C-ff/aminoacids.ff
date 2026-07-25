@@ -94,7 +94,7 @@ L4Y                1
 [ bonds ]
 #meta {"group": "Side chain bonds"}
 ;  i     j   funct   length  force.c.
-  BB   SC1    1       0.310    9000      
+  BB   SC1    1       0.310    10000      
   
   
 ;;;; DIVALENT - CROSSLINK - PART L5Y
@@ -113,8 +113,8 @@ L5Y                1
 [ bonds ]
 #meta {"group": "Side chain bonds"}
 ;  i     j   funct   length  force.c.
-  BB   SC1    1       0.360     8000      
- SC1   SC2    1       0.365     7000  
+  BB   SC1    1       0.360     9000      
+ SC1   SC2    1       0.365     5000  
 
 [angles]
 #meta {"group": "Side chain angles"}
@@ -137,7 +137,7 @@ LY2                1
 [ bonds ]
 #meta {"group": "Side chain bonds"}
 ;  i     j   funct   length  force.c.
-  BB   SC1    1       0.250   14000      
+  BB   SC1    1       0.250   18000      
   
   
 ;;;; TRIVALENT - CROSSLINK - PART LY3
@@ -155,7 +155,7 @@ LY3                1
 [ bonds ]
 #meta {"group": "Side chain bonds"}
 ;  i     j   funct   length  force.c.
-  BB   SC1    1       0.250   14000      
+  BB   SC1    1       0.250   18000      
   
 
 ;;;; TRIVALENT - CROSSLINK - PART LYX
@@ -177,9 +177,9 @@ LYX                1
 [bonds]
 #meta {"group": "Side chain bonds"}
 ;  i     j   funct   length  force.c.
-  BB   SC1    1       0.270    14000      
+  BB   SC1    1       0.270    18000      
  SC1   SC2    1       0.250    15000  
- SC2   SC3    1       0.260    10000   
+ SC2   SC3    1       0.260    14000   
  SC3   SC4    1       0.250    72000
  SC3   SC5    1       0.270    72000
  SC4   SC5    1       0.395    68000

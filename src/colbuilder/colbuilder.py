@@ -516,7 +516,14 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
         # the common mistake of, e.g., specifying a divalent type (HLKNL) for a
         # trivalent (PYD) structure. Generated PDBs match by construction, so
         # this only meaningfully guards user-provided structures.
-        if config.pdb_file and (config.n_term_type or config.c_term_type):
+        # Only validate crosslink-type consistency when crosslinking/replacement is
+        # actually active. With crosslink:false (and no replace) the term-type fields
+        # are inert, so a populated-but-unused n_term_type must not trigger GEO_ERR_008.
+        if (
+            (config.crosslink or config.replace_bool)
+            and config.pdb_file
+            and (config.n_term_type or config.c_term_type)
+        ):
             from colbuilder.core.utils.crosslink_detector import CrosslinkDetector
 
             pdb_to_check = Path(config.pdb_file).resolve()
