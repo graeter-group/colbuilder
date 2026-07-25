@@ -64,22 +64,22 @@ class Crosslink:
         self.al45y_1: str = '140'    # L4Y-L5Y SC1-SC2-SC1(L4Y) angle (degrees)
         self.al45y_2: str = '140'    # L4Y-L5Y SC2(L5Y)-SC1-BB angle (degrees)
         self.k_angle: str = '153'    # Universal angle force constant (kJ/mol/rad^2)
-
+        
         # PYD-crosslink parameters
-        self.klyxly2: str = '9000'    # LYX-LY2 (SC4) bond force constant (kJ/mol/nm^2)
-        self.klyxly3: str = '12000'   # LYX-LY3 (SC5) bond force constant (kJ/mol/nm^2)
-        self.klyx5ly2: str = '12000'  # LYX-LY2 (SC5) bond force constant (kJ/mol/nm^2) (conserve ring)
-        self.dlyxly2: str = '0.290'   # LYX-LY2 (SC4) bond equilibrium distance (nm)
-        self.dlyxly3: str = '0.230'   # LYX-LY3 (SC5) bond equilibrium distance (nm)
-        self.dlyx5ly2: str = '0.370'  # LYX-LY2 (SC5) bond equilibrium distance (nm) (conserve ring)
-
+        self.klyxly2: str = '11000'   # LYX-LY2 bond force constant (kJ/mol/nm^2)
+        self.klyxly3: str = '12000'  # LYX-LY3 bond force constant (kJ/mol/nm^2)
+        self.klyx5ly2: str = '12000'  # LYX-LY2 bond force constant (kJ/mol/nm^2) (conserve ring)
+        self.dlyxly2: str = '0.290'  # LYX-LY2 bond equilibrium distance (nm)
+        self.dlyxly3: str = '0.230'  # LYX-LY3 bond equilibrium distance (nm)
+        self.dlyx5ly2: str = '0.370'  # LYX-LY2 bond equilibrium distance (nm) (added)
+        
         # PYD-crosslink angle parameters (degrees)
-        self.al2yx_1: str = '140'    # LY2-LYX TP1q-TC6q-TC4 angle
-        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle
-        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle
-        self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle
-        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle
-        self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle
+        self.al2yx_1: str = '100'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
+        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
+        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
+        self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
+        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 R3/S3
+        self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
 
         LOG.debug(f"Initialized Crosslink for model counter {cnt_model}")
 
