@@ -53,7 +53,7 @@ class Crosslink:
         # crosslink-dense regions, creating spurious bonds. Keep the cutoff modest
         # so only genuine partners (close in the assembled fibril) are bonded.
         self.crosslink_thresholds = {
-            'LYX_LY2': 6.0,  # Maximum distance for LYX SC4 - LY2 SC1 crosslinks
+            'LYX_LY2': 6.0,  # Maximum distance for LYX SC4/SC5 - LY2 SC1 crosslinks
             'LYX_LY3': 6.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
             'L4Y_L5Y': 6.0   # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
         }
@@ -66,13 +66,15 @@ class Crosslink:
         self.k_angle: str = '153'    # Universal angle force constant (kJ/mol/rad^2)
 
         # PYD-crosslink parameters
-        self.klyxly2: str = '9000'   # LYX-LY2 bond force constant (kJ/mol/nm^2)
-        self.klyxly3: str = '12000'  # LYX-LY3 bond force constant (kJ/mol/nm^2)
-        self.dlyxly2: str = '0.290'  # LYX-LY2 bond equilibrium distance (nm)
-        self.dlyxly3: str = '0.230'  # LYX-LY3 bond equilibrium distance (nm)
+        self.klyxly2: str = '9000'    # LYX-LY2 (SC4) bond force constant (kJ/mol/nm^2)
+        self.klyxly3: str = '12000'   # LYX-LY3 (SC5) bond force constant (kJ/mol/nm^2)
+        self.klyx5ly2: str = '12000'  # LYX-LY2 (SC5) bond force constant (kJ/mol/nm^2) (conserve ring)
+        self.dlyxly2: str = '0.290'   # LYX-LY2 (SC4) bond equilibrium distance (nm)
+        self.dlyxly3: str = '0.230'   # LYX-LY3 (SC5) bond equilibrium distance (nm)
+        self.dlyx5ly2: str = '0.370'  # LYX-LY2 (SC5) bond equilibrium distance (nm) (conserve ring)
 
         # PYD-crosslink angle parameters (degrees)
-        self.al2yx_1: str = '100'    # LY2-LYX TP1q-TC6q-TC4 angle
+        self.al2yx_1: str = '140'    # LY2-LYX TP1q-TC6q-TC4 angle
         self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle
         self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle
         self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle
@@ -144,12 +146,10 @@ class Crosslink:
         """
         LOG.debug("Using improved crosslink pair detection algorithm")
 
-        # Use the new pair-finding method and convert to old format for compatibility
         pairs = self.find_crosslink_pairs(cnt_model=cnt_model)
 
         self.crosslink_connect = []
         if pairs:
-            # Group all atoms involved in pairs
             all_atoms = []
             for pair in pairs:
                 if pair[0] not in all_atoms:
@@ -174,9 +174,10 @@ class Crosslink:
 
         Returns (a_atom, b_atom, distance) for the closest compatible pairs within
         ``threshold``, using each atom at most once (shortest pairs assigned first).
-        A crosslink bead bonds exactly one genuine partner, so this prevents the
-        spurious extra bonds that arise when several partners fall inside the cutoff
-        in crosslink-dense regions of the fibril.
+        Matching is per bead-category, so a bead that legitimately participates in
+        two different categories (e.g. LYX SC5 bonds both LY2 and LY3) still forms
+        both bonds — but within a single category a bead bonds only its one nearest
+        partner, preventing spurious extra bonds in crosslink-dense regions.
         """
         candidates: List[Tuple[float, int, int]] = []
         for ai, a in enumerate(a_atoms):
@@ -194,7 +195,7 @@ class Crosslink:
             if ai in used_a or bi in used_b:
                 LOG.debug(
                     f"    Skipping already-bonded pair {a_atoms[ai][0]}-{b_atoms[bi][0]} "
-                    f"(d={dist:.3f} Å); each crosslink bead bonds a single partner."
+                    f"(d={dist:.3f} Å); each crosslink bead bonds a single partner per category."
                 )
                 continue
             used_a.add(ai)
@@ -206,12 +207,12 @@ class Crosslink:
         """
         Find valid crosslink pairs based on distance and compatibility.
 
-        Each crosslink bead bonds exactly one partner, so pairing is a one-to-one
-        nearest-neighbour match per category (LYX-SC4/LY2, LYX-SC5/LY3, L4Y/L5Y):
-        the closest compatible pairs are bonded first and each atom is used at most
-        once. This replaces the previous "bond every pair within the cutoff" logic,
-        which could create spurious extra bonds where one bead falls within range of
-        several partners.
+        Pairing is a one-to-one nearest-neighbour match per bead-category
+        (LYX-SC4/LY2, LYX-SC5/LY2, LYX-SC5/LY3, L4Y/L5Y): the closest compatible
+        pairs are bonded first and each atom is used at most once within a category.
+        This avoids the spurious extra bonds that "bond every pair within the cutoff"
+        produced, while still allowing the shared LYX SC5 bead to bond both LY2
+        (conserve-ring) and LY3.
         """
         self.get_crosslink_coords(cnt_model=cnt_model)
 
@@ -221,7 +222,6 @@ class Crosslink:
 
         self.crosslink_pairs = []
 
-        # Separate atoms by type for targeted pairing
         lyx_sc4_atoms = []
         lyx_sc5_atoms = []
         ly2_sc1_atoms = []
@@ -256,14 +256,21 @@ class Crosslink:
             lyx_sc4_atoms, ly2_sc1_atoms, self.crosslink_thresholds['LYX_LY2']
         ):
             self.crosslink_pairs.append((lyx_atom, ly2_atom))
-            LOG.info(f" Added LYX-LY2 pair: atoms {lyx_atom[0]} - {ly2_atom[0]} (distance: {dist:.3f} Å)")
+            LOG.info(f" Added LYX-LY2 (SC4) pair: atoms {lyx_atom[0]} - {ly2_atom[0]} (distance: {dist:.3f} Å)")
+
+        # LYX SC5 - LY2 SC1 (conserve-ring bond; one-to-one nearest neighbour)
+        for lyx_atom, ly2_atom, dist in self._match_nearest_pairs(
+            lyx_sc5_atoms, ly2_sc1_atoms, self.crosslink_thresholds['LYX_LY2']
+        ):
+            self.crosslink_pairs.append((lyx_atom, ly2_atom))
+            LOG.info(f" Added LYX-LY2 (SC5) pair: atoms {lyx_atom[0]} - {ly2_atom[0]} (distance: {dist:.3f} Å)")
 
         # LYX SC5 - LY3 SC1 (one-to-one nearest neighbour)
         for lyx_atom, ly3_atom, dist in self._match_nearest_pairs(
             lyx_sc5_atoms, ly3_sc1_atoms, self.crosslink_thresholds['LYX_LY3']
         ):
             self.crosslink_pairs.append((lyx_atom, ly3_atom))
-            LOG.info(f" Added LYX-LY3 pair: atoms {lyx_atom[0]} - {ly3_atom[0]} (distance: {dist:.3f} Å)")
+            LOG.info(f" Added LYX-LY3 (SC5) pair: atoms {lyx_atom[0]} - {ly3_atom[0]} (distance: {dist:.3f} Å)")
 
         # L4Y SC1 - L5Y SC2 (one-to-one nearest neighbour)
         for l4y_atom, l5y_atom, dist in self._match_nearest_pairs(
@@ -317,6 +324,17 @@ class Crosslink:
                     ])
                     connections_found += 1
                     LOG.info(f"Added LYX-LY2 crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
+
+                # LYX SC5 - LY2 SC1 crosslinks (conserve-ring bond)
+                elif (clx[1] == 'LYX' and clx[2] == 'SC5' and
+                      cly[1] == 'LY2' and cly[2] == 'SC1'):
+
+                    self.crosslink_bonded['bonds'].append([
+                        clx[0], cly[0], '1', self.dlyx5ly2, f"{self.klyx5ly2}\n"
+                    ])
+                    # TODO: no angle terms defined for the SC5-LY2 bond yet.
+                    connections_found += 1
+                    LOG.info(f"Added LYX-LY2 (SC5) crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
                 # LYX SC5 - LY3 SC1 crosslinks
                 elif (clx[1] == 'LYX' and clx[2] == 'SC5' and
@@ -373,6 +391,16 @@ class Crosslink:
                     ])
                     connections_found += 1
                     LOG.info(f" Added LYX-LY2 crosslink between {cly[0]} and {clx[0]} (distance: {dist:.3f} Å)")
+
+                elif (cly[1] == 'LYX' and cly[2] == 'SC5' and
+                      clx[1] == 'LY2' and clx[2] == 'SC1'):
+
+                    self.crosslink_bonded['bonds'].append([
+                        cly[0], clx[0], '1', self.dlyx5ly2, f"{self.klyx5ly2}\n"
+                    ])
+                    # TODO: no angle terms defined for the SC5-LY2 bond yet.
+                    connections_found += 1
+                    LOG.info(f" Added LYX-LY2 (SC5) crosslink between {cly[0]} and {clx[0]} (distance: {dist:.3f} Å)")
 
                 elif (cly[1] == 'LYX' and cly[2] == 'SC5' and
                       clx[1] == 'LY3' and clx[2] == 'SC1'):
