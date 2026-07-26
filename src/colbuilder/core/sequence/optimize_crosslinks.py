@@ -234,7 +234,9 @@ def get_phi_psi_atoms(
                 "C": residue["C"].coord,
                 "next_N": chain[res_id + 1]["N"].coord,
             },
-            "range": (res_id, min(len(chain) - 1, res_id + 0)),
+            # Only the crosslink residue itself is rotated; downstream residues are
+            # intentionally left fixed, so the propagation range is a single residue.
+            "range": (res_id, min(len(chain) - 1, res_id)),
         }
         return atoms
     except Exception:
@@ -1059,13 +1061,9 @@ def optimize_crosslink(
             LOG.debug(f"Target reached at step {step}")
             return best_structures, best_tracker
 
-        if (
-            not is_divalent
-            and dist1 <= target_distance + 1.0
-            and dist2 <= target_distance + 1.0
-        ):
-            LOG.debug(f"Target reached at step {step}")
-            return best_structures, best_tracker
+        # NOTE: no trivalent early-termination. Its target (dist1,dist2 <= 1.1 for
+        # target_distance=0.1) is unreachable given the >=1.5 A acceptance floor
+        # below, so it was dead code; trivalent optimisation runs the full budget.
 
         if no_improvement_count > 500:
             LOG.debug(f"Resetting at step {step}")
@@ -1217,7 +1215,7 @@ def optimize_structure(
     initial_total_distance = 0
     for crosslink in crosslinks:
         dist1, dist2 = get_distances(structures, crosslink)
-        initial_total_distance += dist1
+        initial_total_distance += dist1 if crosslink["R3"]["type"] == "NONE" else max(dist1, dist2)
 
     LOG.debug(
         f"Initial total distance before optimization: {initial_total_distance:.2f}"
@@ -1267,7 +1265,7 @@ def optimize_structure(
     total_distance = 0
     for crosslink in crosslinks:
         dist1, dist2 = get_distances(structures, crosslink)
-        total_distance += dist1
+        total_distance += dist1 if crosslink["R3"]["type"] == "NONE" else max(dist1, dist2)
         if crosslink["R3"]["type"] == "NONE":
             LOG.debug(
                 f"Final distance: {crosslink['R1']['type']}-{crosslink['R2']['type']} = {dist1:.2f}"
