@@ -1008,16 +1008,34 @@ def main(**kwargs: Any) -> int:
         else:
             config_data = {}
 
-        # Override with command-line arguments if they are explicitly provided
+        # Override config-file values with command-line arguments, but ONLY for
+        # options the user explicitly passed on the command line. click records the
+        # source of each parameter, so unset flags/defaults do not clobber the config
+        # file. This also makes CLI-only invocation (no --config_file) work.
+        try:
+            _click_ctx = click.get_current_context(silent=True)
+        except Exception:
+            _click_ctx = None
+
+        def _explicitly_set(name: str) -> bool:
+            if _click_ctx is None:
+                return False
+            try:
+                src = _click_ctx.get_parameter_source(name)
+            except Exception:
+                return False
+            return src is not None and getattr(src, "name", "") == "COMMANDLINE"
+
         for key, value in kwargs.items():
             if key == "config_file":
                 continue
-
-            elif key == "files_mix" and value:
-                LOG.info(f"Command line files_mix: {value}")
-                config_data[key] = value
-                raw_files_mix = value
+            if not _explicitly_set(key):
                 continue
+            if key == "files_mix":
+                if value:
+                    LOG.info(f"Command line files_mix: {value}")
+                    raw_files_mix = value
+            config_data[key] = value
 
         LOG.debug(f"Final configuration data before validation: {config_data}")
 
