@@ -42,7 +42,7 @@
 - [📚 Documentation](#-documentation)
 - [🤝 Contributing](#-contributing)
 - [📚 Publications \& Citation](#-publications--citation)
-- [🙏 Acknowledgements](#-acknowledgements)
+- [🙏 Contributors](#-contributors)
 
 ## 📚 About
 
@@ -739,9 +739,14 @@ We welcome contributions to ColBuilder! Please see our [contributing guidelines]
 * If you perform coarse-grained simulations, please also cite the Martini 3 paper for collagen fibrils: https://www.cell.com/biophysj/fulltext/S0006-3495(25)00663-0
 * If you use AGE crosslinks in colbuilder, then please also cite "Introducing non-enzymatic crosslinks into atomistic simulations of collagen fibrils" https://www.biorxiv.org/content/10.64898/2026.03.13.711566v1
 
-## 🙏 Acknowledgements
+## 🙏 Contributors
 
-ColBuilder is developed and maintained by the Gräter group at the Max Planck Institute for Polymer Research. We thank all contributors that have supported this work.
+ColBuilder is developed and maintained by the Gräter group at the Max Planck Institute for Polymer Research. 
+* Debora Monego
+* Johanna Buck
+* Matthias Brosz
+* Guido Giannetti (University of Vienna)
+* Justin Pils (University of Vienna)
 
 ---
 
