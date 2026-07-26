@@ -1102,68 +1102,16 @@ def main(**kwargs: Any) -> int:
             if not config.files_mix or len(config.files_mix) == 0:
                 LOG.warning("No mix files found, but mixing is enabled!")
 
-                if raw_files_mix:
-                    LOG.info("Creating empty mix files for testing...")
-                    files = []
-
-                    for file_name in raw_files_mix:
-                        if isinstance(file_name, Path):
-                            file_path = file_name
-                        else:
-                            file_path = Path(file_name)
-
-                        if not file_path.is_absolute():
-                            file_path = (
-                                config.working_directory / file_path.name
-                            ).resolve()
-
-                        if not file_path.exists():
-                            try:
-                                LOG.info(f"Creating empty file: {file_path}")
-                                with open(file_path, "w") as f:
-                                    f.write(
-                                        "REMARK This is an empty PDB file created for testing\n"
-                                    )
-                                    f.write("END\n")
-                                files.append(file_path)
-                            except Exception as e:
-                                LOG.error(f"Failed to create test file: {e}")
-                        else:
-                            files.append(file_path)
-
-                    if files:
-                        config.files_mix = tuple(files)
-                        LOG.info(f"Created test files: {config.files_mix}")
-                    files = []
-
-                    for file_name in raw_files_mix:
-                        if isinstance(file_name, Path):
-                            file_path = file_name
-                        else:
-                            file_path = Path(file_name)
-
-                        if not file_path.is_absolute():
-                            file_path = (
-                                config.working_directory / file_path.name
-                            ).resolve()
-
-                        if not file_path.exists():
-                            try:
-                                LOG.info(f"Creating empty file: {file_path}")
-                                with open(file_path, "w") as f:
-                                    f.write(
-                                        "REMARK This is an empty PDB file created for testing\n"
-                                    )
-                                    f.write("END\n")
-                                files.append(file_path)
-                            except Exception as e:
-                                LOG.error(f"Failed to create test file: {e}")
-                        else:
-                            files.append(file_path)
-
-                    if files:
-                        config.files_mix = tuple(files)
-                        LOG.info(f"Created test files: {config.files_mix}")
+                requested = [str(f) for f in (raw_files_mix or [])]
+                raise ConfigurationError(
+                    message=(
+                        "mix_bool is enabled but none of the files_mix inputs "
+                        f"could be found: {requested or '[none provided]'}. "
+                        "Provide valid PDB paths (relative to the config file, "
+                        "or absolute)."
+                    ),
+                    error_code="CFG_ERR_003",
+                )
 
         LOG.subsection("Starting ColBuilder Pipeline")
         results = asyncio.run(run_pipeline(config))
