@@ -55,15 +55,36 @@ def main():
             if residue_type not in {"LYS", "ARG"}:
                 residue_type = "LYS"
             residue_id = replace[2]
-            chain_id = replace[3].replace('\n', '').lower()
-            
+            # Do NOT force lower-case: PDB chain IDs are upper-case (A/B/C). The old
+            # .lower() built specs like '#0:770.b' which fail to match chain 'B' if
+            # Chimera treats chain IDs case-sensitively, silently skipping the swap.
+            chain_id = replace[3].replace('\n', '').strip()
+
             # Construct path to PDB file
             pdb_path = os.path.join(system_type, pdb_file)
-            
+
             # Open PDB file
             print("Opening {0}".format(pdb_path))
             rc("open {0}".format(pdb_path))
-            
+
+            # Fail-proof chain matching: resolve chain_id against the chain IDs that
+            # actually exist in the opened model, case-insensitively, and use the
+            # real case. Works whether Chimera matches chains case-sensitively or
+            # not; falls back to chain_id as given if the model can't be inspected.
+            try:
+                from chimera import openModels, Molecule
+                mols = openModels.list(modelTypes=[Molecule])
+                if mols:
+                    present = [r.id.chainId for r in mols[0].residues if r.id.chainId]
+                    exact = [c for c in present if c == chain_id]
+                    ci = [c for c in present if c.lower() == chain_id.lower()]
+                    if exact:
+                        chain_id = exact[0]
+                    elif ci:
+                        chain_id = ci[0]
+            except Exception as exc:
+                print("Chain-id introspection failed ({0}); using '{1}' as-is".format(exc, chain_id))
+
             # Replace residue with requested type (default LYS)
             print("Replacing residue {0}.{1} with {2}".format(residue_id, chain_id, residue_type))
             rc("swapaa {0} #0:{1}.{2}".format(residue_type, residue_id, chain_id))
