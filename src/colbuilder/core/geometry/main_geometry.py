@@ -472,7 +472,13 @@ class GeometryService:
                     else:
                         LOG.debug("No unpaired enzymatic crosslinks detected")
                 except Exception as e:
-                    LOG.warning("Automatic unpaired crosslink detection failed: %s", e)
+                    # Fail loudly: a swallowed error here leaves unpaired crosslink
+                    # markers un-mutated (non-standard residues -> broken topology /
+                    # clashes) with no indication anything went wrong.
+                    LOG.error(
+                        "Automatic unpaired crosslink detection failed: %s", e, exc_info=True
+                    )
+                    raise
             else:
                 temp_config.auto_fix_unpaired = False
 
