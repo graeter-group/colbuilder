@@ -47,14 +47,13 @@ amber27 amber36 amber99
    16   HE2   !SC2
    17    NZ   SC3
    18   C10   SC3
-   19   C14   SC4
+   19   O11   SC4
    20   C11   SC4
-   21   C12   SC5
-   22   C13   SC5
-   23   O11   SC5
-   24   H11   !SC4
-   25   H10   !SC3
-   26   H14   !SC4
-   27     C    BB
-   28     O    BB
+   21   C13   SC5
+   22   C14   SC5
+   23   H11   !SC4
+   24   H10   !SC3
+   25   H14   !SC4
+   26     C    BB
+   27     O    BB
 
