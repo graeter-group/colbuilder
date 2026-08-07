@@ -528,9 +528,19 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
 
             pdb_to_check = Path(config.pdb_file).resolve()
             if pdb_to_check.exists():
+                # Include the additional (e.g. AGE) crosslink types, not just the
+                # terminal ones: an AGE workflow declares PYD via n_term/c_term_type
+                # and Glucosepane/Pentosidine/MOLD via additional_*_type, producing a
+                # mixed divalent+trivalent structure. Validating against the terminal
+                # types alone wrongly rejects the tool's own mixed output (GEO_ERR_008).
                 CrosslinkDetector.validate_against_specified_types(
                     pdb_to_check,
-                    [config.n_term_type, config.c_term_type],
+                    [
+                        config.n_term_type,
+                        config.c_term_type,
+                        getattr(config, "additional_1_type", None),
+                        getattr(config, "additional_2_type", None),
+                    ],
                 )
 
         # Topology-only mode
