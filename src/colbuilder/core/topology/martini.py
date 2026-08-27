@@ -26,6 +26,7 @@ from colorama import Fore, Style
 
 from colbuilder.core.topology.itp import Itp
 from colbuilder.core.topology.crosslink import Crosslink
+from colbuilder.core.topology.backbone_repair import repair_backbone_bonds
 from colbuilder.core.geometry.system import System
 from colbuilder.core.utils.dec import timeit
 from colbuilder.core.utils.config import ColbuilderConfig
@@ -933,8 +934,25 @@ async def build_martini3(
                         itp_.read_model(model_id=int(model_id))
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
+
+                        # martinize2 infers backbone bonds by distance and drops
+                        # the BB-BB peptide bond wherever crosslink strain pushes
+                        # the all-atom C-N beyond its ~1.9 A threshold, fragmenting
+                        # the CG chain. Add back the missing consecutive-residue
+                        # backbone bonds (the amber path is unaffected because
+                        # pdb2gmx bonds from templates, not geometry).
+                        try:
+                            repair_backbone_bonds(
+                                itp_path=f"col_{int(cnt_model)}.itp",
+                                merge_pdb=f"{int(cnt_model)}.merge.pdb",
+                            )
+                        except Exception as e:
+                            LOG.warning(
+                                f"Backbone-bond repair failed for col_{int(cnt_model)}.itp: {e}"
+                            )
+
                         processed_models.append(model_id)
-                        written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists                        
+                        written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists
 
                         # Track what we processed
                         for connect_id in connect_ids:

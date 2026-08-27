@@ -29,7 +29,7 @@ import os
 import time
 import logging
 import asyncio
-import traceback 
+import traceback
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Union, List
 import click
@@ -310,16 +310,16 @@ async def run_topology_generation(
 ) -> Tuple[Path, Path]:
     """
     Generate topology files for molecular dynamics simulations.
-    
+
     Args:
         config: Configuration settings
         system_path: Path to the fibril PDB file
         existing_system: Optional pre-loaded System object
         file_manager: Optional file manager for handling directories
-        
+
     Returns:
         Tuple of (topology_directory, system_path)
-        
+
     Raises:
         TopologyGenerationError: If topology generation fails
     """
@@ -339,39 +339,39 @@ async def run_topology_generation(
         topology_dir_path = file_manager.get_temp_dir("topology_gen")
 
         cap_files_found = False
-        
+
         # Copy cap files from mixing directory if available
         if mixing_dir.exists():
             LOG.debug(f"Searching for cap files in mixing directory: {mixing_dir}")
             cap_files = list(mixing_dir.glob("**/*.caps.pdb"))
             LOG.debug(f"Found {len(cap_files)} cap files in mixing directory")
-            
+
             if cap_files:
                 cap_files_found = True
                 for cap_file in cap_files:
                     relative_path = cap_file.relative_to(mixing_dir)
                     dest_file = topology_dir_path / relative_path
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    
+
                     try:
                         shutil.copy2(cap_file, dest_file)
                         LOG.debug(f"Copied cap file: {relative_path}")
                     except Exception as e:
                         LOG.warning(f"Failed to copy {cap_file}: {e}")
-        
+
         # Copy cap files from geometry directory if available
         if geometry_dir.exists():
             LOG.debug(f"Searching for cap files in geometry directory: {geometry_dir}")
             cap_files = list(geometry_dir.glob("**/*.caps.pdb"))
             LOG.debug(f"Found {len(cap_files)} cap files in geometry directory")
-            
+
             if cap_files:
                 cap_files_found = True
                 for cap_file in cap_files:
                     relative_path = cap_file.relative_to(geometry_dir)
                     dest_file = topology_dir_path / relative_path
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    
+
                     try:
                         shutil.copy2(cap_file, dest_file)
                         LOG.debug(f"Copied cap file: {relative_path}")
@@ -433,11 +433,11 @@ async def extract_and_cap_models_from_pdb(
 ) -> None:
     """
     Prepare fibril PDB for topology generation.
-    
+
     Extracts individual models from a multi-model PDB, detects crosslink-based
-    connectivity, and organizes them by crosslink type. Works for both Amber99 
+    connectivity, and organizes them by crosslink type. Works for both Amber99
     and Martini3 force fields.
-    
+
     Args:
         pdb_path: Path to the fibril PDB file
         system: System object with model information
@@ -445,15 +445,15 @@ async def extract_and_cap_models_from_pdb(
         output_dir: Directory for output files
     """
     from colbuilder.core.utils.crosslink_detector import CrosslinkDetector
-    
+
     LOG.info(f"Preparing fibril structure for topology generation: {pdb_path}")
-    
+
     detector = CrosslinkDetector()
     type_dir = detector.prepare_for_topology(pdb_path, output_dir)
-    
+
     LOG.info("Analyzing crosslink connectivity between models...")
     connections = detector.find_crosslink_connections(type_dir, cutoff=5.0)
-    
+
     # Update system models with connectivity information
     for model_id in system.get_models():
         model = system.get_model(model_id=model_id)
@@ -465,24 +465,69 @@ async def extract_and_cap_models_from_pdb(
             else:
                 model.connect = [model_id]
                 LOG.debug(f"Model {int_model_id} has no connections (self only)")
-    
-    connected_count = sum(1 for m_id in system.get_models() 
+
+    connected_count = sum(1 for m_id in system.get_models()
                          if len(system.get_model(model_id=m_id).connect) > 1)
     LOG.info(f"Connectivity analysis complete: {connected_count}/{len(list(system.get_models()))} models have connections")
-    
+
     LOG.info(f"Ready for {config.force_field} topology generation")
+
+
+def _purge_stale_topology_inputs(working_directory: str) -> None:
+    """Remove stale cap/topology intermediates before a topology-only run.
+
+    In topology-only mode no geometry/mixing/replace step runs this session, so
+    any ``*.caps.pdb`` or per-model topology left under ``.tmp`` from a PREVIOUS
+    run is stale. If left in place, the cap-file discovery in
+    ``run_topology_generation`` / ``build_topology`` finds those old caps first,
+    sets ``cap_files_found = True`` and reuses them instead of extracting fresh
+    caps from the current ``pdb_file`` -- which is why a manual
+    ``rm -rf .tmp/geometry_gen`` was needed between topology-only runs on
+    different structures. Clearing them here forces a clean extraction from the
+    current input. Safe precisely because this mode never legitimately populates
+    these directories in the same session.
+    """
+    tmp = Path(working_directory).resolve() / ".tmp"
+    if not tmp.exists():
+        return
+    removed = 0
+    # Stale caps from a prior geometry/mixing/replace stage.
+    for sub in ("geometry_gen", "mixing_crosslinks", "replace_crosslinks"):
+        sub_dir = tmp / sub
+        if not sub_dir.exists():
+            continue
+        for cap in sub_dir.glob("**/*.caps.pdb"):
+            try:
+                cap.unlink()
+                removed += 1
+            except OSError as e:
+                LOG.debug(f"Could not remove stale cap file {cap}: {e}")
+    # Stale per-model topology outputs (CG/merge/itp) from a prior topology run;
+    # get_temp_dir("topology_gen") recreates the directory fresh.
+    topo_dir = tmp / "topology_gen"
+    if topo_dir.exists():
+        try:
+            shutil.rmtree(topo_dir)
+            removed += 1
+        except OSError as e:
+            LOG.debug(f"Could not clear stale topology_gen directory: {e}")
+    if removed:
+        LOG.info(
+            f"Cleared stale topology inputs under {tmp} before topology-only run "
+            f"(caps/intermediates from a previous run would otherwise be reused)."
+        )
 
 
 async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
     """
     Run the complete Colbuilder pipeline based on configuration.
-    
+
     Args:
         config: Configuration settings
-        
+
     Returns:
         Dictionary containing paths to all generated outputs
-        
+
     Raises:
         Various ColbuilderError subclasses depending on which step fails
     """
@@ -528,50 +573,66 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
 
             pdb_to_check = Path(config.pdb_file).resolve()
             if pdb_to_check.exists():
+                # Include the additional (e.g. AGE) crosslink types, not just the
+                # terminal ones: an AGE workflow declares PYD via n_term/c_term_type
+                # and Glucosepane/Pentosidine/MOLD via additional_*_type, producing a
+                # mixed divalent+trivalent structure. Validating against the terminal
+                # types alone wrongly rejects the tool's own mixed output (GEO_ERR_008).
                 CrosslinkDetector.validate_against_specified_types(
                     pdb_to_check,
-                    [config.n_term_type, config.c_term_type],
+                    [
+                        config.n_term_type,
+                        config.c_term_type,
+                        getattr(config, "additional_1_type", None),
+                        getattr(config, "additional_2_type", None),
+                    ],
                 )
 
         # Topology-only mode
-        if (config.topology_generator and 
-            not config.geometry_generator and 
-            not config.mix_bool and 
+        if (config.topology_generator and
+            not config.geometry_generator and
+            not config.mix_bool and
             not config.replace_bool):
-            
+
             LOG.section("Running topology-only mode")
-            
+
+            # Discard stale caps/intermediates from any previous run so the
+            # topology is built from the current pdb_file, not a leftover
+            # structure's cap files (previously required a manual
+            # `rm -rf .tmp/geometry_gen`).
+            _purge_stale_topology_inputs(config.working_directory)
+
             if not config.pdb_file:
                 raise TopologyGenerationError(
                     message="PDB file required for topology-only mode",
                     error_code="TOP_ERR_008",
                 )
-            
+
             pdb_path = Path(config.pdb_file).resolve()
             if not pdb_path.exists():
                 raise TopologyGenerationError(
                     message=f"PDB file not found: {pdb_path}",
                     error_code="TOP_ERR_008",
                 )
-            
+
             LOG.info(f"Using existing fibril PDB: {pdb_path}")
             results["geometry_pdb"] = pdb_path
-            
+
             from colbuilder.core.geometry.crystal import Crystal
             from colbuilder.core.geometry.system import System
             from colbuilder.core.geometry.model import Model
             from colbuilder.core.utils.crosslink_detector import CrosslinkDetector
-            
+
             detector = CrosslinkDetector()
-            
+
             structure_type = detector.detect_structure_type(pdb_path)
             LOG.info(f"Detected structure type: {structure_type}")
-            
+
             crystal = Crystal(pdb=str(pdb_path))
             current_system = System(crystal=crystal)
-            
+
             model_ids = detector.get_model_ids(pdb_path)
-            
+
             if not model_ids:
                 # Count by TER records (3 TERs = 1 triple helix)
                 LOG.info("No MODEL records found, counting TER-separated triple helices")
@@ -580,11 +641,11 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                     for line in f:
                         if line.startswith('TER'):
                             ter_count += 1
-                
+
                 num_models = ter_count // 3
                 model_ids = list(range(num_models))
                 LOG.info(f"Detected {num_models} triple helix models from TER records")
-            
+
             for model_id in model_ids:
                 model = Model(
                     id=float(model_id),
@@ -598,7 +659,7 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                 model.crosslink_type = structure_type
                 current_system.add_model(model=model)
                 LOG.debug(f"Added model {model_id} with type {structure_type}")
-            
+
             LOG.info(f"Created system with {len(model_ids)} models of type {structure_type}")
             results["geometry_system"] = current_system
 
@@ -615,7 +676,7 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
             results["geometry_system"] = current_system
             LOG.info(f"Direct replacement completed, output PDB: {pdb_path}")
 
-        # Mix-only 
+        # Mix-only
         elif config.mix_bool and not config.geometry_generator:
             LOG.section("Running crosslinks mixing mode")
             current_system, pdb_path = await run_geometry_generation(
@@ -705,13 +766,13 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
     """
     # Detect topology-only mode
     topology_only = (
-        cfg.topology_generator and 
-        not cfg.geometry_generator and 
+        cfg.topology_generator and
+        not cfg.geometry_generator and
         not cfg.sequence_generator and
-        not cfg.mix_bool and 
+        not cfg.mix_bool and
         not cfg.replace_bool
     )
-    
+
     if topology_only:
         # Minimal configuration for topology-only mode
         sections = {
@@ -721,7 +782,7 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
                 f"Input PDB: {cfg.pdb_file}" if cfg.pdb_file else None,
             ],
             "Operation Modes": lambda: [
-                "Topology Generation \u2713",
+                "Topology Generation ✓",
             ],
         }
     else:
@@ -751,11 +812,11 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
                 ),
             ],
             "Operation Modes": lambda: [
-                "Sequence Generation \u2713" if cfg.sequence_generator else None,
-                "Geometry Generation \u2713" if cfg.geometry_generator else None,
-                "Mix Crosslinks \u2713" if cfg.mix_bool else None,
-                "Replace Crosslinks \u2713" if cfg.replace_bool else None,
-                "Topology Generation \u2713" if cfg.topology_generator else None,
+                "Sequence Generation ✓" if cfg.sequence_generator else None,
+                "Geometry Generation ✓" if cfg.geometry_generator else None,
+                "Mix Crosslinks ✓" if cfg.mix_bool else None,
+                "Replace Crosslinks ✓" if cfg.replace_bool else None,
+                "Topology Generation ✓" if cfg.topology_generator else None,
             ],
         }
 
@@ -776,12 +837,12 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
 def initialize_logging(debug=False, working_dir=None, config_file=None):
     """
     Initialize logging system for the application.
-    
+
     Args:
         debug: Enable debug logging if True
         working_dir: Working directory for log files
         config_file: Configuration file to copy to temp directory
-        
+
     Returns:
         Configured logger instance
     """
@@ -837,7 +898,7 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     help="First additional crosslink type to apply to mutated PDB"
 )
 @click.option(
-    "--additional_2_type", 
+    "--additional_2_type",
     type=str,
     help="Second additional crosslink type to apply to mutated PDB"
 )
@@ -1008,16 +1069,34 @@ def main(**kwargs: Any) -> int:
         else:
             config_data = {}
 
-        # Override with command-line arguments if they are explicitly provided
+        # Override config-file values with command-line arguments, but ONLY for
+        # options the user explicitly passed on the command line. click records the
+        # source of each parameter, so unset flags/defaults do not clobber the config
+        # file. This also makes CLI-only invocation (no --config_file) work.
+        try:
+            _click_ctx = click.get_current_context(silent=True)
+        except Exception:
+            _click_ctx = None
+
+        def _explicitly_set(name: str) -> bool:
+            if _click_ctx is None:
+                return False
+            try:
+                src = _click_ctx.get_parameter_source(name)
+            except Exception:
+                return False
+            return src is not None and getattr(src, "name", "") == "COMMANDLINE"
+
         for key, value in kwargs.items():
             if key == "config_file":
                 continue
-
-            elif key == "files_mix" and value:
-                LOG.info(f"Command line files_mix: {value}")
-                config_data[key] = value
-                raw_files_mix = value
+            if not _explicitly_set(key):
                 continue
+            if key == "files_mix":
+                if value:
+                    LOG.info(f"Command line files_mix: {value}")
+                    raw_files_mix = value
+            config_data[key] = value
 
         LOG.debug(f"Final configuration data before validation: {config_data}")
 
@@ -1084,68 +1163,16 @@ def main(**kwargs: Any) -> int:
             if not config.files_mix or len(config.files_mix) == 0:
                 LOG.warning("No mix files found, but mixing is enabled!")
 
-                if raw_files_mix:
-                    LOG.info("Creating empty mix files for testing...")
-                    files = []
-
-                    for file_name in raw_files_mix:
-                        if isinstance(file_name, Path):
-                            file_path = file_name
-                        else:
-                            file_path = Path(file_name)
-
-                        if not file_path.is_absolute():
-                            file_path = (
-                                config.working_directory / file_path.name
-                            ).resolve()
-
-                        if not file_path.exists():
-                            try:
-                                LOG.info(f"Creating empty file: {file_path}")
-                                with open(file_path, "w") as f:
-                                    f.write(
-                                        "REMARK This is an empty PDB file created for testing\n"
-                                    )
-                                    f.write("END\n")
-                                files.append(file_path)
-                            except Exception as e:
-                                LOG.error(f"Failed to create test file: {e}")
-                        else:
-                            files.append(file_path)
-
-                    if files:
-                        config.files_mix = tuple(files)
-                        LOG.info(f"Created test files: {config.files_mix}")
-                    files = []
-
-                    for file_name in raw_files_mix:
-                        if isinstance(file_name, Path):
-                            file_path = file_name
-                        else:
-                            file_path = Path(file_name)
-
-                        if not file_path.is_absolute():
-                            file_path = (
-                                config.working_directory / file_path.name
-                            ).resolve()
-
-                        if not file_path.exists():
-                            try:
-                                LOG.info(f"Creating empty file: {file_path}")
-                                with open(file_path, "w") as f:
-                                    f.write(
-                                        "REMARK This is an empty PDB file created for testing\n"
-                                    )
-                                    f.write("END\n")
-                                files.append(file_path)
-                            except Exception as e:
-                                LOG.error(f"Failed to create test file: {e}")
-                        else:
-                            files.append(file_path)
-
-                    if files:
-                        config.files_mix = tuple(files)
-                        LOG.info(f"Created test files: {config.files_mix}")
+                requested = [str(f) for f in (raw_files_mix or [])]
+                raise ConfigurationError(
+                    message=(
+                        "mix_bool is enabled but none of the files_mix inputs "
+                        f"could be found: {requested or '[none provided]'}. "
+                        "Provide valid PDB paths (relative to the config file, "
+                        "or absolute)."
+                    ),
+                    error_code="CFG_ERR_003",
+                )
 
         LOG.subsection("Starting ColBuilder Pipeline")
         results = asyncio.run(run_pipeline(config))

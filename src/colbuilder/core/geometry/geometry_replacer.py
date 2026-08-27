@@ -1738,7 +1738,7 @@ class CrosslinkReplacer:
         if z_max - z_min > 5000.0 and fibril_length:
             center = (z_min + z_max) / 2.0
             fibril_len_ang = fibril_length * 10.0
-            return (center - fibril_len_ang * 5, center + fibril_len_ang * 5)
+            return (center - fibril_len_ang / 2, center + fibril_len_ang / 2)
 
         return (z_min, z_max)
 

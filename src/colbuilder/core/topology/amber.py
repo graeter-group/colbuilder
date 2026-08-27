@@ -116,16 +116,38 @@ class Amber:
                     except Exception as e:
                         LOG.warning(f"Could not read crosslinks from {caps_file}: {e}")
             
+            # Each crosslink marker atom forms exactly ONE covalent bond, so pair
+            # them by GREEDY one-to-one nearest-neighbour matching: collect every
+            # compatible cross-model pair within the cutoff, then assign shortest
+            # first, using each marker atom at most once. This is what guarantees
+            # a trivalent LYX yields only its two true bonds (C13-CG, C12-CB) and
+            # not the 4 that "bond every compatible pair < 5 A" produced — C13 and
+            # C12 are adjacent ring atoms, so both fall within range of both arms.
+            candidate_pairs = []
             for i, cl1 in enumerate(all_crosslinks):
-                for cl2 in all_crosslinks[i+1:]:
-                    if cl1.model_id != cl2.model_id:
-                        distance = np.linalg.norm(cl1.position - cl2.position)
-                        if distance < 5.0 and self._are_compatible_crosslinks(cl1, cl2):
-                            crosslink_pairs.append((cl1, cl2))
-                            LOG.debug(
-                                f"  Crosslink pair: model {cl1.model_id} ({cl1.resname}) - "
-                                f"model {cl2.model_id} ({cl2.resname}), distance: {distance:.2f} Å"
-                            )
+                for j in range(i + 1, len(all_crosslinks)):
+                    cl2 = all_crosslinks[j]
+                    if cl1.model_id == cl2.model_id:
+                        continue
+                    if not self._are_compatible_crosslinks(cl1, cl2):
+                        continue
+                    distance = float(np.linalg.norm(cl1.position - cl2.position))
+                    if distance < 5.0:
+                        candidate_pairs.append((distance, i, j))
+
+            candidate_pairs.sort(key=lambda t: t[0])
+            used_markers: Set[int] = set()
+            for distance, i, j in candidate_pairs:
+                if i in used_markers or j in used_markers:
+                    continue
+                used_markers.add(i)
+                used_markers.add(j)
+                cl1, cl2 = all_crosslinks[i], all_crosslinks[j]
+                crosslink_pairs.append((cl1, cl2))
+                LOG.debug(
+                    f"  Crosslink pair: model {cl1.model_id} ({cl1.resname}{getattr(cl1, 'atom', '')}) - "
+                    f"model {cl2.model_id} ({cl2.resname}{getattr(cl2, 'atom', '')}), distance: {distance:.2f} Å"
+                )
             
             if crosslink_pairs:
                 LOG.info(f"Found {len(crosslink_pairs)} crosslink pairs for group {group_id}")
@@ -175,9 +197,15 @@ class Amber:
         divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS', 'LZD'}
         divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD', 'LZS'}
         
-        # Trivalent crosslinks (T-type)
-        trivalent_aldehyde = {'LYX', 'LXY', 'LYY', 'LXX'}
-        trivalent_amine = {'LY2', 'LX2', 'LY3', 'LX3', 'L3Y', 'L2Y', 'L3X', 'L2X'}
+        # Trivalent crosslinks (T-type). Each aldehyde (ring) residue bonds two
+        # specific arms — one via ring carbon C13, one via C12 — fixed per type
+        # (data/sequence/crosslinks.csv). Blocks cross-arm and cross-type bonds.
+        trivalent_bond_map = {
+            "LYX": {"C13": "LY3", "C12": "LY2"},  # PYD
+            "LXX": {"C13": "LX3", "C12": "LX2"},  # DPD
+            "LXY": {"C13": "L3Y", "C12": "L2Y"},  # PYL
+            "LYY": {"C13": "L3X", "C12": "L2X"},  # DPL
+        }
         
         # Divalent pairs: aldehyde + amine
         if cl1.resname in divalent_aldehyde and cl2.resname in divalent_amine:
@@ -185,10 +213,21 @@ class Amber:
         if cl1.resname in divalent_amine and cl2.resname in divalent_aldehyde:
             return True
         
-        # Trivalent pairs: aldehyde + amine
-        if cl1.resname in trivalent_aldehyde and cl2.resname in trivalent_amine:
+        # Trivalent pairs: the aldehyde ring carbon must bond its designated arm.
+        def _trivalent_ok(aldehyde: Crosslink, amine: Crosslink) -> bool:
+            arms = trivalent_bond_map.get(aldehyde.resname)
+            if arms is None:
+                return False
+            atom = (getattr(aldehyde, "atom", "") or "").strip()
+            if atom in arms:
+                return arms[atom] == amine.resname
+            # Atom name unknown: restrict to this central's two valid arms (still
+            # blocks cross-type; the greedy 1-to-1 match below resolves C13 vs C12).
+            return amine.resname in arms.values()
+        
+        if _trivalent_ok(cl1, cl2):
             return True
-        if cl1.resname in trivalent_amine and cl2.resname in trivalent_aldehyde:
+        if _trivalent_ok(cl2, cl1):
             return True
         
         return False

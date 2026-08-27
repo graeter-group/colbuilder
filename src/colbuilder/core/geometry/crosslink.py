@@ -29,6 +29,7 @@ class Crosslink:
         position: List[float],
         type: str,
         model_id: Optional[Union[int, float]] = None,
+        atom: str = "",
     ):
         self.model_id = model_id
         self.resid = resid
@@ -36,6 +37,7 @@ class Crosslink:
         self.chain = chain
         self.position = np.array(position)
         self.type = type
+        self.atom = atom  # PDB atom name that matched (e.g. C13, C12, CG, CB)
         self.state = "none"
 
     def set_transform(
@@ -102,6 +104,7 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                             float(line[46:54]),
                         ],
                         type="T",
+                        atom=line[12:16].strip(),
                     )
                 )
             elif (
@@ -118,6 +121,7 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                             float(line[46:54]),
                         ],
                         type="D",
+                        atom=line[12:16].strip(),
                     )
                 )
             elif (
@@ -134,6 +138,7 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                             float(line[46:54]),
                         ],
                         type="D",
+                        atom=line[12:16].strip(),
                     )
                 )
             elif (line[17:20] in ("LGX", "LPS") and line[13:15] == "CE") or (
@@ -150,6 +155,7 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                             float(line[46:54]),
                         ],
                         type="D",
+                        atom=line[12:16].strip(),
                     )
                 )
 

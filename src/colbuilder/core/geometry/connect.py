@@ -142,11 +142,22 @@ class Connect:
             Any: Updated system object.
         """
         if connect_file:
+            # Each connect-file line lists ALL member ids of a group before the ';'
+            # (e.g. "5.caps.pdb 10.caps.pdb ; T"). Register every "<id>.caps.pdb"
+            # token, not just the first, otherwise non-leading members of grouped/
+            # graph-style connect files are silently disconnected.
+            self.external_connect = []
             with open(connect_file.with_suffix(".txt"), "r") as fh:
-                self.external_connect = [
-                    float(l.split(" ")[0].replace(".caps.pdb", ""))
-                    for l in fh
-                ]
+                for line in fh:
+                    body = line.split(";", 1)[0]
+                    for tok in body.split():
+                        if tok.endswith(".caps.pdb"):
+                            try:
+                                self.external_connect.append(
+                                    float(tok.replace(".caps.pdb", ""))
+                                )
+                            except ValueError:
+                                continue
         # Connect files are written by write_connect() using the system's own
         # (0-based) model ids, so they are already aligned with system.get_connect().
         # The previous "if min > 0: subtract 1" heuristic wrongly shifted every id
