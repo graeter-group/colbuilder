@@ -89,7 +89,6 @@ def print_version(ctx: click.Context, param: click.Parameter, value: bool) -> No
     ctx.exit()
 
 
-from colbuilder.core.sequence.main_sequence import build_sequence
 from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
 from colbuilder.core.topology.main_topology import build_topology
 
@@ -202,6 +201,11 @@ async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Optional[Pa
         SequenceGenerationError: If sequence generation fails
     """
     try:
+        # MODELLER is licensed separately and is only needed for sequence
+        # generation. Import it lazily so geometry/topology workflows that start
+        # from an existing PDB do not require a MODELLER installation or key.
+        from colbuilder.core.sequence.main_sequence import build_sequence
+
         LOG.subsection("Generating Sequence")
         return await build_sequence(config)
     except Exception as e:
@@ -327,14 +331,13 @@ async def run_topology_generation(
         if file_manager is None:
             file_manager = FileManager(config)
 
-        # Check for existing cap files from geometry/mixing steps
-        mixing_dir = Path(".tmp") / "mixing_crosslinks"
-        if not mixing_dir.exists():
-            mixing_dir = Path.cwd() / ".tmp" / "mixing_crosslinks"
-
-        geometry_dir = Path(".tmp") / "geometry_gen"
-        if not geometry_dir.exists():
-            geometry_dir = Path.cwd() / ".tmp" / "geometry_gen"
+        # Geometry writes .caps.pdb under config.working_directory/.tmp/geometry_gen
+        # (via FileManager). Looking up Path(".tmp")/geometry_gen would use the
+        # shell's current directory instead. If Colbuilder is launched from another
+        # directory (for example cd /private/tmp), that relative path misses the
+        # real caps and topology falls back to TER-splitting the fibril PDB.
+        mixing_dir = file_manager.mixing_dir
+        geometry_dir = file_manager.geometry_dir
 
         topology_dir_path = file_manager.get_temp_dir("topology_gen")
 
