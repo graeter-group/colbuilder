@@ -89,7 +89,6 @@ def print_version(ctx: click.Context, param: click.Parameter, value: bool) -> No
     ctx.exit()
 
 
-from colbuilder.core.sequence.main_sequence import build_sequence
 from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
 from colbuilder.core.topology.main_topology import build_topology
 
@@ -202,6 +201,11 @@ async def run_sequence_generation(config: ColbuilderConfig) -> Tuple[Optional[Pa
         SequenceGenerationError: If sequence generation fails
     """
     try:
+        # MODELLER is licensed separately and is only needed for sequence
+        # generation. Import it lazily so geometry/topology workflows that start
+        # from an existing PDB do not require a MODELLER installation or key.
+        from colbuilder.core.sequence.main_sequence import build_sequence
+
         LOG.subsection("Generating Sequence")
         return await build_sequence(config)
     except Exception as e:
@@ -425,6 +429,50 @@ async def run_topology_generation(
         raise
 
 
+def _remap_extracted_models_to_system_ids(type_dir: Path, system: System) -> None:
+    """Restore sparse system IDs after TER-based extraction renumbers models."""
+    model_files = sorted(
+        (
+            path
+            for path in type_dir.glob("[0-9]*.pdb")
+            if not path.name.endswith(".caps.pdb")
+        ),
+        key=lambda path: int(path.stem),
+    )
+    system_ids = sorted(int(model_id) for model_id in system.get_models())
+
+    if len(model_files) != len(system_ids):
+        LOG.warning(
+            "Cannot map extracted models to system IDs: extracted %d models, "
+            "but the system contains %d",
+            len(model_files),
+            len(system_ids),
+        )
+        return
+
+    extracted_ids = [int(path.stem) for path in model_files]
+    if extracted_ids == system_ids:
+        return
+
+    staged_files = []
+    for index, (model_file, system_id) in enumerate(zip(model_files, system_ids)):
+        caps_file = type_dir / f"{model_file.stem}.caps.pdb"
+        staged_model = type_dir / f".remap_{index}.pdb"
+        staged_caps = type_dir / f".remap_{index}.caps.pdb"
+
+        model_file.replace(staged_model)
+        if caps_file.exists():
+            caps_file.replace(staged_caps)
+        staged_files.append((staged_model, staged_caps, system_id))
+
+    for staged_model, staged_caps, system_id in staged_files:
+        staged_model.replace(type_dir / f"{system_id}.pdb")
+        if staged_caps.exists():
+            staged_caps.replace(type_dir / f"{system_id}.caps.pdb")
+
+    LOG.info("Mapped %d extracted models back to their system IDs", len(system_ids))
+
+
 async def extract_and_cap_models_from_pdb(
     pdb_path: Path,
     system: System,
@@ -450,6 +498,7 @@ async def extract_and_cap_models_from_pdb(
 
     detector = CrosslinkDetector()
     type_dir = detector.prepare_for_topology(pdb_path, output_dir)
+    _remap_extracted_models_to_system_ids(type_dir, system)
 
     LOG.info("Analyzing crosslink connectivity between models...")
     connections = detector.find_crosslink_connections(type_dir, cutoff=5.0)
