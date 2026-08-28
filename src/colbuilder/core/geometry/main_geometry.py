@@ -393,6 +393,44 @@ class GeometryService:
 
                 geometry_only_system = copy.deepcopy(system)
 
+                # Auto-detect unpaired crosslinks
+                auto_manual_replacements: List[str] = []
+                auto_manual_file: Optional[Path] = None
+                if system:
+                    try:
+                        finder = UnpairedCrosslinkFinder(base_dir=working_dir_root)
+                        auto_manual_replacements, auto_manual_file = finder.run()
+                        if auto_manual_replacements:
+                            temp_config.manual_replacements = auto_manual_replacements
+                            temp_config.replace_bool = True
+                            temp_config.auto_fix_unpaired = True
+
+                            # Propagate to shared config so downstream (topology) uses replace_manual
+                            try:
+                                self.config.auto_fix_unpaired = True
+                            except Exception:
+                                pass
+
+                            if (
+                                temp_config.ratio_replace is None
+                                and temp_config.replace_file is None
+                            ):
+                                temp_config.ratio_replace = 0
+
+                            LOG.info(
+                                "Auto-detected %d unpaired crosslink marker(s); enabling replacement.",
+                                len(auto_manual_replacements),
+                            )
+                        else:
+                            LOG.debug("No unpaired crosslinks detected")
+                    except Exception as e:
+                        LOG.error(
+                            "Automatic unpaired crosslink detection failed: %s", e, exc_info=True
+                        )
+                        raise
+                else:
+                    temp_config.auto_fix_unpaired = False
+
                 # Only write geometry-only PDB if no mixing or replacement will follow
                 if not (temp_config.mix_bool or temp_config.replace_bool):
                     output_prefix = temp_config.output or temp_config.species
@@ -419,10 +457,6 @@ class GeometryService:
                 LOG.section("Mixing geometry...")
                 mixing_dir = self.file_manager.ensure_mixing_dir()
                 system, _ = await self.mixer_service.mix(system, temp_config, mixing_dir)
-                # Finalize from where the mixed, per-type caps actually live. The
-                # mixer writes caps into mixing_dir/<type>; geometry_dir only holds
-                # the original single build type, so writing from it would miss the
-                # newly assigned mix types (FileNotFoundError or stale caps).
                 final_temp_dir = mixing_dir
                 LOG.info("Mixing completed.")
 
@@ -444,43 +478,9 @@ class GeometryService:
             except Exception:
                 pass
 
-            # Auto-detect unpaired enzymatic crosslinks and stage manual replacements
-            auto_manual_replacements: List[str] = []
-            auto_manual_file: Optional[Path] = None
-            if system:
-                try:
-                    finder = UnpairedCrosslinkFinder(base_dir=working_dir_root)
-                    auto_manual_replacements, auto_manual_file = finder.run()
-                    if auto_manual_replacements:
-                        temp_config.manual_replacements = auto_manual_replacements
-                        temp_config.replace_bool = True
-                        temp_config.auto_fix_unpaired = True
-                        
-                        # Propagate to shared config so downstream (topology) uses replace_manual
-                        try:
-                            self.config.auto_fix_unpaired = True
-                        except Exception:
-                            pass
-                        
-                        if (
-                            temp_config.ratio_replace is None
-                            and temp_config.replace_file is None
-                        ):
-                            temp_config.ratio_replace = 0
-                        
-                        LOG.debug(f"Auto-detected {len(auto_manual_replacements)} unpaired crosslinks")
-                    else:
-                        LOG.debug("No unpaired enzymatic crosslinks detected")
-                except Exception as e:
-                    # Fail loudly: a swallowed error here leaves unpaired crosslink
-                    # markers un-mutated (non-standard residues -> broken topology /
-                    # clashes) with no indication anything went wrong.
-                    LOG.error(
-                        "Automatic unpaired crosslink detection failed: %s", e, exc_info=True
-                    )
-                    raise
-            else:
-                temp_config.auto_fix_unpaired = False
+            # (Unpaired-crosslink auto-detection now runs earlier, right after the
+            # system is built and before the geometry-only early return, so that a
+            # detected unpaired crosslink can enable the replacement stage.)
 
             # Enable replacement stage when a ratio was provided without explicit replace_bool
             if (
