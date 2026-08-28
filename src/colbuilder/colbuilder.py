@@ -331,14 +331,13 @@ async def run_topology_generation(
         if file_manager is None:
             file_manager = FileManager(config)
 
-        # Check for existing cap files from geometry/mixing steps
-        mixing_dir = Path(".tmp") / "mixing_crosslinks"
-        if not mixing_dir.exists():
-            mixing_dir = Path.cwd() / ".tmp" / "mixing_crosslinks"
-
-        geometry_dir = Path(".tmp") / "geometry_gen"
-        if not geometry_dir.exists():
-            geometry_dir = Path.cwd() / ".tmp" / "geometry_gen"
+        # Geometry writes .caps.pdb under config.working_directory/.tmp/geometry_gen
+        # (via FileManager). Looking up Path(".tmp")/geometry_gen would use the
+        # shell's current directory instead. If Colbuilder is launched from another
+        # directory (for example cd /private/tmp), that relative path misses the
+        # real caps and topology falls back to TER-splitting the fibril PDB.
+        mixing_dir = file_manager.mixing_dir
+        geometry_dir = file_manager.geometry_dir
 
         topology_dir_path = file_manager.get_temp_dir("topology_gen")
 
@@ -429,50 +428,6 @@ async def run_topology_generation(
         raise
 
 
-def _remap_extracted_models_to_system_ids(type_dir: Path, system: System) -> None:
-    """Restore sparse system IDs after TER-based extraction renumbers models."""
-    model_files = sorted(
-        (
-            path
-            for path in type_dir.glob("[0-9]*.pdb")
-            if not path.name.endswith(".caps.pdb")
-        ),
-        key=lambda path: int(path.stem),
-    )
-    system_ids = sorted(int(model_id) for model_id in system.get_models())
-
-    if len(model_files) != len(system_ids):
-        LOG.warning(
-            "Cannot map extracted models to system IDs: extracted %d models, "
-            "but the system contains %d",
-            len(model_files),
-            len(system_ids),
-        )
-        return
-
-    extracted_ids = [int(path.stem) for path in model_files]
-    if extracted_ids == system_ids:
-        return
-
-    staged_files = []
-    for index, (model_file, system_id) in enumerate(zip(model_files, system_ids)):
-        caps_file = type_dir / f"{model_file.stem}.caps.pdb"
-        staged_model = type_dir / f".remap_{index}.pdb"
-        staged_caps = type_dir / f".remap_{index}.caps.pdb"
-
-        model_file.replace(staged_model)
-        if caps_file.exists():
-            caps_file.replace(staged_caps)
-        staged_files.append((staged_model, staged_caps, system_id))
-
-    for staged_model, staged_caps, system_id in staged_files:
-        staged_model.replace(type_dir / f"{system_id}.pdb")
-        if staged_caps.exists():
-            staged_caps.replace(type_dir / f"{system_id}.caps.pdb")
-
-    LOG.info("Mapped %d extracted models back to their system IDs", len(system_ids))
-
-
 async def extract_and_cap_models_from_pdb(
     pdb_path: Path,
     system: System,
@@ -498,7 +453,6 @@ async def extract_and_cap_models_from_pdb(
 
     detector = CrosslinkDetector()
     type_dir = detector.prepare_for_topology(pdb_path, output_dir)
-    _remap_extracted_models_to_system_ids(type_dir, system)
 
     LOG.info("Analyzing crosslink connectivity between models...")
     connections = detector.find_crosslink_connections(type_dir, cutoff=5.0)
