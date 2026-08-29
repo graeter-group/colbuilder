@@ -984,7 +984,8 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     "-ratio_replace",
     "--ratio_replace",
     type=float,
-    help="Ratio of crosslinks to be replaced with Lysines",
+    help="Percentage (0-100) of crosslinks to REMOVE (replace with Lysines); "
+    "e.g. 70 removes 70%, leaving 30% — not the remaining density",
 )
 @click.option(
     "-replace_file",

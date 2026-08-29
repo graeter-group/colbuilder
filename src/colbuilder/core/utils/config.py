@@ -263,7 +263,12 @@ class ColbuilderConfig(BaseModel):
         description="Scope of residues considered for ratio-based replacement",
     )
     ratio_replace: Optional[float] = Field(
-        None, description="Ratio of crosslinks to be replaced"
+        None,
+        description=(
+            "Percentage (0-100) of eligible crosslinks to REMOVE (replace with "
+            "standard residues). This is the fraction removed, NOT the remaining "
+            "density: e.g. 70 removes 70% of crosslinks, leaving 30%."
+        ),
     )
     replace_file: Optional[Path] = Field(
         None, description="File with crosslinks to be replaced"

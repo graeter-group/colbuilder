@@ -1507,6 +1507,42 @@ class CrosslinkReplacer:
             target = max(1, math.ceil(len(eligible_entities) * ratio_replace / 100.0))
             selected_entities = eligible_entities[:target]
 
+        # Integrity guard (#5): never fully strip a CONNECTED (multi-model) group
+        # of ALL its crosslinks -- that would let that part of the fibril
+        # disconnect. If every eligible entity belonging to such a group was
+        # selected for removal, keep one back. This can slightly undershoot the
+        # requested ratio, but only in the specific case where honouring it would
+        # fragment the fibril. Singletons (already standalone helices) are left
+        # alone by design.
+        multi_model_groups = [
+            {int(m) for m in g} for g in (connect_groups or []) if len(g) > 1
+        ]
+        if multi_model_groups and selected_entities:
+            def _entity_models(entity: Tuple[str, List[Dict[str, Any]]]) -> Set[int]:
+                models: Set[int] = set()
+                for rec in entity[1]:
+                    try:
+                        models.add(int(float(rec.get("model_id", -1))))
+                    except (ValueError, TypeError):
+                        continue
+                return models
+
+            selected_ids = {id(e) for e in selected_entities}
+            for grp in multi_model_groups:
+                grp_eligible = [e for e in eligible_entities if _entity_models(e) & grp]
+                if not grp_eligible:
+                    continue
+                if all(id(e) in selected_ids for e in grp_eligible):
+                    keep = grp_eligible[0]
+                    selected_entities = [e for e in selected_entities if e is not keep]
+                    selected_ids.discard(id(keep))
+                    LOG.info(
+                        "Integrity guard: retained 1 crosslink in connected group %s "
+                        "to avoid fully stripping it (requested ratio may undershoot "
+                        "slightly for this group).",
+                        sorted(grp),
+                    )
+
         seen: Set[str] = set()
         instructions: List[str] = []
         for _scope_tag, entity_records in selected_entities:
