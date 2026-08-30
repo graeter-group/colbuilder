@@ -632,76 +632,86 @@ class Amber:
         valid_bond_data: List[Dict],
         cutoff: float = 4.5,
     ) -> None:
-        """Write explicit [ exclusions ] between each pair of crosslinked residues.
+        """Write the [ exclusions ] that the crosslink bond needs but nrexcl misses.
 
-        nrexcl=3 only excludes atoms within 3 bonds along the bond graph. Covalently
-        joining two residues (e.g. HLKNL: L4Y CE - L5Y NZ) brings several heavy atoms
-        into close contact that are more than 3 bonds apart through the new bond, so
-        they are NOT auto-excluded and clash during equilibration. Here we exclude all
-        atom pairs between the two joined residues that lie within `cutoff` Angstrom
-        (falling back to excluding every inter-residue pair if no coordinates exist).
+        pdb2gmx builds each residue separately, so the covalent bond that joins two
+        residues (e.g. HLKNL: L4Y CE - L5Y NZ) is added only afterwards. GROMACS'
+        nrexcl=3 auto-exclusions are generated per residue and do not span that new
+        bond, so the 1-2/1-3/1-4 neighbours ACROSS the crosslink are left unexcluded
+        and clash during equilibration.
+
+        We add exactly those missing exclusions: every atom pair whose shortest path
+        *through the crosslink bond* is <= nrexcl bonds. This mirrors what nrexcl
+        would do if it saw the new bond, and NOTHING more. The previous version used
+        a purely geometric cutoff (any inter-residue pair within `cutoff` Angstrom),
+        which also excluded atoms that are close in space but far along the bond graph
+        (>nrexcl) -- removing legitimate LJ/Coulomb interactions (notably around
+        LYX C11/O11/H11) and destabilising force-pulling simulations.
+
+        `cutoff` is retained for signature compatibility but is no longer used.
         """
         if not valid_bond_data:
             return
 
+        nrexcl = 3  # matches the moleculetype nrexcl written by pdb2gmx
+
         with open(itp_file, "r") as f:
             lines = f.readlines()
 
-        # Map atom index -> (residue_nr, residue_name) and residue -> [indices]
-        atom_res: Dict[int, Tuple[int, str]] = {}
-        res_atoms: Dict[Tuple[int, str], List[int]] = {}
-        atoms_section = False
+        # Build the covalent adjacency from [ bonds ] (crosslink bonds are already
+        # present -- _add_crosslink_bonds ran before this).
+        adj: Dict[int, Set[int]] = {}
+        in_bonds = False
         for line in lines:
             s = line.strip()
-            if s.startswith("[ atoms ]"):
-                atoms_section = True
+            if s.startswith("[ bonds ]"):
+                in_bonds = True
                 continue
-            if atoms_section and s.startswith("["):
-                break
-            if atoms_section and s and not s.startswith(";"):
-                parts = s.split()
-                if len(parts) >= 8:
-                    idx = int(parts[0])
-                    key = (int(parts[2]), parts[3])
-                    atom_res[idx] = key
-                    res_atoms.setdefault(key, []).append(idx)
+            if in_bonds and s.startswith("["):
+                in_bonds = False
+                continue
+            if in_bonds and s and not s.startswith((";", "#")):
+                p = s.split()
+                if len(p) >= 2 and p[0].isdigit() and p[1].isdigit():
+                    a, b = int(p[0]), int(p[1])
+                    adj.setdefault(a, set()).add(b)
+                    adj.setdefault(b, set()).add(a)
 
-        # Coordinates (Angstrom) from the matching GRO, if present
-        gro_file = str(Path(itp_file).with_suffix(".gro"))
-        coords: Dict[int, np.ndarray] = {}
-        if os.path.exists(gro_file):
-            with open(gro_file, "r") as f:
-                glines = f.readlines()
-            for line in glines[2:-1]:
-                if len(line) >= 44:
-                    try:
-                        aidx = int(line[15:20].strip())
-                        coords[aidx] = np.array([
-                            float(line[20:28]) * 10,
-                            float(line[28:36]) * 10,
-                            float(line[36:44]) * 10,
-                        ])
-                    except (ValueError, IndexError):
-                        continue
+        # Adjacency WITHOUT the crosslink bonds, so a BFS from one endpoint stays on
+        # its own side of the junction (path length through the crosslink is then
+        # du + 1 + dv).
+        crosslink_edges = {frozenset(bd["atoms"]) for bd in valid_bond_data}
+        adj_side: Dict[int, Set[int]] = {
+            a: {b for b in nbrs if frozenset((a, b)) not in crosslink_edges}
+            for a, nbrs in adj.items()
+        }
 
-        # Build exclusion sets between each crosslinked residue pair
+        def _bfs(src: int, max_depth: int) -> Dict[int, int]:
+            dist = {src: 0}
+            frontier = [src]
+            for d in range(1, max_depth + 1):
+                nxt: List[int] = []
+                for u in frontier:
+                    for w in adj_side.get(u, ()):
+                        if w not in dist:
+                            dist[w] = d
+                            nxt.append(w)
+                frontier = nxt
+            return dist
+
+        # For each crosslink bond a1-a2, exclude (u, v) with dist(u,a1)+dist(v,a2) <=
+        # nrexcl-1, i.e. path u..a1-a2..v = du + 1 + dv <= nrexcl bonds.
         excl: Dict[int, Set[int]] = {}
         pairs_added = 0
         for bond_data in valid_bond_data:
             a1, a2 = bond_data["atoms"]
-            r1 = atom_res.get(a1)
-            r2 = atom_res.get(a2)
-            if not r1 or not r2 or r1 == r2:
-                continue
-            for i in res_atoms.get(r1, []):
-                for j in res_atoms.get(r2, []):
-                    if i == j:
+            side1 = _bfs(a1, nrexcl - 1)
+            side2 = _bfs(a2, nrexcl - 1)
+            for u, du in side1.items():
+                for v, dv in side2.items():
+                    if u == v or du + dv > nrexcl - 1:
                         continue
-                    if coords:
-                        pi, pj = coords.get(i), coords.get(j)
-                        if pi is not None and pj is not None and np.linalg.norm(pi - pj) > cutoff:
-                            continue
-                    lo, hi = (i, j) if i < j else (j, i)
+                    lo, hi = (u, v) if u < v else (v, u)
                     if hi not in excl.setdefault(lo, set()):
                         excl[lo].add(hi)
                         pairs_added += 1
@@ -734,7 +744,7 @@ class Amber:
 
         LOG.debug(
             f"Added {pairs_added} crosslink exclusion pair(s) "
-            f"({'distance-filtered' if coords else 'all inter-residue'}) "
+            f"(graph distance <= nrexcl through the crosslink bond) "
             f"to {os.path.basename(itp_file)}"
         )
 
