@@ -233,7 +233,10 @@ def repair_backbone_bonds(
             segset = {s for s, _ in ps}
             order = [i for _, i in ps]
             if len(segset) == 1 and order == list(range(order[0], order[0] + 4)):
-                dih_tmpl.setdefault((ids[1], ids[2]), tuple(t[3:]))
+                # params start AFTER the 4 atom indices (t[4:]); slicing t[3:]
+                # would leave the 4th atom index in the function-type column,
+                # producing malformed dihedrals ("Invalid dihedral type <atom>").
+                dih_tmpl.setdefault((ids[1], ids[2]), tuple(t[4:]))
 
     def nearest_angle_params(mid: int) -> Optional[Tuple[str, ...]]:
         if not angle_tmpl:
