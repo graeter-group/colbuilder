@@ -447,16 +447,41 @@ class Amber:
         return angles
 
     def generate_crosslink_dihedrals(self, crosslink_bonds: List[Tuple[int, int]], connectivity: Dict[int, Set[int]]) -> List[Tuple[int, int, int, int]]:
-        """Generate dihedrals involving crosslink bonds."""
+        """Generate every proper dihedral that uses a crosslink bond as its first,
+        central, or last bond (matches pdb2gmx with all_dihedrals=1). H atoms are
+        kept; deduplication and force-field parameters are handled downstream."""
         dihedrals = []
 
-        for atom1, atom2 in crosslink_bonds:
-            if atom1 in connectivity and atom2 in connectivity:
-                for x in connectivity[atom1]:
-                    if x != atom2:
-                        for y in connectivity[atom2]:
-                            if y != atom1 and y != x:
-                                dihedrals.append((x, atom1, atom2, y))
+        for a1, a2 in crosslink_bonds:
+            n1 = connectivity.get(a1, set())
+            n2 = connectivity.get(a2, set())
+
+            # Crosslink bond as the CENTRAL bond: x-a1-a2-y
+            for x in n1:
+                if x == a2:
+                    continue
+                for y in n2:
+                    if y == a1 or y == x:
+                        continue
+                    dihedrals.append((x, a1, a2, y))
+
+            # Crosslink bond as an END bond, extending past a2: a1-a2-y-z
+            for y in n2:
+                if y == a1:
+                    continue
+                for z in connectivity.get(y, set()):
+                    if z == a1 or z == a2:
+                        continue
+                    dihedrals.append((a1, a2, y, z))
+
+            # Crosslink bond as an END bond, extending past a1: a2-a1-x-w
+            for x in n1:
+                if x == a2:
+                    continue
+                for w in connectivity.get(x, set()):
+                    if w == a1 or w == a2:
+                        continue
+                    dihedrals.append((a2, a1, x, w))
 
         return dihedrals
 
@@ -956,81 +981,39 @@ class Amber:
             proposed_angles = self.generate_crosslink_angles(crosslink_bonds, connectivity)
             proposed_dihedrals = self.generate_crosslink_dihedrals(crosslink_bonds, connectivity)
 
+            # Keep only terms whose every bond is real (guards against stray tuples).
+            # Hydrogens are intentionally NOT filtered out: pdb2gmx generates the
+            # H-containing angles/dihedrals too, and dropping them left holes around
+            # the LY2/LY3 arms (e.g. C12-CB-HB1). No same-residue filter either --
+            # a term is valid iff its bonds exist, and dedup against the existing
+            # terms removes any overlap with what pdb2gmx already wrote.
             angles_seq = self._filter_angles_by_bonds(proposed_angles, bond_set)
             diheds_seq = self._filter_dihedrals_by_bonds(proposed_dihedrals, bond_set)
 
-            atom_info: Dict[int, Dict[str, Any]] = {}
-            with open(itp_file, "r") as f:
-                lines = f.readlines()
-            atoms_section = False
-            for line in lines:
-                s = line.strip()
-                if s.startswith("[ atoms ]"):
-                    atoms_section = True
-                    continue
-                if atoms_section and s.startswith("["):
-                    break
-                if atoms_section and s and not s.startswith(";"):
-                    parts = s.split()
-                    if len(parts) >= 8:
-                        idx = int(parts[0])
-                        atom_info[idx] = {
-                            "name": parts[4],
-                            "resid": int(parts[2]),
-                            "resname": parts[3],
-                        }
+            # Canonical dedup against pdb2gmx's terms and among ourselves.
+            # An angle i-j-k equals k-j-i; a dihedral i-j-k-l equals l-k-j-i.
+            def canon_angle(t: Tuple[int, int, int]) -> Tuple[int, int, int]:
+                return t if t[0] <= t[2] else (t[2], t[1], t[0])
 
-            def is_H(i: int) -> bool:
-                return atom_info.get(i, {}).get("name", "").startswith("H")
+            def canon_dihedral(t: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+                return t if t[0] <= t[3] else (t[3], t[2], t[1], t[0])
 
-            def same_res(i: int, j: int) -> bool:
-                ai, aj = atom_info.get(i), atom_info.get(j)
-                return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
+            existing_angles = {canon_angle(tuple(a)) for a in existing_topology["angles"]}
+            existing_diheds = {canon_dihedral(tuple(d)) for d in existing_topology["dihedrals"]}
 
-            # Angles: only keep if the middle pair is the crosslink bond and the outer atom
-            # is in the same residue as its adjacent crosslink atom (and heavy).
-            filtered_angles: List[Tuple[int, int, int]] = []
-            for i, j, k in angles_seq:
-                jk_is_xlink = as_bond(j, k) in xlink_set
-                ij_is_xlink = as_bond(i, j) in xlink_set
-                if jk_is_xlink:
-                    # angle (i, j=atom1, k=atom2): i must belong to j's residue; i,k must be heavy
-                    if not is_H(i) and not is_H(k) and same_res(i, j):
-                        filtered_angles.append((i, j, k))
-                elif ij_is_xlink:
-                    # angle (i=atom1, j=atom2, k): k must belong to j's residue; i,k heavy
-                    if not is_H(i) and not is_H(k) and same_res(k, j):
-                        filtered_angles.append((i, j, k))
-                # else: angle doesn't center on crosslink bond (shouldn't happen from our generator)
-
-            # Dihedrals: must be (i, j, k, l) with (j,k) the crosslink bond,
-            # i in j's residue, l in k's residue, all heavy for robustness.
-            filtered_diheds: List[Tuple[int, int, int, int]] = []
-            for i, j, k, l in diheds_seq:
-                if as_bond(j, k) not in xlink_set:
-                    continue
-                if is_H(i) or is_H(j) or is_H(k) or is_H(l):
-                    continue
-                if not (same_res(i, j) and same_res(k, l)):
-                    continue
-                filtered_diheds.append((i, j, k, l))
-
-            # Remove duplicates
-            existing_angles = set(tuple(a) for a in existing_topology["angles"])
-            existing_diheds = set(tuple(d) for d in existing_topology["dihedrals"])
-
-            def unique_new(seq, existing):
+            def unique_new(seq, existing, canon):
                 out = []
                 seen = set()
                 for t in seq:
-                    if t in existing or t in seen:
+                    c = canon(t)
+                    if c in existing or c in seen:
                         continue
-                    seen.add(t)
+                    seen.add(c)
                     out.append(t)
                 return out
 
-            crosslink_angles = unique_new(filtered_angles, existing_angles)
-            crosslink_dihedrals = unique_new(filtered_diheds, existing_diheds)
+            crosslink_angles = unique_new(angles_seq, existing_angles, canon_angle)
+            crosslink_dihedrals = unique_new(diheds_seq, existing_diheds, canon_dihedral)
 
             if not (crosslink_angles or crosslink_dihedrals):
                 return
@@ -1100,13 +1083,16 @@ class Amber:
         return lines
 
     def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
-        """Add crosslink dihedrals; if type 4 is selected, append fixed params 105.4 0.75 1."""
+        """Add crosslink dihedrals as proper function 9.
+
+        Parameters are left to grompp, which looks them up from the force field by
+        atom type -- exactly what pdb2gmx does for the propers it generates. We do
+        NOT assign function-4 impropers here: an atom being named CA/N/C/O/H does
+        not make a torsion an improper, and improper terms belong only where a
+        validated template defines them.
+        """
         if not crosslink_dihedrals:
             return lines
-
-        temp_itp_file = "temp_for_backbone_check.itp"
-        with open(temp_itp_file, 'w') as f:
-            f.writelines(lines)
 
         dihedrals_section_start = -1
         dihedrals_section_end = -1
@@ -1133,14 +1119,9 @@ class Amber:
             lines.insert(insert_pos + 1, ';   ai    aj    ak    al funct\n')
             insert_pos += 2
 
-        dihedral_entries = []
-        dihedral_entries.append("; Crosslink dihedrals\n")
+        dihedral_entries = ["; Crosslink dihedrals\n"]
         for a, b, c, d in crosslink_dihedrals:
-            dihedral_type = 4 if self._dihedral_involves_backbone(temp_itp_file, (a, b, c, d)) else 9
-            if dihedral_type == 4:
-                dihedral_entries.append(f"{a} {b} {c} {d}     4    105.4       0.75       1\n")
-            else:
-                dihedral_entries.append(f"{a} {b} {c} {d}     9\n")
+            dihedral_entries.append(f"{a} {b} {c} {d}     9\n")
 
         for entry in reversed(dihedral_entries):
             lines.insert(insert_pos, entry)
@@ -1149,11 +1130,6 @@ class Amber:
             lines[final_pos].strip().startswith('[') and
             (final_pos == 0 or lines[final_pos - 1].strip())):
             lines.insert(final_pos, '\n')
-
-        try:
-            os.remove(temp_itp_file)
-        except Exception:
-            pass
 
         return lines
 
