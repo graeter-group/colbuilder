@@ -34,55 +34,55 @@ class Amber:
         self.system = system
         self.ff = ff + '.ff' if ff else None
         self.pdb_line_types = ('ATOM  ', 'HETATM', 'ANISOU', 'TER   ')
-    
+
     def get_connected_groups(self) -> List[List[int]]:
         """Group models that are connected together."""
         if not self.system:
             return []
-            
+
         all_models = list(self.system.get_models())
         processed = set()
         groups = []
-        
+
         for model_id in all_models:
             if model_id in processed:
                 continue
-                
+
             model = self.system.get_model(model_id=model_id)
             if not model or not model.connect:
                 groups.append([model_id])
                 processed.add(model_id)
                 continue
-            
+
             group = set()
             to_process = [model_id]
-            
+
             while to_process:
                 current_id = to_process.pop()
                 if current_id in group:
                     continue
-                    
+
                 group.add(current_id)
                 current_model = self.system.get_model(model_id=current_id)
-                
+
                 if current_model and current_model.connect:
                     for connected_id in current_model.connect:
                         if connected_id not in group:
                             to_process.append(connected_id)
-            
+
             if group:
                 groups.append(sorted(list(group)))
                 processed.update(group)
-        
+
         return groups
-    
+
     def merge_connected_models(
-        self, 
+        self,
         model_group: List[int]
     ) -> Optional[Tuple[str, str, List[Tuple[Crosslink, Crosslink]]]]:
         """
         Merge connected models and detect crosslink pairs from individual model files.
-        
+
         Returns:
             Tuple of (model_type, group_id, crosslink_pairs) or None
         """
@@ -98,12 +98,12 @@ class Amber:
 
         group_id = "_".join(str(int(mid)) for mid in sorted(model_group))
         output_file = os.path.join(model_type, f"{group_id}.merge.pdb")
-        
+
         # DETECT CROSSLINKS FROM INDIVIDUAL MODEL FILES BEFORE MERGING
         crosslink_pairs = []
         if len(model_group) > 1:
             all_crosslinks = []
-            
+
             for mid in model_group:
                 caps_file = os.path.join(model_type, f"{int(mid)}.caps.pdb")
                 if os.path.exists(caps_file):
@@ -115,7 +115,7 @@ class Amber:
                         LOG.debug(f"Found {len(cls)} crosslinks in model {int(mid)}")
                     except Exception as e:
                         LOG.warning(f"Could not read crosslinks from {caps_file}: {e}")
-            
+
             # Each crosslink marker atom forms exactly ONE covalent bond, so pair
             # them by GREEDY one-to-one nearest-neighbour matching: collect every
             # compatible cross-model pair within the cutoff, then assign shortest
@@ -148,7 +148,7 @@ class Amber:
                     f"  Crosslink pair: model {cl1.model_id} ({cl1.resname}{getattr(cl1, 'atom', '')}) - "
                     f"model {cl2.model_id} ({cl2.resname}{getattr(cl2, 'atom', '')}), distance: {distance:.2f} Å"
                 )
-            
+
             if crosslink_pairs:
                 LOG.info(f"Found {len(crosslink_pairs)} crosslink pairs for group {group_id}")
 
@@ -178,25 +178,25 @@ class Amber:
 
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             return (model_type, group_id, crosslink_pairs)
-        
+
         LOG.error(f"Failed to create merged PDB for group {model_group}")
         return None
 
     def _are_compatible_crosslinks(self, cl1: Crosslink, cl2: Crosslink) -> bool:
         """
         Check if two crosslinks are compatible for bonding.
-        
+
         Args:
             cl1: First crosslink
             cl2: Second crosslink
-            
+
         Returns:
             True if crosslinks can form a bond
         """
         # Divalent crosslinks (D-type)
         divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS', 'LZD'}
         divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD', 'LZS'}
-        
+
         # Trivalent crosslinks (T-type). Each aldehyde (ring) residue bonds two
         # specific arms — one via ring carbon C13, one via C12 — fixed per type
         # (data/sequence/crosslinks.csv). Blocks cross-arm and cross-type bonds.
@@ -206,13 +206,13 @@ class Amber:
             "LXY": {"C13": "L3Y", "C12": "L2Y"},  # PYL
             "LYY": {"C13": "L3X", "C12": "L2X"},  # DPL
         }
-        
+
         # Divalent pairs: aldehyde + amine
         if cl1.resname in divalent_aldehyde and cl2.resname in divalent_amine:
             return True
         if cl1.resname in divalent_amine and cl2.resname in divalent_aldehyde:
             return True
-        
+
         # Trivalent pairs: the aldehyde ring carbon must bond its designated arm.
         def _trivalent_ok(aldehyde: Crosslink, amine: Crosslink) -> bool:
             arms = trivalent_bond_map.get(aldehyde.resname)
@@ -224,14 +224,14 @@ class Amber:
             # Atom name unknown: restrict to this central's two valid arms (still
             # blocks cross-type; the greedy 1-to-1 match below resolves C13 vs C12).
             return amine.resname in arms.values()
-        
+
         if _trivalent_ok(cl1, cl2):
             return True
         if _trivalent_ok(cl2, cl1):
             return True
-        
+
         return False
-    
+
     def find_atom_indices_for_crosslinks(
         self,
         itp_file: str,
@@ -369,30 +369,30 @@ class Amber:
             elif resname in ("AGS", "APD") and atom_name == "NZ":
                 return True
             elif resname in ("LZD") and atom_name == "CE":
-                return True   
+                return True
             elif resname in ("LZS") and atom_name == "NZ1":
-                return True  
+                return True
 
         return False
 
     def parse_topology_sections(self, itp_file: str) -> Dict[str, List[List[int]]]:
         """Parse existing topology to get bonds, angles, and dihedrals."""
         topology = {'bonds': [], 'angles': [], 'dihedrals': []}
-        
+
         try:
             with open(itp_file, 'r') as f:
                 lines = f.readlines()
         except Exception as e:
             LOG.warning(f"Could not read {itp_file}: {e}")
             return topology
-        
+
         current_section = None
-        
+
         for line in lines:
             line = line.strip()
             if not line or line.startswith(';'):
                 continue
-                
+
             if line.startswith('[ bonds ]'):
                 current_section = 'bonds'
             elif line.startswith('[ angles ]'):
@@ -412,7 +412,7 @@ class Amber:
                         topology['dihedrals'].append([int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])])
                 except (ValueError, IndexError):
                     continue
-        
+
         return topology
 
     def build_connectivity_graph(self, bonds: List[List[int]]) -> Dict[int, Set[int]]:
@@ -426,30 +426,30 @@ class Amber:
                 graph[atom2] = set()
             graph[atom1].add(atom2)
             graph[atom2].add(atom1)
-        
+
         return graph
 
     def generate_crosslink_angles(self, crosslink_bonds: List[Tuple[int, int]], connectivity: Dict[int, Set[int]]) -> List[Tuple[int, int, int]]:
         """Generate angles involving crosslink bonds."""
         angles = []
-        
+
         for atom1, atom2 in crosslink_bonds:
             if atom1 in connectivity:
                 for x in connectivity[atom1]:
                     if x != atom2:
                         angles.append((x, atom1, atom2))
-            
+
             if atom2 in connectivity:
                 for y in connectivity[atom2]:
                     if y != atom1:
                         angles.append((atom1, atom2, y))
-        
+
         return angles
 
     def generate_crosslink_dihedrals(self, crosslink_bonds: List[Tuple[int, int]], connectivity: Dict[int, Set[int]]) -> List[Tuple[int, int, int, int]]:
         """Generate dihedrals involving crosslink bonds."""
         dihedrals = []
-        
+
         for atom1, atom2 in crosslink_bonds:
             if atom1 in connectivity and atom2 in connectivity:
                 for x in connectivity[atom1]:
@@ -457,7 +457,7 @@ class Amber:
                         for y in connectivity[atom2]:
                             if y != atom1 and y != x:
                                 dihedrals.append((x, atom1, atom2, y))
-        
+
         return dihedrals
 
     def _is_backbone_atom(self, atom_name: str) -> bool:
@@ -469,7 +469,7 @@ class Amber:
         try:
             with open(itp_file, 'r') as f:
                 lines = f.readlines()
-            
+
             atoms_section = False
             for line in lines:
                 if line.strip().startswith('[ atoms ]'):
@@ -553,6 +553,11 @@ class Amber:
                 LOG.warning(f"Failed to add angles/dihedrals, but bonds were added successfully: {str(e)}")
 
             try:
+                self._add_crosslink_pairs(itp_file, valid_bond_data)
+            except Exception as e:
+                LOG.warning(f"Failed to add crosslink 1-4 pairs, bonds/angles still added: {str(e)}")
+
+            try:
                 self._add_crosslink_exclusions(itp_file, valid_bond_data)
             except Exception as e:
                 LOG.warning(f"Failed to add crosslink exclusions, bonds/angles still added: {str(e)}")
@@ -563,25 +568,47 @@ class Amber:
             LOG.error(f"Failed to add crosslink topology to {itp_file}: {str(e)}")
 
     def _add_crosslink_bonds(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
-        """Add crosslink bonds using standard GROMACS format."""
+        """Add crosslink bonds, skipping any pdb2gmx already wrote via specbond.dat
+        (adding it twice would double-count the bond)."""
         with open(itp_file, 'r') as f:
             lines = f.readlines()
-        
+
+        def _canon(a: int, b: int) -> Tuple[int, int]:
+            return (a, b) if a < b else (b, a)
+
+        # Bonds already present (e.g. written by pdb2gmx from specbond.dat).
+        existing_bonds: Set[Tuple[int, int]] = set()
+        in_bonds = False
+        for line in lines:
+            s = line.strip()
+            if s.startswith('[ bonds ]'):
+                in_bonds = True
+                continue
+            if in_bonds and s.startswith('['):
+                break
+            if in_bonds and s and not s.startswith(';'):
+                p = s.split()
+                if len(p) >= 2:
+                    try:
+                        existing_bonds.add(_canon(int(p[0]), int(p[1])))
+                    except ValueError:
+                        pass
+
         bonds_section_start = -1
         bonds_section_end = -1
-        
+
         for i, line in enumerate(lines):
             if line.strip().startswith('[ bonds ]'):
                 bonds_section_start = i
             elif bonds_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ bonds ]'):
                 bonds_section_end = i
                 break
-        
+
         if bonds_section_start >= 0:
             if bonds_section_end >= 0:
                 last_content_line = bonds_section_end - 1
-                while (last_content_line > bonds_section_start and 
-                       (not lines[last_content_line].strip() or 
+                while (last_content_line > bonds_section_start and
+                       (not lines[last_content_line].strip() or
                         lines[last_content_line].strip().startswith(';'))):
                     last_content_line -= 1
                 insert_pos = last_content_line + 1
@@ -596,59 +623,194 @@ class Amber:
                             insert_pos = j
                             break
                     break
-            
+
             if insert_pos >= 0:
                 lines.insert(insert_pos, '\n[ bonds ]\n')
                 lines.insert(insert_pos + 1, ';   ai    aj funct\n')
                 insert_pos += 2
-        
+
         if insert_pos >= 0:
             crosslink_entries = []
+            skipped = 0
             for i, bond_data in enumerate(valid_bond_data):
                 atom1_idx, atom2_idx = bond_data['atoms']
                 cl1, cl2 = bond_data['cl1'], bond_data['cl2']
-                
+
+                if _canon(atom1_idx, atom2_idx) in existing_bonds:
+                    # Already written by pdb2gmx (specbond.dat) -> don't duplicate.
+                    skipped += 1
+                    continue
+
                 comment = f"; Crosslink bond {i+1}: {cl1.resname}{cl1.resid}{cl1.chain} - {cl2.resname}{cl2.resid}{cl2.chain} (Type: {cl1.type}-{cl2.type})\n"
                 bond_entry = f"{atom1_idx} {atom2_idx}     1\n"
-                
+
                 crosslink_entries.append(comment)
                 crosslink_entries.append(bond_entry)
-            
+
+            if skipped:
+                LOG.debug(
+                    f"    Skipped {skipped} crosslink bond(s) already present "
+                    f"(pdb2gmx/specbond.dat) in {os.path.basename(itp_file)}"
+                )
+
             for entry in reversed(crosslink_entries):
                 lines.insert(insert_pos, entry)
-            
+
             final_pos = insert_pos + len(crosslink_entries)
-            if (final_pos < len(lines) and 
-                lines[final_pos].strip().startswith('[') and 
+            if (final_pos < len(lines) and
+                lines[final_pos].strip().startswith('[') and
                 (final_pos == 0 or lines[final_pos - 1].strip())):
                 lines.insert(final_pos, '\n')
-        
+
         with open(itp_file, 'w') as f:
             f.writelines(lines)
-            
+
+    def _add_crosslink_pairs(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
+        """Add the 1-4 [ pairs ] for crosslink bonds.
+
+        pdb2gmx only generates [ pairs ] for bonds present at its run time, and
+        grompp never regenerates them, so bonds colbuilder adds later have no
+        1-4 pairs -- leaving their scaled LJ-14/Coulomb-14 interactions missing.
+        Add every non-H/H pair exactly three bonds apart through a crosslink bond,
+        keeping any pdb2gmx already wrote.
+        """
+        if not valid_bond_data:
+            return
+
+        with open(itp_file, 'r') as f:
+            lines = f.readlines()
+
+        def _canon(a: int, b: int) -> Tuple[int, int]:
+            return (a, b) if a < b else (b, a)
+
+        atom_name: Dict[int, str] = {}
+        bonds: List[Tuple[int, int]] = []
+        existing_pairs: Set[Tuple[int, int]] = set()
+        section = None
+        for line in lines:
+            s = line.strip()
+            if s.startswith('['):
+                toks = s.strip('[] ').split()
+                section = toks[0].lower() if toks else None
+                continue
+            if not s or s.startswith(';') or s.startswith('#'):
+                continue
+            p = s.split()
+            try:
+                if section == 'atoms' and len(p) >= 5:
+                    atom_name[int(p[0])] = p[4]
+                elif section == 'bonds' and len(p) >= 2:
+                    bonds.append((int(p[0]), int(p[1])))
+                elif section == 'pairs' and len(p) >= 2:
+                    existing_pairs.add(_canon(int(p[0]), int(p[1])))
+            except ValueError:
+                continue
+
+        xlink: Set[Tuple[int, int]] = {_canon(*bd['atoms']) for bd in valid_bond_data}
+
+        # Full graph (all bonds) and graph without the crosslink bonds.
+        adj_full: Dict[int, Set[int]] = {}
+        adj_nox: Dict[int, Set[int]] = {}
+        for a, b in bonds:
+            adj_full.setdefault(a, set()).add(b)
+            adj_full.setdefault(b, set()).add(a)
+            if _canon(a, b) in xlink:
+                continue
+            adj_nox.setdefault(a, set()).add(b)
+            adj_nox.setdefault(b, set()).add(a)
+
+        def bfs(adj: Dict[int, Set[int]], src: int, depth: int) -> Dict[int, int]:
+            dist = {src: 0}
+            frontier = [src]
+            for d in range(1, depth + 1):
+                nxt = []
+                for u in frontier:
+                    for w in adj.get(u, ()):
+                        if w not in dist:
+                            dist[w] = d
+                            nxt.append(w)
+                frontier = nxt
+            return dist
+
+        def is_H(i: int) -> bool:
+            return atom_name.get(i, '').startswith('H')
+
+        # Candidate 1-4 pairs: for each crosslink bond a-b, walk out (without the
+        # crosslink bonds) so du + 1 + dv == 3, i.e. du + dv == 2.
+        candidates: Set[Tuple[int, int]] = set()
+        for bd in valid_bond_data:
+            a, b = bd['atoms']
+            da = bfs(adj_nox, a, 2)
+            db = bfs(adj_nox, b, 2)
+            for u, du in da.items():
+                for v, dv in db.items():
+                    if u == v or du + dv != 2:
+                        continue
+                    if is_H(u) and is_H(v):
+                        continue
+                    candidates.add(_canon(u, v))
+
+        # Keep only those whose true shortest path in the full graph is exactly 3
+        # (guards against a shorter route that would make them a 1-3 angle pair),
+        # and that are not already listed.
+        full_dist_cache: Dict[int, Dict[int, int]] = {}
+        new_pairs: Set[Tuple[int, int]] = set()
+        for (u, v) in candidates:
+            if _canon(u, v) in existing_pairs or _canon(u, v) in xlink:
+                continue
+            du = full_dist_cache.get(u)
+            if du is None:
+                du = bfs(adj_full, u, 3)
+                full_dist_cache[u] = du
+            if du.get(v) == 3:
+                new_pairs.add(_canon(u, v))
+
+        if not new_pairs:
+            return
+
+        body = [f"{a} {b}     1\n" for (a, b) in sorted(new_pairs)]
+
+        # Insert into the existing [ pairs ] section (pdb2gmx always writes one).
+        start = end = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith('[ pairs ]'):
+                start = i
+            elif start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ pairs ]'):
+                end = i
+                break
+        if start >= 0:
+            insert_at = end if end >= 0 else len(lines)
+            while insert_at - 1 > start and (
+                not lines[insert_at - 1].strip() or lines[insert_at - 1].strip().startswith(';')
+            ):
+                insert_at -= 1
+            for entry in reversed(body):
+                lines.insert(insert_at, entry)
+        else:
+            lines.append("\n[ pairs ]\n")
+            lines.append(";   ai    aj funct\n")
+            lines.extend(body)
+
+        with open(itp_file, 'w') as f:
+            f.writelines(lines)
+
+        LOG.debug(
+            f"    Added {len(new_pairs)} crosslink 1-4 pair(s) to {os.path.basename(itp_file)}"
+        )
+
     def _add_crosslink_exclusions(
         self,
         itp_file: str,
         valid_bond_data: List[Dict],
         cutoff: float = 4.5,
     ) -> None:
-        """Write the [ exclusions ] that the crosslink bond needs but nrexcl misses.
+        """Add [ exclusions ] for atom pairs within nrexcl bonds through a crosslink.
 
-        pdb2gmx builds each residue separately, so the covalent bond that joins two
-        residues (e.g. HLKNL: L4Y CE - L5Y NZ) is added only afterwards. GROMACS'
-        nrexcl=3 auto-exclusions are generated per residue and do not span that new
-        bond, so the 1-2/1-3/1-4 neighbours ACROSS the crosslink are left unexcluded
-        and clash during equilibration.
-
-        We add exactly those missing exclusions: every atom pair whose shortest path
-        *through the crosslink bond* is <= nrexcl bonds. This mirrors what nrexcl
-        would do if it saw the new bond, and NOTHING more. The previous version used
-        a purely geometric cutoff (any inter-residue pair within `cutoff` Angstrom),
-        which also excluded atoms that are close in space but far along the bond graph
-        (>nrexcl) -- removing legitimate LJ/Coulomb interactions (notably around
-        LYX C11/O11/H11) and destabilising force-pulling simulations.
-
-        `cutoff` is retained for signature compatibility but is no longer used.
+        Redundant with grompp (which derives these from the final bond graph) but
+        harmless: only pairs at graph distance <= nrexcl are listed, never beyond.
+        The old geometric cutoff excluded atoms close in space but far along the
+        graph, wrongly removing real interactions (e.g. around LYX C11/O11/H11).
+        `cutoff` is unused, kept only for signature compatibility.
         """
         if not valid_bond_data:
             return
@@ -736,7 +898,7 @@ class Amber:
                 lines.insert(insert_at, entry)
         else:
             lines.append("\n[ exclusions ]\n")
-            lines.append("; crosslink through-space exclusions (beyond nrexcl)\n")
+            lines.append("; crosslink exclusions (<= nrexcl bonds through the crosslink; grompp also derives these from the final bond graph)\n")
             lines.extend(body)
 
         with open(itp_file, "w") as f:
@@ -891,22 +1053,22 @@ class Amber:
         """Add crosslink angles using standard GROMACS format."""
         if not crosslink_angles:
             return lines
-            
+
         angles_section_start = -1
         angles_section_end = -1
-        
+
         for i, line in enumerate(lines):
             if line.strip().startswith('[ angles ]'):
                 angles_section_start = i
             elif angles_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ angles ]'):
                 angles_section_end = i
                 break
-        
+
         if angles_section_start >= 0:
             if angles_section_end >= 0:
                 last_content_line = angles_section_end - 1
-                while (last_content_line > angles_section_start and 
-                       (not lines[last_content_line].strip() or 
+                while (last_content_line > angles_section_start and
+                       (not lines[last_content_line].strip() or
                         lines[last_content_line].strip().startswith(';'))):
                     last_content_line -= 1
                 insert_pos = last_content_line + 1
@@ -918,23 +1080,23 @@ class Amber:
                 lines.insert(insert_pos, '\n[ angles ]\n')
                 lines.insert(insert_pos + 1, ';   ai    aj    ak funct\n')
                 insert_pos += 2
-        
+
         if insert_pos >= 0:
             angle_entries = []
             angle_entries.append("; Crosslink angles\n")
             for atom1, atom2, atom3 in crosslink_angles:
                 angle_entry = f"{atom1} {atom2} {atom3}     1\n"
                 angle_entries.append(angle_entry)
-            
+
             for entry in reversed(angle_entries):
                 lines.insert(insert_pos, entry)
-            
+
             final_pos = insert_pos + len(angle_entries)
-            if (final_pos < len(lines) and 
-                lines[final_pos].strip().startswith('[') and 
+            if (final_pos < len(lines) and
+                lines[final_pos].strip().startswith('[') and
                 (final_pos == 0 or lines[final_pos - 1].strip())):
                 lines.insert(final_pos, '\n')
-        
+
         return lines
 
     def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
@@ -1064,15 +1226,15 @@ class Amber:
         itp_path.write_text("\n".join(lines) + "\n")
 
     def write_itp(
-        self, 
-        itp_file: Union[str, Path], 
-        molecule_name: str, 
+        self,
+        itp_file: Union[str, Path],
+        molecule_name: str,
         merged_pdb_file: Optional[str] = None,
         crosslink_pairs: Optional[List[Tuple[Crosslink, Crosslink]]] = None
     ) -> None:
         """Process and write Include Topology (ITP) file with crosslink bonds."""
         itp_file = Path(itp_file)
-        
+
         with open(itp_file, 'r') as f:
             itp_model = f.readlines()
 
@@ -1080,7 +1242,7 @@ class Amber:
             itp_file.unlink()
         except Exception:
             pass
-        
+
         output_file = itp_file.with_suffix(".itp")
 
         # pdb2gmx writes a single moleculetype block. GROMACS <2023 names it
@@ -1110,20 +1272,20 @@ class Amber:
             raise ValueError("processed_groups cannot be empty")
         if not self.ff:
             raise ValueError("Force field (self.ff) is not set")
-            
+
         with open(topology_file, 'w') as f:
             f.write('; Topology for Collagen Microfibril from Colbuilder 2.0\n')
             f.write(f'#include "./{self.ff}/forcefield.itp"\n')
-            
+
             for group_type, group_id in processed_groups:
                 itp_file = f"col_{group_id}.itp"
                 if os.path.exists(itp_file):
                     f.write(f'#include "{itp_file}"\n')
-            
+
             f.write(f'#include "./{self.ff}/ions.itp"\n')
             f.write(f'#include "./{self.ff}/tip3p.itp"\n')
             f.write('\n\n[ system ]\n ;name\nCollagen Microfibril in Water\n\n[ molecules ]\n;name  number\n')
-            
+
             for group_type, group_id in processed_groups:
                 itp_file = f"col_{group_id}.itp"
                 if os.path.exists(itp_file):
@@ -1166,7 +1328,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
     source_ff_dir = config.FORCE_FIELD_DIR / ff_name
     working_dir = Path.cwd()
     copied_ff_dir = working_dir / ff_name
-    
+
     amber = Amber(system=system, ff=ff)
     file_manager = file_manager or FileManager(config)
     steps = 3
@@ -1203,10 +1365,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 )
 
         LOG.info(f'Step 2/{steps} Grouping connected models and processing with GROMACS')
-        
+
         connected_groups = amber.get_connected_groups()
         LOG.debug(f"    Found {len(connected_groups)} molecular groups: {connected_groups}")
-        
+
         processed_groups = []
 
         for group in connected_groups:
@@ -1215,10 +1377,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 if merge_result is None:
                     LOG.warning(f"Skipping group {group} - merge failed")
                     continue
-                
+
                 model_type, group_id, crosslink_pairs = merge_result
                 merge_pdb_path = working_dir / model_type / f"{group_id}.merge.pdb"
-                
+
                 if not merge_pdb_path.exists() or not os.path.getsize(merge_pdb_path):
                     LOG.error(f'Invalid merged PDB file: {merge_pdb_path}')
                     continue
@@ -1227,7 +1389,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                           f'-ignh -merge all -ff {ff} -water tip3p '
                           f'-p col_{group_id}.top -o col_{group_id}.gro '
                           f'-i posre_{group_id}.itp')
-                
+
                 result = await asyncio.create_subprocess_shell(
                     gmx_cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -1273,10 +1435,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
         try:
             topology_file = str(working_dir / f"collagen_fibril_{config.species}.top")
             gro_file = str(working_dir / f"collagen_fibril_{config.species}.gro")
-            
+
             amber.write_topology(topology_file=topology_file, processed_groups=processed_groups)
             amber.write_gro(gro_file=gro_file, processed_groups=processed_groups)
-            
+
             LOG.info(f"Successfully generated topology for {len(processed_groups)} molecular groups")
             LOG.debug(f"    Groups processed: {[group_id for _, group_id in processed_groups]}")
 
@@ -1287,9 +1449,9 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 error_code="TOP_ERR_007",
                 context={"output": config.species}
             )
-            
+
         return amber
-    
+
     except TopologyGenerationError:
         raise
     except Exception as e:
