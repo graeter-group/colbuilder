@@ -9,9 +9,7 @@ import os
 import time
 import shutil
 import traceback
-import asyncio
 import logging
-import copy
 from pathlib import Path
 from typing import Optional, Set, List, Union, Tuple, Dict
 
@@ -391,8 +389,6 @@ class GeometryService:
                 self.crystal_service.set_file_manager(self.file_manager)
                 system = await self.crystal_service.build(temp_config)
 
-                geometry_only_system = copy.deepcopy(system)
-
                 # Auto-detect unpaired crosslinks
                 auto_manual_replacements: List[str] = []
                 auto_manual_file: Optional[Path] = None
@@ -501,23 +497,6 @@ class GeometryService:
                     else "D"
                 )
 
-                geometry_type_dir = geometry_dir / model_type
-                if geometry_type_dir.exists():
-                    pre_replacement_counts = {}
-                    atom_count = 0
-                    for caps_file in geometry_type_dir.glob("*.caps.pdb"):
-                        with open(caps_file, "r") as f:
-                            for line in f:
-                                if (
-                                    line.startswith(("ATOM", "HETATM"))
-                                    and len(line) >= 20
-                                ):
-                                    atom_count += 1
-                                    resname = line[17:20].strip()
-                                    pre_replacement_counts[resname] = (
-                                        pre_replacement_counts.get(resname, 0) + 1
-                                    )
-
                 replacement_dir = self.file_manager.ensure_replacement_dir()
                 LOG.debug(f"Using replacement directory: {replacement_dir}")
 
@@ -550,22 +529,6 @@ class GeometryService:
                             )
 
                             if output_pdb_path.exists():
-                                try:
-                                    post_replacement_counts = {}
-                                    with open(output_pdb_path, "r") as f:
-                                        for line in f:
-                                            if (
-                                                line.startswith(("ATOM", "HETATM"))
-                                                and len(line) >= 20
-                                            ):
-                                                resname = line[17:20].strip()
-                                                post_replacement_counts[resname] = (
-                                                    post_replacement_counts.get(resname, 0)
-                                                    + 1
-                                                )
-                                except Exception as e:
-                                    LOG.warning(f"Error analyzing output PDB: {e}")
-
                                 final_pdb = self.file_manager.copy_to_output(
                                     output_pdb_path
                                 )
@@ -748,109 +711,6 @@ class GeometryService:
                 error_code="GEO_ERR_001",
                 context={"config": self.config.model_dump()},
             )
-
-
-async def build_geometry(
-    config: ColbuilderConfig, file_manager: Optional[FileManager] = None
-) -> Optional[System]:
-    """
-    Build geometry from configuration.
-
-    Standalone function that creates a GeometryService and invokes its
-    build_geometry method.
-
-    Args:
-        config: Configuration for geometry operations
-        file_manager: Optional file manager for consistent file handling
-
-    Returns:
-        Generated system or None
-    """
-    service = GeometryService(config, file_manager)
-    system, _ = await service.build_geometry()
-    return system
-
-
-async def build_geometry_anywhere(
-    config: ColbuilderConfig, file_manager: Optional[FileManager] = None
-) -> Tuple[Path, Path]:
-    """
-    Main entry point for standalone geometry generation.
-
-    This function serves as an alternative entry point for geometry generation outside
-    of the usual pipeline. It creates a clean environment, handles file copying, and
-    delegates to the CrystalBuilder to generate the structure.
-
-    Args:
-        config: Configuration settings with geometry parameters
-        file_manager: Optional file manager to use for consistent file handling
-
-    Returns:
-        Tuple[Path, Path]: Tuple containing paths to geometry directory and final PDB file
-
-    Raises:
-        GeometryGenerationError: If input validation fails or geometry generation fails
-    """
-    original_dir: Path = Path.cwd()
-
-    try:
-        if file_manager is None:
-            file_manager = FileManager(config)
-
-        if not config.pdb_file:
-            raise GeometryGenerationError(
-                message="PDB file not specified for geometry generation",
-                error_code="GEO_ERR_005",
-            )
-
-        if not config.contact_distance and not config.crystalcontacts_file:
-            raise GeometryGenerationError(
-                message="Either contact_distance or crystalcontacts_file must be provided",
-                error_code="GEO_ERR_001",
-                context={
-                    "contact_distance": config.contact_distance,
-                    "crystalcontacts_file": config.crystalcontacts_file,
-                },
-            )
-
-        geometry_dir: Path = file_manager.ensure_geometry_dir()
-        os.chdir(geometry_dir)
-
-        try:
-            pdb_path: Path = file_manager.copy_to_directory(
-                config.pdb_file, dest_dir=geometry_dir
-            )
-            config.pdb_file = pdb_path
-
-            crystal_builder: CrystalBuilder = CrystalBuilder(file_manager)
-
-            system: System = await crystal_builder.build(config)
-            LOG.info("Crystal structure built successfully")
-
-            output_pdb_path: Path = file_manager.get_output_path(config.output, ".pdb")
-            if not output_pdb_path.exists():
-                raise GeometryGenerationError(
-                    message=f"Expected output file not found: {output_pdb_path}",
-                    error_code="GEO_ERR_001",
-                )
-
-            return geometry_dir, output_pdb_path
-
-        finally:
-            os.chdir(original_dir)
-            LOG.debug(f"Returned to original directory: {original_dir}")
-
-    except GeometryGenerationError:
-        raise
-    except Exception as e:
-        LOG.error(
-            f"Unexpected error during geometry generation: {str(e)}", exc_info=True
-        )
-        raise GeometryGenerationError(
-            message=f"Failed to complete geometry generation: {str(e)}",
-            original_error=e,
-            error_code="GEO_ERR_001",
-        )
 
 
 async def mix_geometry(system: System, config: ColbuilderConfig) -> System:

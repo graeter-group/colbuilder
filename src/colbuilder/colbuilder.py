@@ -90,7 +90,6 @@ def print_version(ctx: click.Context, param: click.Parameter, value: bool) -> No
 
 
 from colbuilder.core.sequence.main_sequence import build_sequence
-from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
 from colbuilder.core.topology.main_topology import build_topology
 
 
@@ -220,7 +219,12 @@ async def run_geometry_generation(
     config: ColbuilderConfig, file_manager: Optional[FileManager] = None
 ) -> Tuple[Optional[System], Path]:
     """
-    Generate fibril geometry or handle mixing/replacement operations.
+    Handle mixing-only operation (mix_bool without geometry_generator).
+
+    The only caller guards this with `elif config.mix_bool and not
+    config.geometry_generator`, so that's the only case this needs to handle;
+    combined geometry + mixing/replacement goes through
+    GeometryService._handle_full_generation() directly instead.
 
     Args:
         config: Configuration settings
@@ -230,63 +234,17 @@ async def run_geometry_generation(
         Tuple containing the generated system (which might be None) and the output PDB path
 
     Raises:
-        GeometryGenerationError: If geometry generation or mixing fails
+        GeometryGenerationError: If mixing fails
     """
     try:
         LOG.subsection("Building Geometry or Mixing")
 
         current_file_manager = file_manager or FileManager(config)
 
-        # mixing-only
-        if config.mix_bool and not config.geometry_generator:
-            from colbuilder.core.geometry.main_geometry import GeometryService
+        from colbuilder.core.geometry.main_geometry import GeometryService
 
-            geometry_service = GeometryService(config, current_file_manager)
-            system, pdb_path = await geometry_service._handle_mixing_only()
-            return system, pdb_path
-
-        # geometry generation (or combined geometry + mixing/replacement)
-        if not config.pdb_file:
-            raise GeometryGenerationError(
-                message="PDB file not specified for geometry generation",
-                error_code="GEO_ERR_005",
-            )
-
-        pdb_path = Path(config.pdb_file).resolve()
-        if not pdb_path.exists():
-            raise GeometryGenerationError(
-                message=f"PDB file not found: {pdb_path}", error_code="GEO_ERR_005"
-            )
-
-        if config.contact_distance is None and not config.crystalcontacts_file:
-            raise GeometryGenerationError(
-                message="Either contact_distance or crystalcontacts_file must be provided",
-                error_code="GEO_ERR_001",
-                context={
-                    "contact_distance": config.contact_distance,
-                    "crystalcontacts_file": config.crystalcontacts_file,
-                },
-            )
-
-        output_path, pdb_path = await build_geometry_anywhere(
-            config, current_file_manager
-        )
-
-        if not pdb_path.exists():
-            raise GeometryGenerationError(
-                message=f"Expected output file not found: {pdb_path}",
-                error_code="GEO_ERR_001",
-            )
-
-        try:
-            from colbuilder.core.geometry.crystal import Crystal
-
-            crystal = Crystal(pdb=str(pdb_path))
-            system = System(crystal=crystal)
-        except Exception as e:
-            LOG.warning(f"Could not create system object from output PDB: {e}")
-            system = None
-
+        geometry_service = GeometryService(config, current_file_manager)
+        system, pdb_path = await geometry_service._handle_mixing_only()
         return system, pdb_path
 
     except Exception as e:

@@ -44,8 +44,6 @@ class Model:
         crosslink_types = set(cross.type for cross in self.crosslink)
         self.type = "".join(sorted(crosslink_types)) if crosslink_types else "NC"
 
-        self.cog = self.get_cog()
-
     def add_connect(self, connect_id: float, connect: List[float]) -> None:
         """
         Add information about model's connections.
@@ -88,21 +86,3 @@ class Model:
         if self.crosslink:
             return np.mean([cross.position for cross in self.crosslink], axis=0)
         return np.zeros(3)
-
-    def count_state(self, state: str) -> int:
-        """
-        Count crosslinks with certain state (no, replace, protect) in model.
-        Args:
-            state (str): State to count ('no', 'replace', or 'protect').
-        Returns:
-            int: Number of crosslinks with the specified state.
-        """
-        return sum(1 for cross in self.crosslink if cross.state == state)
-
-    def has_crosslinks(self) -> bool:
-        """
-        Check if the model has any crosslinks.
-        Returns:
-            bool: True if model has crosslinks, False otherwise.
-        """
-        return bool(self.crosslink)

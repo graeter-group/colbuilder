@@ -94,6 +94,7 @@ class CrystalBuilder:
             raise
 
         models_before = len(list(system.get_models()))
+        pruned_connections = 0
         for model in list(system.get_models()):
             if model not in contacts:
                 system.delete_model(model_id=model)
@@ -105,10 +106,13 @@ class CrystalBuilder:
                             connect_id=connect
                         )
                 connect_after = len(list(system.get_model(model_id=model).connect))
-                if connect_before != connect_after:
-                    pass
+                pruned_connections += connect_before - connect_after
 
         models_after = len(list(system.get_models()))
+        LOG.debug(
+            f"Pruned {models_before - models_after} model(s) and "
+            f"{pruned_connections} stale connection(s) outside the final fibril length"
+        )
         return system
 
     async def build(self, config: ColbuilderConfig) -> System:
@@ -211,44 +215,30 @@ class CrystalBuilder:
             LOG.debug(f"Using caps directory: {caps_dir}")
 
             has_crosslinks = self._needs_optimization(system)
-            if has_crosslinks:
-                LOG.debug(f"System has crosslinks, using crosslink capping")
-                caps = Caps(system=system)
-                LOG.debug(f"Writing capped PDB files to {geometry_dir}")
-                for idx in system.get_models():
-                    pdb_id = int(idx)
-                    pdb_file = f"{pdb_id}.pdb"
-                    pdb_path = Path(pdb_file)
+            LOG.debug(
+                "System has crosslinks, using crosslink capping"
+                if has_crosslinks
+                else "System has no crosslinks, using NC capping"
+            )
+            caps_crosslink_type = model_type if has_crosslinks else "NC"
 
-                    if not pdb_path.exists():
-                        LOG.warning(
-                            f"PDB file {pdb_file} not found. Model IDs: {list(system.get_models())}"
-                        )
-                        continue
-                    caps.read_residues(pdb_id=pdb_id)
+            caps = Caps(system=system)
+            LOG.debug(f"Writing capped PDB files to {geometry_dir}")
+            for idx in system.get_models():
+                pdb_id = int(idx)
+                pdb_file = f"{pdb_id}.pdb"
+                pdb_path = Path(pdb_file)
 
-                    caps.add_caps(
-                        pdb_id=pdb_id, crosslink_type=model_type, temp_dir=geometry_dir
+                if not pdb_path.exists():
+                    LOG.warning(
+                        f"PDB file {pdb_file} not found. Model IDs: {list(system.get_models())}"
                     )
-            else:
-                caps = Caps(system=system)
+                    continue
 
-                LOG.debug(f"Writing capped PDB files to {geometry_dir}")
-                for idx in system.get_models():
-                    pdb_id = int(idx)
-                    pdb_file = f"{pdb_id}.pdb"
-                    pdb_path = Path(pdb_file)
-
-                    if not pdb_path.exists():
-                        LOG.warning(
-                            f"PDB file {pdb_file} not found. Model IDs: {list(system.get_models())}"
-                        )
-                        continue
-
-                    caps.read_residues(pdb_id=pdb_id)
-                    caps.add_caps(
-                        pdb_id=pdb_id, crosslink_type="NC", temp_dir=geometry_dir
-                    )
+                caps.read_residues(pdb_id=pdb_id)
+                caps.add_caps(
+                    pdb_id=pdb_id, crosslink_type=caps_crosslink_type, temp_dir=geometry_dir
+                )
 
             LOG.info(f"Step 7/{self.steps} Writing final structure")
             output_path = self.file_manager.get_output_path(config.output, ".pdb")

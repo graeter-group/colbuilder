@@ -106,26 +106,3 @@ class CrystalContacts:
                         f.write(
                             f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
                         )
-
-    def find_contact(self, model_id: float) -> List[float]:
-        """
-        Finds the translation vector for one specific model-id.
-
-        Args:
-            model_id (float): ID of the model to find the contact for.
-
-        Returns:
-            List[float]: Translation vector for the specified model.
-
-        Raises:
-            KeyError: If the model_id is not found in the t_matrix.
-        """
-        if not self.t_matrix:
-            self.t_matrix = self.read_t_matrix(self.crystalcontacts_file)
-
-        if model_id not in self.t_matrix:
-            raise KeyError(
-                f"Model ID {model_id} not found in the transformation matrix."
-            )
-
-        return self.t_matrix[model_id]
