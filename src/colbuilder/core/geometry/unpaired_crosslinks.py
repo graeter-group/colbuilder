@@ -39,7 +39,6 @@ from .crosslink import read_crosslink
 
 LOG = setup_logger(__name__)
 
-PDB_SUBDIR_NAMES = ["D", "T", "NC", "DT"]
 OPT_ID_CANDIDATES = [
     Path(".tmp") / "geometry_gen" / "crystalcontacts_from_colbuilder_opt_id.txt",
     Path("crystalcontacts_from_colbuilder_opt_id.txt"),
@@ -275,13 +274,21 @@ class UnpairedCrosslinkFinder:
     # File discovery
     # ------------------------------------------------------------------ #
     def _find_all_pdb_dirs(self) -> List[Path]:
+        """Find geom_root itself plus any immediate subdirectory holding caps files.
+
+        Subdirectories are discovered dynamically rather than matched against a
+        fixed name list: the standard (non-mixing) build path names them by the
+        model's crosslink-derived type ("D"/"T"/"NC"/"DT"), but the mixing
+        feature names them by the user's own, arbitrary ``ratio_mix`` labels
+        (e.g. "PYD"/"HLKNL"), so no fixed set of names covers both.
+        """
         dirs: List[Path] = []
         if list(self.geom_root.glob("*.caps.pdb")):
             dirs.append(self.geom_root)
-        for sub in PDB_SUBDIR_NAMES:
-            candidate = self.geom_root / sub
-            if candidate.is_dir() and list(candidate.glob("*.caps.pdb")):
-                dirs.append(candidate)
+        if self.geom_root.is_dir():
+            for candidate in sorted(self.geom_root.iterdir()):
+                if candidate.is_dir() and list(candidate.glob("*.caps.pdb")):
+                    dirs.append(candidate)
         return dirs
 
     def _find_opt_id(self) -> Optional[Path]:
