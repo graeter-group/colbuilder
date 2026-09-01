@@ -82,13 +82,6 @@ class CrosslinkMixer:
         self.config: Optional[ColbuilderConfig] = None
 
     @staticmethod
-    def _ensure_pdb_extension(filename: str) -> str:
-        """Ensure filename has .pdb extension."""
-        if not filename.endswith(".pdb"):
-            return filename + ".pdb"
-        return filename
-
-    @staticmethod
     def _build_system(
         crystal: Crystal, crystalcontacts: Optional[CrystalContacts] = None
     ) -> System:
@@ -428,8 +421,6 @@ class CrosslinkMixer:
 
             system_size = system.get_size()
 
-            AGE_RESN = {"AGS", "LGX", "APD", "LPS"}
-
             if hasattr(system, "crystalcontacts") and system.crystalcontacts:
                 LOG.debug(
                     f"Crystalcontacts file: {system.crystalcontacts.crystalcontacts_file}"
@@ -527,27 +518,6 @@ class CrosslinkMixer:
                     allowed_resnames=None,
                     config=config,
                 )
-
-            # After fixing per-type caps, compute average AGE markers per model for each type
-            per_type_age_avg: Dict[str, float] = {}
-            for key in mix_pdb.keys():
-                type_dir = temp_dir / str(key)
-                caps_files = list(type_dir.glob("*.caps.pdb"))
-                if not caps_files:
-                    per_type_age_avg[key] = 1.0
-                    continue
-                marker_count = 0
-                for cf in caps_files:
-                    try:
-                        with cf.open("r") as fh:
-                            for line in fh:
-                                if not line.startswith(("ATOM", "HETATM")):
-                                    continue
-                                if line[17:20].strip() in AGE_RESN:
-                                    marker_count += 1
-                    except Exception:
-                        continue
-                per_type_age_avg[key] = marker_count / float(len(caps_files) or 1) or 1.0
 
             LOG.info("Step 2/2 Mixing systems")
 
