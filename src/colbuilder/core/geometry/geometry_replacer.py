@@ -1,7 +1,7 @@
 """
 Colbuilder Crosslink Replacement Module
 
-This module provides a unified approach to replacing crosslinks with standard amino acids
+This module provides an approach to replacing crosslinks with standard amino acids
 in a collagen microfibril, supporting both system-based and direct replacement approaches,
 including manual replacement lists and ratio-based automated selection.
 """
@@ -70,7 +70,6 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "LX5": "LYS",
     "LY4": "LYS",
     "LX4": "LYS",
-    # Enzymatic C/N-term markers (PYD)
     "LYX": "LYS",
     "LY3": "LYS",
     "LY2": "LYS",
@@ -109,6 +108,18 @@ ENZYMATIC_TRIOS = [
     ("L3X", "L2X", "LYY"),  # DPL
 ]
 PYD_THRESHOLD = 5.0  # distance cutoff to group enzymatic trios
+
+
+def _ratio_target(count: int, ratio_replace: float) -> int:
+    """Number of items to replace out of ``count`` for a requested percentage.
+
+    Rounds to the nearest integer so the requested percentage is the closest
+    achievable one. A requested ratio that rounds to 0 for a
+    given (small) system replaces nothing from that system.
+    """
+    if count <= 0 or ratio_replace <= 0:
+        return 0
+    return min(count, round(count * ratio_replace / 100.0))
 
 
 class CrosslinkReplacer:
@@ -1153,17 +1164,8 @@ class CrosslinkReplacer:
             pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
 
         # Calculate how many to replace
-        num_pair_to_replace = (
-            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
-            if pairs
-            else 0
-        )
-
-        num_trio_to_replace = (
-            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
-            if pyd_trios
-            else 0
-        )
+        num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
+        num_trio_to_replace = _ratio_target(len(pyd_trios), ratio_replace)
 
         # Collect singletons (excluding those in pairs or trios)
         if scope in {"enzymatic", "all"}:
@@ -1171,7 +1173,7 @@ class CrosslinkReplacer:
                 if resname in PAIRED_RESIDUES:
                     continue
                 singles.extend(crosslinks_by_type.get(resname, []))
-            
+
             # Remove any singleton that is already part of a PYD trio
             trio_members = {
                 (getattr(x["crosslink"], "resid", ""), getattr(x["crosslink"], "chain", ""), x.get("model_id", 0.0))
@@ -1185,11 +1187,7 @@ class CrosslinkReplacer:
                 not in trio_members
             ]
 
-        num_single_to_replace = (
-            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
-            if singles
-            else 0
-        )
+        num_single_to_replace = _ratio_target(len(singles), ratio_replace)
 
         # Randomly select items to replace
         random.seed(int(time.time()))
@@ -1639,7 +1637,7 @@ class CrosslinkReplacer:
                 if not bucket:
                     continue
                 random.shuffle(bucket)
-                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                target = _ratio_target(len(bucket), ratio_replace)
                 selected_entities.extend(bucket[:target])
         elif scope == "enzymatic":
             buckets = {
@@ -1650,48 +1648,12 @@ class CrosslinkReplacer:
                 if not bucket:
                     continue
                 random.shuffle(bucket)
-                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                target = _ratio_target(len(bucket), ratio_replace)
                 selected_entities.extend(bucket[:target])
         else:
             random.shuffle(eligible_entities)
-            target = max(1, math.ceil(len(eligible_entities) * ratio_replace / 100.0))
+            target = _ratio_target(len(eligible_entities), ratio_replace)
             selected_entities = eligible_entities[:target]
-
-        # Integrity guard (#5): never fully strip a CONNECTED (multi-model) group
-        # of ALL its crosslinks -- that would let that part of the fibril
-        # disconnect. If every eligible entity belonging to such a group was
-        # selected for removal, keep one back. This can slightly undershoot the
-        # requested ratio, but only in the specific case where honouring it would
-        # fragment the fibril. Singletons (already standalone helices) are left
-        # alone by design.
-        multi_model_groups = [
-            {int(m) for m in g} for g in (connect_groups or []) if len(g) > 1
-        ]
-        if multi_model_groups and selected_entities:
-            def _entity_models(entity: Tuple[str, List[Dict[str, Any]]]) -> Set[int]:
-                models: Set[int] = set()
-                for rec in entity[1]:
-                    try:
-                        models.add(int(float(rec.get("model_id", -1))))
-                    except (ValueError, TypeError):
-                        continue
-                return models
-
-            selected_ids = {id(e) for e in selected_entities}
-            for grp in multi_model_groups:
-                grp_eligible = [e for e in eligible_entities if _entity_models(e) & grp]
-                if not grp_eligible:
-                    continue
-                if all(id(e) in selected_ids for e in grp_eligible):
-                    keep = grp_eligible[0]
-                    selected_entities = [e for e in selected_entities if e is not keep]
-                    selected_ids.discard(id(keep))
-                    LOG.info(
-                        "Integrity guard: retained 1 crosslink in connected group %s "
-                        "to avoid fully stripping it (requested ratio may undershoot "
-                        "slightly for this group).",
-                        sorted(grp),
-                    )
 
         seen: Set[str] = set()
         instructions: List[str] = []
@@ -1805,17 +1767,8 @@ class CrosslinkReplacer:
             ly3_list = by_type.get("LY3", [])
             pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
 
-        num_pair_to_replace = (
-            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
-            if pairs
-            else 0
-        )
-
-        num_trio_to_replace = (
-            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
-            if pyd_trios
-            else 0
-        )
+        num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
+        num_trio_to_replace = _ratio_target(len(pyd_trios), ratio_replace)
 
         if scope in {"enzymatic", "all"}:
             for resname in target_resnames:
@@ -1832,16 +1785,12 @@ class CrosslinkReplacer:
                 for s in singles
                 if (s.get("resid", ""), s.get("chain", ""), s.get("model_id", 0.0)) not in trio_members
             ]
-        
+
         # Fallback: if we found no valid pairs or trios but still have candidates, treat them as singles
         if not pairs and not pyd_trios and filtered:
             singles = filtered.copy()
 
-        num_single_to_replace = (
-            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
-            if singles
-            else 0
-        )
+        num_single_to_replace = _ratio_target(len(singles), ratio_replace)
 
         random.seed(int(time.time()))
         random.shuffle(pairs)
