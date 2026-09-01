@@ -48,6 +48,7 @@ class Connect:
                 "L5Y",
                 "L4Y",
                 "L5X",
+                "L4X",
                 "LY5",
                 "LX5",
                 "LY4",
