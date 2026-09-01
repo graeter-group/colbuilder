@@ -192,7 +192,7 @@ class Caps:
                         line = "ATOM  " + line[6:]
                     f_out.write(line)
                     if (line[17:20] == "NME" and line[12:16] == "3HH3") or (
-                        line[17:20] == "ALA" and line[13:16] == "OXT"
+                        line[13:16] == "OXT"
                     ):
                         f_out.write("TER \n")
 
