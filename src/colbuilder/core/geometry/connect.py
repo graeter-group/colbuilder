@@ -12,6 +12,13 @@ from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
 
+# Shared cutoff (Angstrom) for "is this crosslink marker pair genuinely
+# connected" wherever that question drives lattice-growth decisions (adding a
+# whole new model to the fibril): Connect.get_connect()'s default below, and
+# Optimizer._get_unpaired_crosslinks() in optimize.py. Kept tight -- see
+# get_connect()'s docstring for why a looser value breaks system building.
+LATTICE_GROWTH_CUTOFF = 3.0
+
 
 class Connect:
     """
@@ -349,24 +356,25 @@ class Connect:
             LOG.debug("No markers found in caps files, using model.connect graph")
             return self._connections_from_model_graph(system)
 
-        # Build connectivity based on marker proximity (< 4.0 Å)
+        # Build connectivity based on marker proximity (< 5.0 Å, matching the
+        # cutoff amber.py uses to form crosslink bonds -- see get_connect above).
         connect_pairs: Dict[float, Set[float]] = {
             mid: set() for mid in marker_positions
         }
         mids = sorted(marker_positions.keys())
-        
+
         for i, m1 in enumerate(mids):
             for m2 in mids[i + 1 :]:
                 pos1 = marker_positions.get(m1, [])
                 pos2 = marker_positions.get(m2, [])
                 if not pos1 or not pos2:
                     continue
-                
+
                 min_dist = min(
                     np.linalg.norm(a - b) for a in pos1 for b in pos2
                 )
-                
-                if min_dist < 4.0:
+
+                if min_dist < 5.0:
                     connect_pairs[m1].add(m2)
                     connect_pairs[m2].add(m1)
 
@@ -425,7 +433,7 @@ class Connect:
     def print_connection_summary(self, system):
         """
         Prints a summary of connections for all models in the system.
-        
+
         Args:
             system: System object containing models
         """
@@ -445,7 +453,9 @@ class Connect:
         for connection in self._get_unique_connections(system):
             print(connection)
 
-    def get_connect(self, ref_model: Any, model: Any, cut_off: float = 3.0) -> bool:
+    def get_connect(
+        self, ref_model: Any, model: Any, cut_off: float = LATTICE_GROWTH_CUTOFF
+    ) -> bool:
         """
         Calculates distance between models: distance below cut_off (3.0 A) keep model.
 

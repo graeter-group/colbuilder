@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 import numpy as np
-from itertools import product
-from typing import Dict, List, Optional, Any, Set, Tuple, Union
-import os
-from pathlib import Path
+from typing import Dict, List, Optional, Any, Set
 
 from colbuilder.core.geometry import model
+from colbuilder.core.geometry.connect import LATTICE_GROWTH_CUTOFF
 from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
@@ -356,7 +354,7 @@ class Optimizer:
                         continue
                         
                     for connected_cross in connected_model.crosslink:
-                        if np.linalg.norm(cross.position - connected_cross.position) < 3.0:
+                        if np.linalg.norm(cross.position - connected_cross.position) < LATTICE_GROWTH_CUTOFF:
                             self.paired_crosslinks.add(crosslink_id)
                             self.paired_crosslinks.add(f"{connected_model.id}_{connected_cross.resid}_{connected_cross.type}")
                             has_pair = True
