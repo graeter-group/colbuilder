@@ -406,8 +406,13 @@ async def run_topology_generation(
         # Generate topology files
         await build_topology(system, config, file_manager)
 
-        # Topology files are created in [species]_topology_files directory
-        topology_dir = Path(f"{config.species}_topology_files")
+        # Topology files are created in [species]_topology_files directory,
+        # except for Martini3 where main_topology.py names it
+        # [species]_[force_field]_topology_files (see the matching logic there).
+        if config.force_field == 'martini3':
+            topology_dir = Path(f"{config.species}_{config.force_field}_topology_files")
+        else:
+            topology_dir = Path(f"{config.species}_topology_files")
         if not topology_dir.exists():
             LOG.warning(f"Topology directory not found: {topology_dir}")
             topology_dir = Path()

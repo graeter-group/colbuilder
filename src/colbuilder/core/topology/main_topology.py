@@ -277,8 +277,19 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     context={"force_field": force_field}
                 )
             
-            # Create output directory and copy all generated files
-            output_topology_dir = file_manager.ensure_dir(f"{config.species}_topology_files")
+            # Create output directory and copy all generated files. Martini3's
+            # own builder (build_martini3) already assembles a complete output
+            # directory named "{species}_{force_field}_topology_files" -- reuse
+            # that same name here so this generic copy pass lands in the one
+            # directory that actually has the Martini base force-field files
+            # (martini_v3.0.0*.itp), instead of creating a second, incomplete
+            # "{species}_topology_files" directory whose #include directives
+            # would point at files that were never copied there.
+            if force_field == 'martini3':
+                output_dir_name = f"{config.species}_{force_field}_topology_files"
+            else:
+                output_dir_name = f"{config.species}_topology_files"
+            output_topology_dir = file_manager.ensure_dir(output_dir_name)
 
             # Copy coarse-grained PDB files (Martini3)
             for cg_pdb_file in Path().glob("collagen_fibril_CG_*.pdb"):
