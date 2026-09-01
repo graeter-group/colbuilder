@@ -15,6 +15,10 @@ from colbuilder.core.geometry.crystalcontacts import CrystalContacts
 from colbuilder.core.geometry.mix import Mix
 from colbuilder.core.geometry.optimize import Optimizer
 from colbuilder.core.geometry.unpaired_crosslinks import UnpairedCrosslinkFinder
+from colbuilder.core.geometry.geometry_replacer import (
+    snapshot_residue_atoms,
+    repair_missing_backbone_atoms,
+)
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
@@ -246,11 +250,15 @@ class CrosslinkMixer:
 
             replace_file.write_text("\n".join(lines) + "\n")
 
+            pre_mutation_snapshot = snapshot_residue_atoms(system_dir, lines)
+
             chim = Chimera(cfg, pdb=str(system_dir))
             result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
             if result.returncode != 0:
                 LOG.error("Chimera swapaa failed for %s: %s", system_dir, result.stderr.decode() if hasattr(result, "stderr") else result.stderr)
                 return False
+
+            repair_missing_backbone_atoms(system_dir, lines, pre_mutation_snapshot)
             return True
         except Exception as e:
             LOG.warning("Chimera swapaa application failed: %s", e)

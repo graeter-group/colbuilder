@@ -34,6 +34,152 @@ from .model import Model
 
 LOG = setup_logger(__name__)
 
+# ==================================================================================
+# Backbone Repair After Chimera Mutation
+# ==================================================================================
+#
+# Chimera's ``swapaa`` can silently drop the backbone O atom when the residue
+# being mutated is missing a sidechain atom the target residue needs (e.g.
+# LGX -> LYS: LGX's sidechain stops at CE, so Chimera has to build the extra
+# NZ via its rotamer library). Verified directly: mutating a residue that
+# already has every target atom keeps O; mutating one that is short a
+# sidechain atom drops it. AGS -> ARG is unaffected because AGS already
+# carries every ARG atom (only deletions, no additions). Backbone atom
+# *positions* never change with a sidechain mutation, so any that Chimera
+# drops can be restored verbatim from a pre-mutation snapshot.
+#
+# Shared between geometry_replacer.py's CrosslinkReplacer and
+# crosslink_mixer.py's per-type Chimera swapaa calls, since both drive
+# Chimera the same way and are subject to the same bug.
+
+_BACKBONE_ATOM_ORDER = ("N", "CA", "C", "O")
+
+
+def snapshot_residue_atoms(
+    type_dir: Path, instructions: List[str]
+) -> Dict[Tuple[str, str, str], Dict[str, str]]:
+    """Capture the atom lines of every residue about to be mutated.
+
+    Keyed by (pdb_file, resid, chain) -> {atom_name: original_line}.
+    """
+    targets: Dict[str, Set[Tuple[str, str]]] = {}
+    for instr in instructions:
+        parts = instr.split()
+        if len(parts) < 4:
+            continue
+        pdb_file, resid, chain = parts[0], parts[2], parts[3]
+        targets.setdefault(pdb_file, set()).add((resid, chain))
+
+    snapshot: Dict[Tuple[str, str, str], Dict[str, str]] = {}
+    for pdb_file, keys in targets.items():
+        path = type_dir / pdb_file
+        if not path.exists():
+            continue
+        with open(path, "r") as fh:
+            for line in fh:
+                if not line.startswith(("ATOM", "HETATM")) or len(line) < 54:
+                    continue
+                resid = line[22:26].strip()
+                chain = line[21].strip() or "A"
+                if (resid, chain) not in keys:
+                    continue
+                atom_name = line[12:16].strip()
+                snapshot.setdefault((pdb_file, resid, chain), {})[atom_name] = line
+    return snapshot
+
+
+def repair_missing_backbone_atoms(
+    type_dir: Path,
+    instructions: List[str],
+    snapshot: Dict[Tuple[str, str, str], Dict[str, str]],
+) -> None:
+    """Restore backbone atoms Chimera dropped while mutating a residue."""
+    by_file: Dict[str, List[Tuple[str, str, str]]] = {}
+    for instr in instructions:
+        parts = instr.split()
+        if len(parts) < 4:
+            continue
+        pdb_file, new_res, resid, chain = parts[0], parts[1].upper(), parts[2], parts[3]
+        by_file.setdefault(pdb_file, []).append((new_res, resid, chain))
+
+    for pdb_file, targets in by_file.items():
+        path = type_dir / pdb_file
+        if not path.exists():
+            continue
+        with open(path, "r") as fh:
+            lines = fh.readlines()
+
+        changed = False
+        for new_res, resid, chain in targets:
+            original_atoms = snapshot.get((pdb_file, resid, chain))
+            if not original_atoms:
+                continue
+
+            residue_indices = [
+                i
+                for i, line in enumerate(lines)
+                if line.startswith(("ATOM", "HETATM"))
+                and len(line) >= 26
+                and line[22:26].strip() == resid
+                and (line[21].strip() or "A") == chain
+            ]
+            if not residue_indices:
+                continue
+
+            present_names = {lines[i][12:16].strip() for i in residue_indices}
+            missing = [
+                n
+                for n in _BACKBONE_ATOM_ORDER
+                if n not in present_names and n in original_atoms
+            ]
+            if not missing:
+                continue
+
+            sidechain_idx = next(
+                (
+                    i
+                    for i in residue_indices
+                    if lines[i][12:16].strip() not in _BACKBONE_ATOM_ORDER
+                ),
+                residue_indices[-1] + 1,
+            )
+
+            new_lines = [
+                original_atoms[name][:17] + f"{new_res:<3}" + original_atoms[name][20:]
+                for name in missing
+            ]
+
+            LOG.warning(
+                "Restored backbone atom(s) %s in residue %s.%s of %s after Chimera "
+                "mutation (Chimera's swapaa can drop backbone atoms when it must "
+                "extend a truncated crosslink residue's sidechain).",
+                ", ".join(missing),
+                resid,
+                chain,
+                pdb_file,
+            )
+
+            lines[sidechain_idx:sidechain_idx] = new_lines
+            changed = True
+
+        if changed:
+            lines = renumber_atom_serials(lines)
+            with open(path, "w") as fh:
+                fh.writelines(lines)
+
+
+def renumber_atom_serials(lines: List[str]) -> List[str]:
+    """Renumber ATOM/HETATM serial numbers sequentially after inserting lines."""
+    out = []
+    serial = 0
+    for line in lines:
+        if line.startswith(("ATOM", "HETATM")):
+            serial += 1
+            line = f"{line[:6]}{serial:>5}{line[11:]}"
+        out.append(line)
+    return out
+
+
 # Residue mapping for paired crosslink replacement
 PAIRING_RULES = [
     (["LGX"], ["AGS"]),  # Glucosylpane
@@ -455,7 +601,7 @@ class CrosslinkReplacer:
             # STEP 3: EXECUTE CHIMERA REPLACEMENT
             # =================================================================================
 
-            pre_mutation_snapshot = self._snapshot_residue_atoms(type_dir, manual_list)
+            pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
 
             success = await self._run_chimera_command(
                 config,
@@ -470,7 +616,7 @@ class CrosslinkReplacer:
                     error_code="GEO_ERR_004",
                 )
 
-            self._repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+            repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
 
             LOG.debug("Chimera replacements executed.")
 
@@ -674,7 +820,7 @@ class CrosslinkReplacer:
                     f.write(f"{clean_instr}\n")
 
             # Run Chimera
-            pre_mutation_snapshot = self._snapshot_residue_atoms(type_dir, manual_list)
+            pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
 
             success = await self._run_chimera_command(
                 config,
@@ -689,7 +835,7 @@ class CrosslinkReplacer:
                     error_code="GEO_ERR_004",
                 )
 
-            self._repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+            repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
 
             # Combine caps files into output PDB
             output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
@@ -896,145 +1042,6 @@ class CrosslinkReplacer:
         except Exception as e:
             LOG.error(f"Chimera execution exception: {e}")
             return False
-
-    # ==================================================================================
-    # HELPER METHODS - Backbone Repair After Chimera Mutation
-    # ==================================================================================
-    #
-    # Chimera's ``swapaa`` can silently drop the backbone O atom when the
-    # residue being mutated is missing a sidechain atom the target residue
-    # needs (e.g. LGX -> LYS: LGX's sidechain stops at CE, so Chimera has to
-    # build the extra NZ via its rotamer library). Verified directly: mutating
-    # a residue that already has every target atom keeps O; mutating one that
-    # is short a sidechain atom drops it. AGS -> ARG is unaffected because AGS
-    # already carries every ARG atom (only deletions, no additions). Backbone
-    # atom *positions* never change with a sidechain mutation, so any that
-    # Chimera drops can be restored verbatim from a pre-mutation snapshot.
-
-    _BACKBONE_ATOM_ORDER = ("N", "CA", "C", "O")
-
-    def _snapshot_residue_atoms(
-        self, type_dir: Path, instructions: List[str]
-    ) -> Dict[Tuple[str, str, str], Dict[str, str]]:
-        """Capture the atom lines of every residue about to be mutated.
-
-        Keyed by (pdb_file, resid, chain) -> {atom_name: original_line}.
-        """
-        targets: Dict[str, Set[Tuple[str, str]]] = {}
-        for instr in instructions:
-            parts = instr.split()
-            if len(parts) < 4:
-                continue
-            pdb_file, resid, chain = parts[0], parts[2], parts[3]
-            targets.setdefault(pdb_file, set()).add((resid, chain))
-
-        snapshot: Dict[Tuple[str, str, str], Dict[str, str]] = {}
-        for pdb_file, keys in targets.items():
-            path = type_dir / pdb_file
-            if not path.exists():
-                continue
-            with open(path, "r") as fh:
-                for line in fh:
-                    if not line.startswith(("ATOM", "HETATM")) or len(line) < 54:
-                        continue
-                    resid = line[22:26].strip()
-                    chain = line[21].strip() or "A"
-                    if (resid, chain) not in keys:
-                        continue
-                    atom_name = line[12:16].strip()
-                    snapshot.setdefault((pdb_file, resid, chain), {})[atom_name] = line
-        return snapshot
-
-    def _repair_missing_backbone_atoms(
-        self,
-        type_dir: Path,
-        instructions: List[str],
-        snapshot: Dict[Tuple[str, str, str], Dict[str, str]],
-    ) -> None:
-        """Restore backbone atoms Chimera dropped while mutating a residue."""
-        by_file: Dict[str, List[Tuple[str, str, str]]] = {}
-        for instr in instructions:
-            parts = instr.split()
-            if len(parts) < 4:
-                continue
-            pdb_file, new_res, resid, chain = parts[0], parts[1].upper(), parts[2], parts[3]
-            by_file.setdefault(pdb_file, []).append((new_res, resid, chain))
-
-        for pdb_file, targets in by_file.items():
-            path = type_dir / pdb_file
-            if not path.exists():
-                continue
-            with open(path, "r") as fh:
-                lines = fh.readlines()
-
-            changed = False
-            for new_res, resid, chain in targets:
-                original_atoms = snapshot.get((pdb_file, resid, chain))
-                if not original_atoms:
-                    continue
-
-                residue_indices = [
-                    i
-                    for i, line in enumerate(lines)
-                    if line.startswith(("ATOM", "HETATM"))
-                    and len(line) >= 26
-                    and line[22:26].strip() == resid
-                    and (line[21].strip() or "A") == chain
-                ]
-                if not residue_indices:
-                    continue
-
-                present_names = {lines[i][12:16].strip() for i in residue_indices}
-                missing = [
-                    n
-                    for n in self._BACKBONE_ATOM_ORDER
-                    if n not in present_names and n in original_atoms
-                ]
-                if not missing:
-                    continue
-
-                sidechain_idx = next(
-                    (
-                        i
-                        for i in residue_indices
-                        if lines[i][12:16].strip() not in self._BACKBONE_ATOM_ORDER
-                    ),
-                    residue_indices[-1] + 1,
-                )
-
-                new_lines = [
-                    original_atoms[name][:17] + f"{new_res:<3}" + original_atoms[name][20:]
-                    for name in missing
-                ]
-
-                LOG.warning(
-                    "Restored backbone atom(s) %s in residue %s.%s of %s after Chimera "
-                    "mutation (Chimera's swapaa can drop backbone atoms when it must "
-                    "extend a truncated crosslink residue's sidechain).",
-                    ", ".join(missing),
-                    resid,
-                    chain,
-                    pdb_file,
-                )
-
-                lines[sidechain_idx:sidechain_idx] = new_lines
-                changed = True
-
-            if changed:
-                lines = self._renumber_atom_serials(lines)
-                with open(path, "w") as fh:
-                    fh.writelines(lines)
-
-    def _renumber_atom_serials(self, lines: List[str]) -> List[str]:
-        """Renumber ATOM/HETATM serial numbers sequentially after inserting lines."""
-        out = []
-        serial = 0
-        for line in lines:
-            if line.startswith(("ATOM", "HETATM")):
-                serial += 1
-                line = f"{line[:6]}{serial:>5}{line[11:]}"
-            out.append(line)
-        return out
 
     # ==================================================================================
     # HELPER METHODS - Ratio-based Replacement Selection
@@ -1463,7 +1470,7 @@ class CrosslinkReplacer:
                 clean_instr = instruction.strip().strip('"').strip("'")
                 f.write(f"{clean_instr}\n")
 
-        pre_mutation_snapshot = self._snapshot_residue_atoms(type_dir, manual_list)
+        pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
 
         success = await self._run_chimera_command(
             config=config,
@@ -1478,7 +1485,7 @@ class CrosslinkReplacer:
                 error_code="GEO_ERR_004",
             )
 
-        self._repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+        repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
 
         return True
 
