@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple, Set, Union
 import shutil
 from colorama import Fore, Style
 import os
@@ -311,10 +311,23 @@ class CrosslinkMixer:
         finally:
             os.chdir(original_dir)
 
-    def _matrixset_system(self, system: System) -> System:
-        """Update system after cutting to specified length."""
+    def _matrixset_system(
+        self, system: System, crystalcontacts_file: Optional[Union[str, Path]] = None
+    ) -> System:
+        """Update system after cutting to specified length.
 
-        id_file = Path(f"{self.crystalcontacts_file}_opt_id.txt")
+        ``crystalcontacts_file`` is the same crystalcontacts base name/path
+        just used for the chimera.matrixset() call that produced the ID file
+        (may be an absolute path when the system was built by a prior
+        geometry-generation step in a different directory, e.g. when
+        geometry_generator and mix_bool are both enabled). Falling back to
+        ``self.crystalcontacts_file`` only covers the case where this system
+        was built by this mixer itself, relative to its own cwd.
+        """
+        base = str(crystalcontacts_file) if crystalcontacts_file else f"{self.crystalcontacts_file}_opt"
+        if base.endswith(".txt"):
+            base = base[: -len(".txt")]
+        id_file = Path(f"{base}_id.txt")
 
         if not id_file.exists():
             raise FileNotFoundError(f"Crystal contacts ID file not found: {id_file}")
@@ -481,7 +494,7 @@ class CrosslinkMixer:
                 )
 
                 LOG.info(f"     Cutting system to {fibril_length_nm} nm")
-                system = self._matrixset_system(system)
+                system = self._matrixset_system(system, crystalcontacts_file)
 
                 type_dir = temp_dir / str(key)
                 type_dir.mkdir(parents=True, exist_ok=True)
