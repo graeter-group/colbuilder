@@ -496,8 +496,9 @@ class CrosslinkReplacer:
             )
             generated_from_ratio = False
 
-            # Check for manual replacements first
-            if not ratio_requested and getattr(config, "manual_replacements", None):
+            # Manual replacements take precedence over ratio-based replacement
+            # when both are configured (see config.yaml's documented contract).
+            if getattr(config, "manual_replacements", None):
                 manual_list = [
                     str(instr).strip()
                     for instr in config.manual_replacements
@@ -505,8 +506,8 @@ class CrosslinkReplacer:
                 ]
                 LOG.debug(f"Using {len(manual_list)} manual replacement instructions")
 
-            # If ratio requested and we have connect groups, use connect-based replacement
-            if ratio_requested:
+            # If ratio requested and no manual list took precedence, use connect-based replacement
+            if ratio_requested and not manual_list:
                 connect_groups = (
                     self._load_connect_groups(connect_file) if connect_file else []
                 )
