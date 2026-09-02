@@ -367,6 +367,9 @@ class CrosslinkMixer:
             self.path_wd = temp_dir if temp_dir else Path(config.working_directory)
             if not self.path_wd.exists():
                 self.path_wd.mkdir(parents=True, exist_ok=True)
+            # Normalize: the rest of this method uses temp_dir directly, which
+            # must resolve the same way self.path_wd just did.
+            temp_dir = self.path_wd
 
             os.chdir(self.path_wd)
 
