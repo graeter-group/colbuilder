@@ -74,11 +74,11 @@ class Crosslink:
         self.dlyx5ly2: str = '0.370'  # LYX-LY2 bond equilibrium distance (nm) (added)
         
         # PYD-crosslink angle parameters (degrees)
-        self.al2yx_1: str = '100'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
-        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
-        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
+        self.al2yx_1: str = '60'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3
+        self.al2yx_2: str = '100'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
+        self.al2yx_3: str = '100'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
         self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
-        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 R3/S3
+        self.al3yx_2: str = '140'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 S3
         self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
 
         LOG.debug(f"Initialized Crosslink for model counter {cnt_model}")
