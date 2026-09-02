@@ -406,6 +406,7 @@ class CrosslinkReplacer:
             # =================================================================================
 
             source_dir = geometry_gen_dir
+            auto_fix_applied = False
             if getattr(config, "auto_fix_unpaired", False) and getattr(config, "manual_replacements", None):
                 await self._apply_manual_replacements_to_dir(
                     source_dir=geometry_gen_dir,
@@ -419,6 +420,7 @@ class CrosslinkReplacer:
                     config=config,
                     system=system,
                 )
+                auto_fix_applied = True
                 if getattr(config, "_replacement_verbose", True):
                     LOG.section("Running crosslinks replacement")
                 source_dir = replace_manual_dir
@@ -606,25 +608,30 @@ class CrosslinkReplacer:
             # =================================================================================
             # STEP 3: EXECUTE CHIMERA REPLACEMENT
             # =================================================================================
+            # Skip if _apply_manual_replacements_to_dir already mutated these exact
+            # instructions in STEP 1 (type_dir was populated from its output above).
 
-            pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
+            if auto_fix_applied:
+                LOG.debug("Skipping redundant Chimera run; auto-fix already applied in STEP 1.")
+            else:
+                pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
 
-            success = await self._run_chimera_command(
-                config,
-                str(replace_file),
-                type_dir,
-                working_dir_root
-            )
-
-            if not success:
-                raise GeometryGenerationError(
-                    message="Chimera execution failed.",
-                    error_code="GEO_ERR_004",
+                success = await self._run_chimera_command(
+                    config,
+                    str(replace_file),
+                    type_dir,
+                    working_dir_root
                 )
 
-            repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+                if not success:
+                    raise GeometryGenerationError(
+                        message="Chimera execution failed.",
+                        error_code="GEO_ERR_004",
+                    )
 
-            LOG.debug("Chimera replacements executed.")
+                repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+
+                LOG.debug("Chimera replacements executed.")
 
             # =================================================================================
             # STEP 4: AGGRESSIVE BACK-PROPAGATION (FIX TOPOLOGY)
