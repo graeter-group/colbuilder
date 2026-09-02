@@ -189,7 +189,7 @@ LYX                1
 ;  i     j    k     funct   angle  force.c.
   BB   SC1  SC2       2   180   150    
  SC1   SC2  SC3       2   180   150      
- SC2   SC3  SC4       2   140   150  
+ SC2   SC3  SC4       2   160   150  
  SC2   SC3  SC5       2   100   200
  
  ;;; GLYCINE
