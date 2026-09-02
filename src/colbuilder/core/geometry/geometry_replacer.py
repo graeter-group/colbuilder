@@ -221,6 +221,11 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "LY2": "LYS",
 }
 DEFAULT_REPLACEMENT = "LYS"
+# For atom-specific Crosslink.position pairing only (true bond distance,
+# ~1.5-2.8 A measured). Methods that pair from _load_crosslinks_from_models'
+# whole-residue centroid positions need a looser cutoff (see the 10.0 A used
+# in _build_ratio_replacements_from_connect/_build_ratio_replacements_from_records)
+# since centroid-to-centroid distances for real bonded pairs run ~5-9 A.
 PAIR_DISTANCE_CUTOFF = 5.0
 
 PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4"}
@@ -1009,7 +1014,6 @@ class CrosslinkReplacer:
             search_paths = [
                 Path(config.CHIMERA_SCRIPTS_DIR) / "swapaa.py" if config.CHIMERA_SCRIPTS_DIR else None,
                 root_dir / "chimera_scripts" / "swapaa.py",
-                Path("/home/guido/miniforge3/envs/colbuilder/lib/python3.9/site-packages/colbuilder/chimera_scripts/swapaa.py")
             ]
             
             for p in search_paths:
@@ -1569,6 +1573,8 @@ class CrosslinkReplacer:
                         dist = self._calculate_distance(
                             donor["position"], acceptor["position"]
                         )
+                        # 10.0 A, not PAIR_DISTANCE_CUTOFF: donor/acceptor here are
+                        # whole-residue centroids (see PAIR_DISTANCE_CUTOFF's comment).
                         if dist <= 10.0 and dist < best_dist:
                             best_idx = j
                             best_dist = dist
@@ -1764,6 +1770,8 @@ class CrosslinkReplacer:
                     if j in used_acceptors:
                         continue
                     dist = self._calculate_distance(donor["position"], acceptor["position"])
+                    # 10.0 A, not PAIR_DISTANCE_CUTOFF: donor/acceptor here are
+                    # whole-residue centroids (see PAIR_DISTANCE_CUTOFF's comment).
                     if dist <= 10.0 and dist < best_dist:
                         best_idx = j
                         best_dist = dist
