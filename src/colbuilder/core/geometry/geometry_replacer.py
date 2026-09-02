@@ -1163,12 +1163,16 @@ class CrosslinkReplacer:
                     used_donors.add(i)
                     used_acceptors.add(best_idx)
 
-        # Group enzymatic markers into PYD trios
+        # Group enzymatic markers into trivalent trios (PYD, DPD, PYL, DPL)
         if scope in {"enzymatic", "all"}:
-            lyx_list = crosslinks_by_type.get("LYX", [])
-            ly2_list = crosslinks_by_type.get("LY2", [])
-            ly3_list = crosslinks_by_type.get("LY3", [])
-            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+            for central, arm1, arm2 in ENZYMATIC_TRIOS:
+                pyd_trios.extend(
+                    self._build_pyd_trios(
+                        crosslinks_by_type.get(central, []),
+                        crosslinks_by_type.get(arm1, []),
+                        crosslinks_by_type.get(arm2, []),
+                    )
+                )
 
         # Calculate how many to replace
         num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
@@ -1767,12 +1771,21 @@ class CrosslinkReplacer:
                     used_donors.add(i)
                     used_acceptors.add(best_idx)
 
-        # PYD trios when enzymatic scope is active
+        # Trivalent trios (PYD, DPD, PYL, DPL) when enzymatic scope is active.
+        # These records use whole-residue centroid positions (see
+        # _load_crosslinks_from_models), not atom-specific Crosslink.position,
+        # so they need the same looser 10.0 A cutoff used for pairing above
+        # rather than the tighter PYD_THRESHOLD default.
         if scope in {"enzymatic", "all"}:
-            lyx_list = by_type.get("LYX", [])
-            ly2_list = by_type.get("LY2", [])
-            ly3_list = by_type.get("LY3", [])
-            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+            for central, arm1, arm2 in ENZYMATIC_TRIOS:
+                pyd_trios.extend(
+                    self._build_pyd_trios(
+                        by_type.get(central, []),
+                        by_type.get(arm1, []),
+                        by_type.get(arm2, []),
+                        threshold=10.0,
+                    )
+                )
 
         num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
         num_trio_to_replace = _ratio_target(len(pyd_trios), ratio_replace)
@@ -1908,9 +1921,17 @@ class CrosslinkReplacer:
         lyx_list: List[Dict[str, Any]],
         ly2_list: List[Dict[str, Any]],
         ly3_list: List[Dict[str, Any]],
+        threshold: float = PYD_THRESHOLD,
     ) -> List[List[Dict[str, Any]]]:
         """
         Group LYX/LY2/LY3 into PYD trios based on proximity.
+
+        ``threshold`` must match the position representation of the inputs:
+        callers using atom-specific ``Crosslink.position`` (e.g. the system-based
+        path) see true bond distances of ~1.5-2.8 A, well under the default
+        PYD_THRESHOLD; callers using whole-residue centroid positions (e.g.
+        ``_load_crosslinks_from_models``) see much larger distances (measured
+        ~5.4-8.9 A for real bonded PYD/DPD trios) and must pass a looser value.
         """
         trios: List[List[Dict[str, Any]]] = []
         used_ly2: Set[int] = set()
@@ -1925,12 +1946,12 @@ class CrosslinkReplacer:
                 try:
                     lyx_pos = self._extract_position(lyx)
                     ly2_pos = self._extract_position(ly2)
-                    if not lyx_pos or not ly2_pos:
+                    if lyx_pos is None or ly2_pos is None:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly2_pos)
                 except Exception:
                     continue
-                if dist <= PYD_THRESHOLD and dist < best_ly2_dist:
+                if dist <= threshold and dist < best_ly2_dist:
                     best_ly2 = (idx, ly2)
                     best_ly2_dist = dist
 
@@ -1942,12 +1963,12 @@ class CrosslinkReplacer:
                 try:
                     lyx_pos = self._extract_position(lyx)
                     ly3_pos = self._extract_position(ly3)
-                    if not lyx_pos or not ly3_pos:
+                    if lyx_pos is None or ly3_pos is None:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly3_pos)
                 except Exception:
                     continue
-                if dist <= PYD_THRESHOLD and dist < best_ly3_dist:
+                if dist <= threshold and dist < best_ly3_dist:
                     best_ly3 = (jdx, ly3)
                     best_ly3_dist = dist
 
