@@ -122,8 +122,6 @@ class Chimera(object):
         expected_file = f"{crystalcontacts_str}_id.txt"
         if os.path.exists(expected_file):
             LOG.debug(f"        File created successfully: {expected_file}")
-            with open(expected_file, "r") as f:
-                pass
         else:
             LOG.error(f"    File not created: {expected_file}")
             raise FileNotFoundError(f"Expected file not created: {expected_file}")

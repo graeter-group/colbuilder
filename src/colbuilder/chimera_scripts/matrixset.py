@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-import math
 from chimera import runCommand as rc
 from chimera import openModels, selection, Point
 
@@ -27,7 +26,7 @@ try:
     
     start_pos = openModels.list()[0].atoms[0].coord()
     end_pos = openModels.list()[0].atoms[-1].coord()
-    center_pos = math.sqrt((abs(end_pos[2]) - abs(start_pos[2]))**2) / 2 + start_pos[2]
+    center_pos = (start_pos[2] + end_pos[2]) / 2.0
     start_pos[2] = center_pos - 0.5 * fibril_length
     end_pos[2] = center_pos + 0.5 * fibril_length
 
