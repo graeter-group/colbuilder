@@ -474,8 +474,6 @@ class ColbuilderConfig(BaseModel):
                     "Either contact_distance or crystalcontacts_file must be provided for geometry generation",
                     error_code="CFG_ERR_006",
                 )
-            if self.contact_distance == 0 and self.crystalcontacts_file is None:
-                pass
         return self
 
     @field_validator("contact_distance")
