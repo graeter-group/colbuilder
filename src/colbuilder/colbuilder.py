@@ -512,8 +512,10 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
             results["sequence_msa"] = sequence_msa
             results["sequence_pdb"] = sequence_pdb
 
-            # Update PDB file for next steps if needed
-            if sequence_pdb and not config.pdb_file:
+            # Sequence generation just ran successfully: its output is always
+            # the correct input for the next stage, even if config.pdb_file
+            # was already set to something else (e.g. a stale leftover value).
+            if sequence_pdb:
                 config.pdb_file = sequence_pdb
                 LOG.info(
                     f"Using generated sequence PDB for further processing: {sequence_pdb}"
