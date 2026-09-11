@@ -457,6 +457,12 @@ class ColbuilderConfig(BaseModel):
                     error_code="CFG_ERR_003",
                 )
 
+        # Bundled package resources (templates, libraries, data files) should
+        # always exist regardless of which stages this run enables -- catch a
+        # broken/incomplete install early with a clear message instead of a
+        # confusing failure deep inside whichever stage first needs the file.
+        self.validate_paths()
+
         self.set_mode()
 
     @model_validator(mode="after")
