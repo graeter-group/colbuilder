@@ -56,6 +56,7 @@ print(f"MODELLER alignment file saved to: {modeller_output}")
 # Distributed under the terms of the Apache License 2.0
 
 import os
+import shutil
 import subprocess
 import tempfile
 from typing import List, Dict, Tuple
@@ -484,6 +485,8 @@ class Alignment:
         except Exception as e:
             LOG.error(f"Error in align_sequences: {str(e)}", exc_info=True)
             raise
+        finally:
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
 
 
 @timeit

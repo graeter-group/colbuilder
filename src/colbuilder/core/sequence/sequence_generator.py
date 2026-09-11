@@ -115,6 +115,7 @@ class SequenceGenerator:
                 )
 
             temp_dir = self.file_manager.get_temp_path("sequence_gen", create_dir=True)
+            self._temp_dir = temp_dir
             os.chdir(temp_dir)
 
             yield
