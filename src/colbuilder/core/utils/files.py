@@ -754,7 +754,6 @@ class FileManager:
                 Path.cwd(),  # Python process working directory
                 self.project_root,  # Project root from config
                 self.project_root / "data",  # Project data directory
-                self.project_root / "colbuilder" / "data",  # Package data directory
                 self.config.DATA_DIR,  # Data directory from config
                 self.config.HOMOLOGY_LIB_DIR,  # Homology lib directory from config
                 self.config.FORCE_FIELD_DIR,  # Force field directory from config
