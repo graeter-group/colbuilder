@@ -986,7 +986,6 @@ def optimize_crosslink(
     crosslink: Dict[str, Dict[str, Any]],
     tracker: TransformationTracker,
     max_steps: int = 20000,
-    target_distance: float = 1.5,
     previous_best_distance: float = float("inf"),
 ) -> Tuple[Dict[str, Structure], TransformationTracker]:
     """
@@ -997,7 +996,6 @@ def optimize_crosslink(
         crosslink: Crosslink specification dictionary
         tracker: Transformation tracker for recording moves
         max_steps: Maximum optimization steps
-        target_distance: Target distance for optimization
 
     Returns:
         Tuple of optimized structures and transformation tracker
@@ -1015,7 +1013,6 @@ def optimize_crosslink(
     LOG.debug("\nPhase 1: Backbone exploration")
     angle_steps = np.linspace(-np.pi / 2, np.pi / 2, 8)
     for residue_type in residue_types:
-        restype_best_tracker = TransformationTracker()
         for angle in angle_steps:
             structures_copy = {k: v.copy() for k, v in best_structures.items()}
             temp_tracker = TransformationTracker()
@@ -1036,7 +1033,6 @@ def optimize_crosslink(
             if current_distance < best_distance:
                 best_distance = current_distance
                 best_structures = {k: v.copy() for k, v in structures_copy.items()}
-                restype_best_tracker = temp_tracker.copy()
                 current_tracker.update_from(temp_tracker)
                 if is_divalent:
                     LOG.debug(f"Improved distance: {dist1:.2f}")
