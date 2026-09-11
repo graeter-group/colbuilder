@@ -46,10 +46,9 @@ Classes:
      - `current_distance` (float): Current distance between crosslinked atoms.
      - `attempt_number` (int): Current optimization attempt number.
      - `best_distance` (float): Best distance achieved so far.
-     - `coordinates` (Optional[np.ndarray]): Current atomic coordinates.
      - `optimization_history` (List[Dict[str, Any]]): History of optimization attempts.
    - Methods:
-     - `update`: Updates the optimization state with new distance and coordinates.
+     - `update`: Updates the optimization state with a new distance.
      - `increment_attempt`: Increments the optimization attempt counter.
 
 Usage:
@@ -72,7 +71,7 @@ print(crosslink.is_trivalent)  # Output: False
 
 # Track optimization state
 state = OptimizationState()
-state.update(distance=5.0, coords=np.array([[1.0, 2.0, 3.0]]))
+state.update(distance=5.0)
 state.increment_attempt()
 print(state.best_distance)  # Output: 5.0
 ```
@@ -80,7 +79,6 @@ print(state.best_distance)  # Output: 5.0
 
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
-import numpy as np
 
 
 @dataclass(frozen=True)
@@ -156,22 +154,18 @@ class OptimizationState:
     current_distance: float = float("inf")
     attempt_number: int = 0
     best_distance: float = float("inf")
-    coordinates: Optional[np.ndarray] = None
     optimization_history: List[Dict[str, Any]] = field(default_factory=list)
 
-    def update(self, distance: float, coords: Optional[np.ndarray] = None) -> None:
+    def update(self, distance: float) -> None:
         """
         Update optimization state with new values.
 
         Args:
             distance: Current distance between crosslinked atoms
-            coords: Optional coordinates array. If None, coordinates won't be updated.
         """
         self.current_distance = distance
         if distance < self.best_distance:
             self.best_distance = distance
-            if coords is not None:
-                self.coordinates = coords.copy()
         self.optimization_history.append(
             {"attempt": self.attempt_number, "distance": distance}
         )
