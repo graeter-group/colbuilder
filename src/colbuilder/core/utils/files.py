@@ -28,7 +28,7 @@ import shutil
 import os
 from dataclasses import dataclass
 
-from colbuilder.core.utils.exceptions import SequenceGenerationError, SystemError
+from colbuilder.core.utils.exceptions import SequenceGenerationError
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
@@ -176,23 +176,15 @@ def suppress_output() -> Generator[None, None, None]:
     during its execution scope, which is useful when calling noisy external
     libraries or tools where their console output is not relevant.
 
+    Exceptions raised by the wrapped code are not caught here and propagate
+    to the caller unchanged -- this only manages the output streams.
+
     Yields:
         None
-
-    Raises:
-        SystemError: If there's an error managing output streams
     """
-    try:
-        with io.StringIO() as stdout_buf, io.StringIO() as stderr_buf:
-            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
-                yield
-    except Exception as e:
-        raise SystemError(
-            message="Failed to manage output streams",
-            original_error=e,
-            error_code="SYS_ERR_001",
-            context={"action": "suppress_output"},
-        )
+    with io.StringIO() as stdout_buf, io.StringIO() as stderr_buf:
+        with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+            yield
 
 
 class ProgressTracker:
