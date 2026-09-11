@@ -114,11 +114,15 @@ def pdb_to_fasta(pdb_file):
     return fasta_content
 
 
-if __name__ == "__main__":
+def main():
     if len(sys.argv) != 2:
-        print("Usage: python pdb2fasta.py <pdb_file>")
+        print("Usage: pdb2fasta <pdb_file>")
         sys.exit(1)
 
     pdb_file = sys.argv[1]
     fasta_content = pdb_to_fasta(pdb_file)
     print(fasta_content)
+
+
+if __name__ == "__main__":
+    main()

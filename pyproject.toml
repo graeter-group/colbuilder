@@ -49,7 +49,7 @@ dev = [
 
 [project.scripts]
 colbuilder = "colbuilder.colbuilder:main"
-pdb2fasta = "colbuilder.utils.pdb2fasta:main"
+pdb2fasta = "colbuilder.core.utils.pdb2fasta:main"
 
 [project.urls]
 Homepage = "https://github.com/graeter-group/colbuilder"
