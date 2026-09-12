@@ -521,6 +521,14 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                     f"Using generated sequence PDB for further processing: {sequence_pdb}"
                 )
 
+        # Validate FASTA/PDB structural format (exactly 3 sequences/chains, TER
+        # records, CRYST1 for geometry input). Generated files match by
+        # construction, so this mainly guards user-provided input files.
+        # Logs its own warnings and raises ConfigurationError on hard failures.
+        from colbuilder.core.utils.config import validate_input_files as _validate_input_files
+
+        _validate_input_files(config)
+
         # Validate that the crosslinks present in an input PDB are consistent
         # with the crosslink types requested in the configuration. This catches
         # the common mistake of, e.g., specifying a divalent type (HLKNL) for a
