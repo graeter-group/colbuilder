@@ -85,8 +85,6 @@ from pydantic import (
 import yaml
 import re
 import os
-import subprocess
-import json
 from functools import lru_cache
 
 from .validators import BioformatValidator
@@ -289,12 +287,6 @@ class ColbuilderConfig(BaseModel):
     )
     martinize2_command: Optional[str] = Field(
         None, description="Detected Martinize2 command"
-    )
-    martinize2_env: Optional[str] = Field(
-        None, description="Detected Martinize2 environment"
-    )
-    use_conda_run: bool = Field(
-        default=False, description="Whether to use conda run for Martinize2"
     )
     go_epsilon: float = Field(
         default=9.414,
@@ -874,47 +866,6 @@ class ColbuilderConfig(BaseModel):
                 )
 
         return self
-
-    def get_conda_env_path(self) -> Optional[str]:
-        """
-        Get the full path to the conda environment for martinize2.
-
-        Returns:
-            Optional[str]: Full path to the conda environment or None if not found
-        """
-        if not self.martinize2_env:
-            return None
-
-        try:
-            # Run conda info command to get environment paths
-            result = subprocess.run(
-                ["conda", "info", "--envs", "--json"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            env_data = json.loads(result.stdout)
-
-            # Look for the specified environment in the paths
-            for env_path in env_data["envs"]:
-                if os.path.basename(env_path) == self.martinize2_env:
-                    LOG.info(f"Found conda environment path: {env_path}")
-                    return env_path
-
-            LOG.warning(
-                f"Could not find conda environment path for: {self.martinize2_env}"
-            )
-            return None
-        except Exception as e:
-            LOG.error(f"Error determining conda environment path: {e}")
-            return None
-
-    def update(self, new_config: Dict[str, Any]):
-        """Update configuration with new values."""
-        for key, value in new_config.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-        self.set_mode()
 
     def __str__(self):
         """String representation of the configuration."""

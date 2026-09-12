@@ -12,7 +12,7 @@ from typing import Any, Optional, Set, List
 import shutil
 from colorama import init, Fore, Style
 
-from colbuilder.core.utils.files import FileManager, managed_resources
+from colbuilder.core.utils.files import FileManager
 from colbuilder.core.geometry.system import System
 from colbuilder.core.topology.amber import Amber, build_amber99
 from colbuilder.core.topology.martini import Martini, build_martini3

@@ -203,8 +203,6 @@ The most commonly used parameters for ColBuilder configuration:
 | force_field | string | Force field for simulations | "amber99", "martini3" | None |
 | topology_debug | boolean | Save intermediate topology files | true/false | false |
 | martinize2_command | string | Detected Martinize2 command path | Valid executable path | Auto-detected |
-| martinize2_env | string | Detected Martinize2 conda environment | Valid conda environment name | Auto-detected |
-| use_conda_run | boolean | Use conda run for Martinize2 | true/false | false |
 | go_epsilon | float | GO epsilon for Martini3-CG parametrization | Positive number | 9.414 |
 
 **Notes**:

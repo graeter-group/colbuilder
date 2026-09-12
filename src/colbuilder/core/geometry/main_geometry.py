@@ -16,7 +16,7 @@ from typing import Optional, Set, List, Union, Tuple, Dict
 from colbuilder.core.utils.exceptions import GeometryGenerationError
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
-from colbuilder.core.utils.files import FileManager, managed_resources
+from colbuilder.core.utils.files import FileManager
 from .crystal_builder import CrystalBuilder
 from .crosslink_mixer import CrosslinkMixer
 from .geometry_replacer import CrosslinkReplacer
