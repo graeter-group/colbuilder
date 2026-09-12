@@ -838,7 +838,6 @@ class Amber:
             raise ValueError("processed_groups cannot be empty")
 
         all_atom_lines = []
-        last_box_line = "   1.00000   1.00000   1.00000\n"
 
         for group_type, group_id in processed_groups:
             group_gro = f"col_{group_id}.gro"
@@ -846,17 +845,39 @@ class Amber:
                 with open(group_gro, 'r') as gro_f:
                     gro_lines = gro_f.readlines()
                     all_atom_lines.extend(gro_lines[2:-1])
-                    last_box_line = gro_lines[-1]
                 os.remove(group_gro)
             else:
                 LOG.warning(f"GRO file not found for group: {group_id}")
+
+        # Each per-group GRO carries a box sized for just that one (small)
+        # molecule, computed independently by pdb2gmx. Reusing any single
+        # group's box for the whole merged multi-helix system is too small
+        # in the packing directions and causes atoms to clash with their own
+        # periodic images. Build a box from the merged system's own extent
+        # instead, padded well beyond a typical nonbonded cutoff.
+        padding_nm = 2.0
+        min_x = min_y = min_z = float("inf")
+        max_x = max_y = max_z = float("-inf")
+        for line in all_atom_lines:
+            x, y, z = float(line[20:28]), float(line[28:36]), float(line[36:44])
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+            min_z, max_z = min(min_z, z), max(max_z, z)
+
+        if all_atom_lines:
+            box_x = (max_x - min_x) + padding_nm
+            box_y = (max_y - min_y) + padding_nm
+            box_z = (max_z - min_z) + padding_nm
+        else:
+            box_x = box_y = box_z = 1.0
+        box_line = f"{box_x:10.5f}{box_y:10.5f}{box_z:10.5f}\n"
 
         with open(gro_file, 'w') as f:
             f.write("GROMACS GRO-FILE\n")
             f.write(f"{len(all_atom_lines)}\n")
             for line in all_atom_lines:
                 f.write(line)
-            f.write(last_box_line)
+            f.write(box_line)
 
         LOG.info(f"GRO file written with {len(all_atom_lines)} atoms from {len(processed_groups)} groups")
 
