@@ -148,8 +148,16 @@ class Martini:
                         merged_count += 1
                 f.write("END\n")
 
-            if merged_count == 0:
-                LOG.error(f"No CG files were merged for model {model_id}")
+            if merged_count < len(sys_connect_ids):
+                # A partial merge silently drops the failed connect_id's entire
+                # triple helix from the output (e.g. a crosslink partner whose
+                # martinize2 run failed) while still looking like a complete,
+                # successful group. Treat any missing member as a full failure
+                # so it surfaces as one instead of shipping an incomplete topology.
+                LOG.error(
+                    f"Incomplete merge for model {model_id}: {merged_count}/"
+                    f"{len(sys_connect_ids)} connection(s) succeeded"
+                )
                 if os.path.exists(output_file):
                     os.remove(output_file)
                 return None
@@ -572,23 +580,6 @@ class Martini:
             else:
                 translated.append(line)
         return translated
-
-
-    def write_gro(
-        self,
-        system: Optional[Any] = None,
-        gro_file: Optional[str] = None,
-        processed_models: Optional[List[int]] = None,
-    ) -> None:
-        """
-        Write a GRO (Gromos87) file for the processed models.
-
-        This is a placeholder method for API compatibility with the Amber class.
-        Martini uses PDB files primarily, but this method could be implemented
-        to convert PDB to GRO format if needed.
-        """
-        LOG.debug("Write_gro called but not implemented for Martini - using PDB format instead")
-        return None
 
 
 def _build_connected_groups(system: System) -> List[List[Any]]:
