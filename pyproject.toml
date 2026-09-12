@@ -29,7 +29,6 @@ dependencies = [
     "vermouth==0.9.1",
     "pandas==2.2.2",
     "biopython>=1.87",
-    "scikit-learn",
     "PyYAML",
     "pydantic>=2.0",
     "tqdm",

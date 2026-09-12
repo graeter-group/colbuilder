@@ -13,7 +13,6 @@ with a focus on collagen microfibrils. It provides functionality for:
 The module requires the Martinize2 tool and custom contact map utilities.
 """
 
-import cmd
 import os
 import sys
 import subprocess
@@ -25,7 +24,6 @@ from tqdm import tqdm
 from colorama import Fore, Style
 
 from colbuilder.core.topology.itp import Itp
-from colbuilder.core.topology.crosslink import Crosslink
 from colbuilder.core.topology.backbone_repair import repair_backbone_bonds
 from colbuilder.core.geometry.system import System
 from colbuilder.core.utils.dec import timeit
