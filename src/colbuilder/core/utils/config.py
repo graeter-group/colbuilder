@@ -620,17 +620,6 @@ class ColbuilderConfig(BaseModel):
         
         return self
     
-    @field_validator("mutated_pdb", mode="before")
-    def validate_mutated_pdb_path(cls, value):
-        """Validate mutated PDB path."""
-        if value is not None:
-            path = Path(value)
-            if not path.is_absolute():
-                # Will be resolved relative to working directory later
-                return value
-            return value
-        return None
-
     @field_validator("files_mix", mode="before")
     def validate_files_mix(cls, value):
         """Validate files mix format."""
