@@ -75,10 +75,6 @@ TRIVALENT_ARMS: Dict[str, Dict[str, str]] = {
     "LXY": {"C13": "L3Y", "C12": "L2Y"},
     "LYY": {"C13": "L3X", "C12": "L2X"},
 }
-_TRIVALENT_ARM_RESNAMES: Set[str] = {
-    arm for arms in TRIVALENT_ARMS.values() for arm in arms.values()
-}
-
 # Combined with atom-specific one-to-one matching, 12 A is safe against false pairing.
 CROSSLINK_PAIR_CUTOFF = 12.0
 
