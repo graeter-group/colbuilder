@@ -11,7 +11,7 @@ import shutil
 import traceback
 import logging
 from pathlib import Path
-from typing import Optional, Set, List, Union, Tuple, Dict
+from typing import Optional, List, Tuple
 
 from colbuilder.core.utils.exceptions import GeometryGenerationError
 from colbuilder.core.utils.config import ColbuilderConfig
@@ -23,57 +23,9 @@ from .geometry_replacer import CrosslinkReplacer
 from .unpaired_crosslinks import UnpairedCrosslinkFinder
 from .system import System
 from .crystal import Crystal
-from colorama import init, Fore, Style
+from colorama import Fore, Style
 
 LOG = setup_logger(__name__)
-
-# Standard temporary files and directories created during processing
-STANDARD_TEMP_FILES = {"replace.txt"}
-STANDARD_TEMP_DIRS = {}
-
-
-def cleanup_temp_files(
-    temp_files: Optional[Set[str]] = None,
-    temp_dirs: Optional[Set[str]] = None,
-    include_standard: bool = True,
-) -> None:
-    """
-    Clean up temporary files and directories.
-
-    Args:
-        temp_files: Optional set of specific temporary files to clean up
-        temp_dirs: Optional set of specific temporary directories to clean up
-        include_standard: Whether to also clean up standard temporary files/directories
-    """
-    files_to_clean = set(temp_files) if temp_files else set()
-    dirs_to_clean = set(temp_dirs) if temp_dirs else set()
-
-    if include_standard:
-        files_to_clean.update(STANDARD_TEMP_FILES)
-        dirs_to_clean.update(STANDARD_TEMP_DIRS)
-
-    # Clean up directories
-    for dir_path in dirs_to_clean:
-        if os.path.exists(dir_path) and os.path.isdir(dir_path):
-            try:
-                # Preserve replace_manual directory for manual replacements
-                if os.path.basename(dir_path) == "replace_manual":
-                    continue
-                shutil.rmtree(dir_path)
-                LOG.info(f"Removed temporary directory: {dir_path}")
-            except Exception as e:
-                LOG.warning(
-                    f"Failed to remove temporary directory {dir_path}: {str(e)}"
-                )
-
-    # Clean up files
-    for file_path in files_to_clean:
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            try:
-                os.remove(file_path)
-                LOG.info(f"Removed temporary file: {file_path}")
-            except Exception as e:
-                LOG.warning(f"Failed to remove temporary file {file_path}: {str(e)}")
 
 
 class GeometryService:
@@ -98,39 +50,12 @@ class GeometryService:
         self.crystal_service = CrystalBuilder()
         self.mixer_service = CrosslinkMixer()
         self.replacer_service = CrosslinkReplacer()
-        self.temp_files: Set[str] = set()
-        self.temp_dirs: Set[str] = set()
         self.file_manager = file_manager or FileManager(config)
         self.original_dir = Path.cwd()
         self.temp_dir = None
 
         # Set file manager on all services
         self.crystal_service.set_file_manager(self.file_manager)
-
-    def _track_temp_resources(
-        self, files: Optional[List[str]] = None, dirs: Optional[List[str]] = None
-    ) -> None:
-        """
-        Track temporary files and directories for later cleanup.
-
-        Args:
-            files: List of file paths to track
-            dirs: List of directory paths to track
-        """
-        if files:
-            self.temp_files.update(files)
-            for file_path in files:
-                LOG.info(f"Tracking temporary file: {file_path}")
-
-        if dirs:
-            self.temp_dirs.update(dirs)
-            for dir_path in dirs:
-                LOG.info(f"Tracking temporary directory: {dir_path}")
-
-    def _cleanup(self) -> None:
-        """Clean up all tracked temporary resources."""
-        LOG.info("Cleaning up temporary files...")
-        cleanup_temp_files(self.temp_files, self.temp_dirs)
 
     async def _handle_mixing_only(self) -> Tuple[Optional[System], Optional[Path]]:
         """
@@ -164,20 +89,6 @@ class GeometryService:
             LOG.debug(
                 f"{Fore.BLUE}Using mixing directory: {mixing_dir}{Style.RESET_ALL}"
             )
-
-            # Process ratio_mix format
-            if isinstance(self.config.ratio_mix, str):
-                ratio_dict: Dict[str, int] = {}
-                for part in self.config.ratio_mix.split():
-                    if ":" in part:
-                        key, value = part.split(":")
-                        try:
-                            ratio_dict[key] = int(value)
-                        except ValueError:
-                            LOG.error(f"Invalid ratio value in {part}")
-                            ratio_dict[key] = 0
-                self.config.ratio_mix = ratio_dict
-                LOG.info(f"Converted ratio_mix: {self.config.ratio_mix}")
 
             # Validate ratio_mix
             if not isinstance(self.config.ratio_mix, dict):
@@ -432,7 +343,6 @@ class GeometryService:
                     output_prefix = temp_config.output or temp_config.species
                     output_pdb_path = geometry_dir / f"{output_prefix}.pdb"
 
-                    import logging
                     original_level = LOG.level
                     try:
                         LOG.setLevel(logging.ERROR)  # Suppress non-error messages
@@ -618,7 +528,6 @@ class GeometryService:
 
         except Exception as e:
             LOG.error(f"Error during full generation: {str(e)}")
-            import traceback
             LOG.error(f"Traceback: {traceback.format_exc()}")
             raise GeometryGenerationError(
                 message=f"Failed to complete geometry generation: {str(e)}",
@@ -712,148 +621,3 @@ class GeometryService:
                 context={"config": self.config.model_dump()},
             )
 
-
-async def mix_geometry(system: System, config: ColbuilderConfig) -> System:
-    """
-    Mix geometry types in system.
-
-    Standalone function that creates a CrosslinkMixer and invokes its
-    mix method.
-
-    Args:
-        system: System containing models to be mixed
-        config: Configuration for mixing operation
-
-    Returns:
-        Mixed system
-    """
-    mixer = CrosslinkMixer()
-    mixing_dir = Path(config.working_directory) / ".tmp" / "mixing_crosslinks"
-    mixing_dir.mkdir(parents=True, exist_ok=True)
-
-    system, _ = await mixer.mix(system, config, mixing_dir)
-    return system
-
-
-async def replace_geometry(
-    system: System, config: ColbuilderConfig
-) -> Optional[System]:
-    """
-    Replace crosslinks in system according to replacement ratio.
-
-    Standalone function that handles both direct replacement (when no system
-    is provided) and system-based replacement.
-
-    Args:
-        system: System containing models with crosslinks, or None for direct replacement
-        config: Configuration for replacement
-
-    Returns:
-        System with replaced crosslinks, or None for direct replacement
-    """
-    file_manager = FileManager(config)
-    original_dir = Path.cwd()
-
-    try:
-        replace_dir = Path(config.working_directory) / ".tmp" / "replace_crosslinks"
-        replace_dir.mkdir(parents=True, exist_ok=True)
-        file_manager.temp_dirs.add(replace_dir)
-
-        LOG.info(f"Created clean replacement directory: {replace_dir}")
-
-        os.chdir(replace_dir)
-
-        replacer = CrosslinkReplacer()
-        replacer.file_manager = file_manager
-
-        temp_config = config.copy()
-        temp_config.working_directory = replace_dir
-
-        is_direct_replacement = (
-            system is None
-            and config.replace_file
-            and os.path.exists(config.replace_file)
-            and _is_pdb_file(config.replace_file)
-        )
-
-        if is_direct_replacement:
-            replace_path = Path(config.replace_file)
-            local_replace = replace_dir / replace_path.name
-            shutil.copy2(replace_path, local_replace)
-            temp_config.replace_file = local_replace
-
-            LOG.info("Using direct replacement approach")
-            system, output_pdb = await replacer.replace_direct(temp_config, replace_dir)
-
-            if output_pdb and output_pdb.exists():
-                output_prefix = temp_config.species or "output"
-                if temp_config.output:
-                    output_prefix = temp_config.output
-
-                final_pdb = file_manager.get_output_path(output_prefix, ".pdb")
-                shutil.copy2(output_pdb, final_pdb)
-                LOG.info(f"Copied final output to: {final_pdb}")
-
-                if final_pdb.exists():
-                    try:
-                        crystal = Crystal(pdb=str(final_pdb))
-                        return System(crystal=crystal)
-                    except Exception as e:
-                        LOG.warning(
-                            f"Could not create minimal system after direct replacement: {e}"
-                        )
-
-            return None
-        else:
-            if not system:
-                raise GeometryGenerationError(
-                    message="No system provided for replacement and input file is not a valid PDB",
-                    error_code="GEO_ERR_004",
-                )
-
-            system = await replacer.replace_in_system(system, temp_config, replace_dir)
-
-            output_prefix = temp_config.species or "output"
-            if temp_config.output:
-                output_prefix = temp_config.output
-
-            output_pdb_path = replace_dir / f"{output_prefix}.pdb"
-            LOG.info(f"Writing final system PDB to {output_pdb_path}")
-            system.write_pdb(
-                pdb_out=output_prefix,
-                fibril_length=temp_config.fibril_length,
-                cleanup=False,
-                temp_dir=replace_dir,
-            )
-            LOG.info(f"PDB file written to {output_pdb_path}")
-
-            if output_pdb_path.exists():
-                final_pdb = file_manager.copy_to_output(output_pdb_path)
-            else:
-                LOG.warning(
-                    f"Output PDB file not found at expected path: {output_pdb_path}"
-                )
-
-            return system
-    finally:
-        os.chdir(original_dir)
-        LOG.debug(f"Returned to original directory: {original_dir}")
-
-
-def _is_pdb_file(file_path: str) -> bool:
-    """
-    Check if a file is a PDB file based on its contents.
-
-    Args:
-        file_path: Path to the file to check
-
-    Returns:
-        True if the file appears to be a PDB file, False otherwise
-    """
-    try:
-        with open(file_path, "r") as f:
-            first_line = f.readline().strip()
-            return first_line.startswith(("ATOM", "CRYST1", "HETATM"))
-    except Exception:
-        return False
-    
