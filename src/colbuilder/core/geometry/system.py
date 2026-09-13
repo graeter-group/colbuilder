@@ -218,13 +218,19 @@ class System:
             LOG.debug("System has no connectivity information")
         
         try:
-            # Get crystal header if available
+            # Get crystal header if available. Search for the CRYST1 record
+            # rather than assuming it is the first line, since a REMARK/TITLE/
+            # HEADER line ahead of it would otherwise be written out as a bogus
+            # "crystal header".
             crystal_header = None
             if self.crystal and self.crystal.pdb_file:
                 crystal_pdb = Path(self.crystal.pdb_file).with_suffix('.pdb')
                 if crystal_pdb.exists():
                     with open(crystal_pdb, 'r') as crystal_file:
-                        crystal_header = crystal_file.readline()
+                        for line in crystal_file:
+                            if line.startswith('CRYST1'):
+                                crystal_header = line
+                                break
             
             written_models = 0
             written_by_type = {}
@@ -235,7 +241,12 @@ class System:
                 # Write crystal header
                 if crystal_header:
                     f.write(crystal_header)
-                
+                else:
+                    LOG.warning(
+                        f"No CRYST1 record found for output PDB {pdb_out_path}; "
+                        f"downstream tools will use a default/arbitrary box."
+                    )
+
                 # Write model files if they exist (typically for initial crystal structures).
                 # Skip any model that will also be written from its caps file below, otherwise
                 # the same atoms are emitted twice (uncapped body + caps) -> 0 A overlaps.
