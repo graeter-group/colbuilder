@@ -72,14 +72,14 @@ class CrystalContacts:
 
     def write_crystalcontacts(
         self,
-        system: Optional[Any] = None,
+        system: Any,
         crystalcontacts_file: Optional[Union[str, Path]] = None,
     ) -> None:
         """
         Writes crystal contacts to txt file for Chimera.
 
         Args:
-            system (Optional[Any]): System object containing model information.
+            system (Any): System object containing model information.
             crystalcontacts_file (Optional[Union[str, Path]]): Path to the output crystal contacts file.
         """
         file_path = (
@@ -89,20 +89,11 @@ class CrystalContacts:
         )
 
         with open(file_path.with_suffix(".txt"), "w") as f:
-            if system is None:
-                contacts = self.read_crystalcontacts(file_path)
-                for key_cc, val_cc in self.t_matrix.items():
-                    f.write(f"Model {key_cc}\n")
-                    for i, val in enumerate(val_cc):
-                        f.write(
-                            f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
-                        )
-            else:
-                for model in system.get_models():
-                    f.write(f"Model {model}\n")
-                    for i, val in enumerate(
-                        system.get_model(model_id=model).transformation
-                    ):
-                        f.write(
-                            f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
-                        )
+            for model in system.get_models():
+                f.write(f"Model {model}\n")
+                for i, val in enumerate(
+                    system.get_model(model_id=model).transformation
+                ):
+                    f.write(
+                        f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
+                    )
