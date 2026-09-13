@@ -172,19 +172,8 @@ class ModellerWrapper:
 
     @timeit
     def execute_modeller(self) -> None:
-        """
-        Execute the MODELLER process.
-
-        This method calls run_modeller and handles any exceptions.
-
-        Raises:
-            Exception: If an error occurs during the MODELLER process.
-        """
-        try:
-            self.run_modeller()
-        except Exception as e:
-            LOG.error(f"An error occurred during the MODELLER process: {str(e)}")
-            raise
+        """Time and delegate to run_modeller, which already logs and raises on failure."""
+        self.run_modeller()
 
 
 @timeit

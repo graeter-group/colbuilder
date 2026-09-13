@@ -30,13 +30,12 @@ Example:
 ```python
 from colbuilder.core.sequence.mutate_crosslinks import apply_crosslinks
 from colbuilder.core.utils.config import ColbuilderConfig
-import pandas as pd
 
 # Define input files and crosslink information
 input_pdb = "input_structure.pdb"
 output_pdb = "output_structure.pdb"
-n_crosslink = pd.Series({"R1": "L5Y", "P1": "9.A"})
-c_crosslink = pd.Series({"R1": "L4Y", "P1": "947.C"})
+n_crosslink = {"R1": "L5Y", "P1": "9.A"}
+c_crosslink = {"R1": "L4Y", "P1": "947.C"}
 
 # Load configuration
 config = ColbuilderConfig(
@@ -54,8 +53,7 @@ print(f"Crosslinked structure saved to: {output_pdb}")
 # Copyright (c) 2024, ColBuilder Development Team
 # Distributed under the terms of the Apache License 2.0
 
-from typing import Optional, List, Tuple
-import pandas as pd
+from typing import Optional, List, Tuple, Dict
 from modeller import Environ
 from modeller.scripts import complete_pdb
 
@@ -98,13 +96,14 @@ def rename_residue_in_pdb(
 
 
 def parse_crosslink_info(
-    crosslink_row: Optional[pd.Series],
+    crosslink_row: Optional[Dict[str, str]],
 ) -> List[Tuple[str, str, int]]:
     """
-    Parse crosslink information from a pandas Series.
+    Parse crosslink information from a dict of R{i}/P{i} keys.
 
     Args:
-        crosslink_row (Optional[pd.Series]): A row from the crosslink DataFrame.
+        crosslink_row (Optional[Dict[str, str]]): Crosslink data, keyed like
+            {"R1": resname, "P1": "resnum.chain", ...} for up to 3 positions.
 
     Returns:
         List[Tuple[str, str, int]]: Parsed crosslink information as a list of tuples.
@@ -137,8 +136,8 @@ def parse_crosslink_info(
 def apply_crosslinks(
     input_pdb: str,
     output_pdb: str,
-    n_crosslink: Optional[pd.Series],
-    c_crosslink: Optional[pd.Series],
+    n_crosslink: Optional[Dict[str, str]],
+    c_crosslink: Optional[Dict[str, str]],
     cfg: ColbuilderConfig,
 ) -> str:
     """
@@ -147,8 +146,8 @@ def apply_crosslinks(
     Args:
         input_pdb (str): Path to input PDB file.
         output_pdb (str): Path to output PDB file.
-        n_crosslink (Optional[pd.Series]): N-terminal crosslink information.
-        c_crosslink (Optional[pd.Series]): C-terminal crosslink information.
+        n_crosslink (Optional[Dict[str, str]]): N-terminal crosslink information.
+        c_crosslink (Optional[Dict[str, str]]): C-terminal crosslink information.
         cfg (ColbuilderConfig): Configuration object.
 
     Returns:
