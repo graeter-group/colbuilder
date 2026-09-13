@@ -118,7 +118,7 @@ class Martini:
                         with open(cg_path, "r") as infile:
                             lines_written = 0
                             for line in infile:
-                                if line[0:6] in self.is_line:
+                                if line[0:6] in self.is_line or line.startswith("TER"):
                                     f.write(line)
                                     lines_written += 1
                             LOG.debug(f"Merged {lines_written} lines from {cg_path.name}")
@@ -141,7 +141,7 @@ class Martini:
                     with open(input_file, "r") as infile:
                         lines_written = 0
                         for line in infile:
-                            if line[0:6] in self.is_line:
+                            if line[0:6] in self.is_line or line.startswith("TER"):
                                 f.write(line)
                                 lines_written += 1
                         LOG.debug(f"Merged {lines_written} lines from {input_file}")
@@ -197,7 +197,7 @@ class Martini:
                 if file_path.exists():
                     try:
                         with open(file_path, "r") as file:
-                            pdb = [line for line in file if line[0:6] in self.is_line]
+                            pdb = [line for line in file if line[0:6] in self.is_line or line.startswith("TER")]
                         return pdb
                     except Exception as e:
                         LOG.error(f"Error reading PDB file {file_path}: {str(e)}")
@@ -212,7 +212,7 @@ class Martini:
             if path and path.exists():
                 try:
                     with open(path, "r") as file:
-                        pdb = [line for line in file if line[0:6] in self.is_line]
+                        pdb = [line for line in file if line[0:6] in self.is_line or line.startswith("TER")]
                     return pdb
                 except Exception as e:
                     LOG.error(f"Error reading PDB file {path}: {str(e)}")

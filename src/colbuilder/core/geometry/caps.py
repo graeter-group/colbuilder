@@ -190,7 +190,17 @@ class Caps:
                     if (line[17:20] == "NME" and line[12:16] == "3HH3") or (
                         line[13:16] == "OXT"
                     ):
-                        f_out.write("TER \n")
+                        # Pad to the standard 6-char PDB record-name field
+                        # ("TER   "), matching amber.py/martini.py/system.py's
+                        # is_line tuples. An under-padded "TER \n" silently
+                        # fails their line.startswith(pdb_line_types) /
+                        # line[0:6] in is_line checks and gets dropped during
+                        # merging -- and since pdb2gmx runs with -merge all,
+                        # a missing TER is the only thing separating two
+                        # chains, so pdb2gmx can misidentify a real chain
+                        # terminus as internal (wrong rtp entry, e.g. "Atom
+                        # OXT ... not found in rtp entry ALA").
+                        f_out.write("TER   \n")
 
         # Cleanup temporary files
         try:

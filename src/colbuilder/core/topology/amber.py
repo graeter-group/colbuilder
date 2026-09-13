@@ -149,7 +149,12 @@ class Amber:
             if os.path.exists(path):
                 with open(path, "r") as f_in:
                     for line in f_in:
-                        if line.startswith(self.pdb_line_types):
+                        # Loose "TER" fallback: a TER record not padded to
+                        # the full 6-char pdb_line_types entry must still be
+                        # kept -- dropping it silently merges two chains,
+                        # which pdb2gmx (-merge all) then relies solely on
+                        # TER to separate.
+                        if line.startswith(self.pdb_line_types) or line.startswith("TER"):
                             out.write(line)
             else:
                 LOG.debug(f"Caps file not found: {path}")
