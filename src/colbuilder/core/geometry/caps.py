@@ -2,10 +2,8 @@
 # Distributed under the terms of the Apache License 2.0
 
 from pymol import cmd, editor
-import subprocess
 from typing import List, Dict, Any, Optional
 import os
-import shutil
 from pathlib import Path
 
 from colbuilder.core.utils.logger import setup_logger
@@ -160,10 +158,8 @@ class Caps:
 
         cmd.save("tmp.pdb")
         cmd.delete(name=str(pdb_id))
-        caps_output_file = output_dir / f"{pdb_id}.caps.pdb"
 
-        result = self.write_caps(pdb="tmp.pdb", pdb_id=pdb_id, output_dir=output_dir)
-        return result
+        return self.write_caps(pdb="tmp.pdb", pdb_id=pdb_id, output_dir=output_dir)
 
     def write_caps(self, pdb: str, pdb_id: int, output_dir: Path) -> str:
         """
