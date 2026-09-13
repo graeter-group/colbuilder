@@ -197,7 +197,7 @@ class CrystalBuilder:
             for mid in system.get_models():
                 model_obj = system.get_model(model_id=mid)
                 if system_connect and mid in system_connect:
-                    model_obj.add_connect(connect_id=mid, connect=system_connect[mid])
+                    model_obj.add_connect(connect=system_connect[mid])
                 else:
                     model_obj.connect = None            
 
@@ -627,7 +627,7 @@ class CrystalBuilder:
                 try:
                     model_connections = system_connect[model_id]
                     system.get_model(model_id=model_id).add_connect(
-                        connect_id=model_id, connect=model_connections
+                        connect=model_connections
                     )
                     connection_count += (
                         len(model_connections)

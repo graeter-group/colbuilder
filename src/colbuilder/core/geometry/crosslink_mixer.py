@@ -188,7 +188,7 @@ class CrosslinkMixer:
 
         for key_m in system_connect:
             system.get_model(model_id=key_m).add_connect(
-                connect_id=key_m, connect=system_connect[key_m]
+                connect=system_connect[key_m]
             )
 
         return system, connect

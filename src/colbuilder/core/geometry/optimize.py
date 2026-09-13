@@ -161,7 +161,6 @@ class Optimizer:
         for model_id, connected_models in contact_connect.items():
             try:
                 system.get_model(model_id=model_id).add_connect(
-                    connect_id=model_id,
                     connect=connected_models
                 )
             except Exception as e:
