@@ -56,23 +56,33 @@ LOG = setup_logger(__name__)
 
 
 def timeit(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator to measure and log the execution time of a function."""
+    """Decorator to measure and log the execution time of a function.
 
-    @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start_time = time.time()
-        if asyncio.iscoroutinefunction(func):
+    Picks a genuinely async or sync wrapper at decoration time based on
+    whether func is a coroutine function. A single sync wrapper that
+    special-cased the async path by returning an inner coroutine (as this
+    used to do) works when callers always `await` the decorated function
+    directly, but makes asyncio.iscoroutinefunction() report False on it
+    even though the original was async.
+    """
+    if asyncio.iscoroutinefunction(func):
 
-            async def async_wrapper():
-                result = await func(*args, **kwargs)
-                end_time = time.time()
-                LOG.debug(
-                    f"{func.__name__} executed in {end_time - start_time:.2f} seconds"
-                )
-                return result
+        @wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            start_time = time.time()
+            result = await func(*args, **kwargs)
+            end_time = time.time()
+            LOG.debug(
+                f"{func.__name__} executed in {end_time - start_time:.2f} seconds"
+            )
+            return result
 
-            return async_wrapper()
-        else:
+        return async_wrapper
+    else:
+
+        @wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            start_time = time.time()
             result = func(*args, **kwargs)
             end_time = time.time()
             LOG.debug(
@@ -80,4 +90,4 @@ def timeit(func: Callable[..., Any]) -> Callable[..., Any]:
             )
             return result
 
-    return wrapper
+        return sync_wrapper
