@@ -255,7 +255,16 @@ class CrosslinkMixer:
             chim = Chimera(cfg, pdb=str(system_dir))
             result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
             if result.returncode != 0:
-                LOG.error("Chimera swapaa failed for %s: %s", system_dir, result.stderr.decode() if hasattr(result, "stderr") else result.stderr)
+                # Chimera.swapaa runs subprocess.run with text=True on its normal
+                # completion path, so result.stderr is already a str there; only
+                # its internal exception-handling fallback returns bytes. Calling
+                # .decode() unconditionally raised AttributeError on the (far more
+                # common) str case, masking the real Chimera error under a generic
+                # "'str' object has no attribute 'decode'" from the outer except.
+                stderr = result.stderr
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode()
+                LOG.error("Chimera swapaa failed for %s: %s", system_dir, stderr)
                 return False
 
             repair_missing_backbone_atoms(system_dir, lines, pre_mutation_snapshot)

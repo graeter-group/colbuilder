@@ -175,9 +175,12 @@ class Chimera(object):
             return result
         except Exception as e:
             LOG.error(f"Error executing Chimera command: {str(e)}")
+            # subprocess.run above uses text=True, so its normal-completion
+            # result carries str stdout/stderr; match that type here so
+            # callers don't have to guess which path produced this result.
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=1,
-                stdout=b"",
-                stderr=str(e).encode() if hasattr(str(e), "encode") else str(e),
+                stdout="",
+                stderr=str(e),
             )
