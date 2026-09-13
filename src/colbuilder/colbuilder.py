@@ -26,14 +26,12 @@ Dependencies:
 
 import sys
 import os
-import time
 import logging
 import asyncio
 import traceback
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, Union, List
+from typing import Dict, Any, Tuple, Optional
 import click
-import yaml
 from colorama import init, Fore, Style
 import shutil
 from datetime import datetime
@@ -56,20 +54,13 @@ from colbuilder.core.utils.config import (
 )
 from colbuilder.core.utils.exceptions import (
     ColbuilderError,
-    ColbuilderErrorDetail,
     ConfigurationError,
     SystemError,
     SequenceGenerationError,
     GeometryGenerationError,
     TopologyGenerationError,
-    ErrorCategory,
-    ErrorSeverity,
 )
 from colbuilder.core.geometry.system import System
-
-ConfigDict = Dict[str, Any]
-RatioDict = Dict[str, int]
-PathLike = Union[str, Path]
 
 LOG = setup_logger(__name__)
 
@@ -141,37 +132,6 @@ def copy_config_to_tmp(config_file_path: Path, tmp_dir: Path) -> Optional[Path]:
     except Exception as e:
         LOG.error(f"Could not copy config file: {e}")
         return None
-
-
-def parse_ratio_mix(ratio_str: str) -> RatioDict:
-    """
-    Parse mixing ratio string into a dictionary.
-
-    Converts a string representation of mixing ratios into a
-    dictionary mapping types to percentages.
-
-    Args:
-        ratio_str: String in format "Type:percentage Type:percentage"
-
-    Returns:
-        Dictionary mapping types to percentages
-
-    Raises:
-        GeometryGenerationError: If parsing fails or ratios invalid
-    """
-    try:
-        ratio_mix = dict(item.split(":") for item in ratio_str.split())
-        ratio_mix = {k: int(v) for k, v in ratio_mix.items()}
-        if sum(ratio_mix.values()) != 100:
-            raise ValueError("Mix ratios must sum to 100%")
-        return ratio_mix
-    except (ValueError, IndexError) as e:
-        raise GeometryGenerationError(
-            message="Invalid mixing ratio format",
-            original_error=e,
-            error_code="GEO_ERR_003",
-            context={"ratio_string": ratio_str, "error_details": str(e)},
-        )
 
 
 def display_title() -> None:
@@ -259,7 +219,6 @@ async def run_geometry_generation(
 
 
 @timeit
-#TODO: double check this!!
 async def run_topology_generation(
     config: ColbuilderConfig,
     system_path: Path,
