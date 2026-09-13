@@ -273,11 +273,6 @@ class SystemError(ColbuilderError):
     These are typically critical errors that affect system operation.
     """
 
-    @classmethod
-    def get_error_info(cls, error_code: str):
-        """Get error information for a system error code."""
-        return SYSTEM_ERRORS[error_code]
-
     def __init__(
         self,
         message: str,
