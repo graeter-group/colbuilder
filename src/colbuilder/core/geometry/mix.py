@@ -167,20 +167,6 @@ class Mix:
         if not self.system or not self.ratio_mix:
             raise ValueError("Both system and ratio_mix must be initialized")
 
-        # Handle string format for ratio_mix (e.g., "D:80 T:20")
-        if isinstance(self.ratio_mix, str):
-            ratio_dict = {}
-            for part in self.ratio_mix.split():
-                if ':' in part:
-                    key, value = part.split(':')
-                    try:
-                        ratio_dict[key] = int(value)
-                    except ValueError:
-                        LOG.error(f"Invalid ratio value in {part}")
-                        ratio_dict[key] = 0
-            self.ratio_mix = ratio_dict
-            LOG.debug(f"Converted ratio_mix from string: {self.ratio_mix}")
-
         total_models = self.system.get_size()
         model_ids = list(self.system.get_models())
 
@@ -222,9 +208,7 @@ class Mix:
             model = self.system.get_model(model_id=model_id)
             model_type = assigned_types.get(model_id, fallback_type)
             
-            # Set both type and crosslink_type attributes
             model.type = model_type
-            model.crosslink_type = model_type
             
             LOG.debug(f"Assigned type {model.type} to model {model_id}")
             
@@ -234,7 +218,6 @@ class Mix:
                     try:
                         connected_model = self.system.get_model(model_id=connect_id)
                         connected_model.type = model_type
-                        connected_model.crosslink_type = model_type
                     except Exception as e:
                         LOG.warning(f"Could not set type for connected model {connect_id}: {e}")
 

@@ -629,7 +629,6 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                     pdb_file=str(pdb_path),
                 )
                 model.type = structure_type
-                model.crosslink_type = structure_type
                 current_system.add_model(model=model)
                 LOG.debug(f"Added model {model_id} with type {structure_type}")
 
