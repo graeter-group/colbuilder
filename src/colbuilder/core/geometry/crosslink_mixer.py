@@ -86,42 +86,26 @@ class CrosslinkMixer:
         self.config: Optional[ColbuilderConfig] = None
 
     @staticmethod
-    def _build_system(
-        crystal: Crystal, crystalcontacts: Optional[CrystalContacts] = None
-    ) -> System:
+    def _build_system(crystal: Crystal, crystalcontacts: CrystalContacts) -> System:
         """Build a system from crystal and crystal contacts."""
         system = System(crystal=crystal, crystalcontacts=crystalcontacts)
 
-        if crystalcontacts is None:
-            LOG.warning("No crystal contacts provided. Adding a default model.")
-            from colbuilder.core.geometry.model import Model
+        transformation = system.crystalcontacts.read_t_matrix()
+        unit_cell: Dict[float, Any] = {
+            k: system.crystal.get_s_matrix(t_matrix=transformation[k])
+            for k in transformation
+        }
 
-            default_transformation = crystal.get_default_transformation()
-            default_unit_cell = crystal.get_s_matrix(t_matrix=default_transformation)
-            default_model = Model(
-                id=0,
-                transformation=default_transformation,
-                unit_cell=default_unit_cell,
+        from colbuilder.core.geometry.model import Model
+
+        for key_m in transformation:
+            model = Model(
+                id=key_m,
+                transformation=transformation[key_m],
+                unit_cell=unit_cell[key_m],
                 pdb_file=crystal.pdb_file,
             )
-            system.add_model(model=default_model)
-        else:
-            transformation = system.crystalcontacts.read_t_matrix()
-            unit_cell: Dict[float, Any] = {
-                k: system.crystal.get_s_matrix(t_matrix=transformation[k])
-                for k in transformation
-            }
-
-            from colbuilder.core.geometry.model import Model
-
-            for key_m in transformation:
-                model = Model(
-                    id=key_m,
-                    transformation=transformation[key_m],
-                    unit_cell=unit_cell[key_m],
-                    pdb_file=crystal.pdb_file,
-                )
-                system.add_model(model=model)
+            system.add_model(model=model)
 
         LOG.debug(f"Built system with {len(system.get_models())} models")
         return system
@@ -384,18 +368,6 @@ class CrosslinkMixer:
 
             self.fibril_length = config.fibril_length
             self.contact_distance = config.contact_distance
-
-            if isinstance(config.ratio_mix, str):
-                ratio_dict = {}
-                for part in config.ratio_mix.split():
-                    if ":" in part:
-                        key, value = part.split(":")
-                        try:
-                            ratio_dict[key] = int(value)
-                        except ValueError:
-                            LOG.error(f"Invalid ratio value in {part}")
-                            ratio_dict[key] = 0
-                config.ratio_mix = ratio_dict
 
             if not config.ratio_mix or not isinstance(config.ratio_mix, dict):
                 LOG.error(f"Invalid ratio_mix format in config: {config.ratio_mix}")
