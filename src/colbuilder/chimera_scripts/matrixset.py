@@ -32,11 +32,19 @@ try:
 
     rc("matrixset " + crystalcontacts_file + ".txt")
 
-    for i, model in enumerate(openModels.list()):
-        rc("write #{0} {1}.pdb".format(model.id, model.id))
-        rc("del #{0}".format(model.id))
-        rc("open {0}.pdb".format(i))
-        os.remove("{0}.pdb".format(i))
+    for model in openModels.list():
+        # Cache model.id before deleting: `del` below destroys the underlying
+        # C++ Model object, and re-reading model.id afterward raises
+        # "underlying C++ Model object is missing". Reusing the cached value
+        # (rather than the previous code's loop index) also keeps the
+        # filename open/remove below in sync with the filename actually
+        # written on the first line, instead of relying on model IDs and
+        # loop indices always coinciding.
+        model_id = model.id
+        rc("write #{0} {1}.pdb".format(model_id, model_id))
+        rc("del #{0}".format(model_id))
+        rc("open {0}.pdb".format(model_id))
+        os.remove("{0}.pdb".format(model_id))
 
     select_atoms = []
     for model in openModels.list():

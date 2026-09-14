@@ -24,7 +24,7 @@ try:
     rc(matrix_command)
     
     if not os.path.exists("{}.txt".format(crystalcontacts_file)):
-        print("Error: Crystal contacts file was not created:", "{}.txt".format(crystalcontacts_file))
+        print("Error: Crystal contacts file was not created: {}.txt".format(crystalcontacts_file))
 except Exception as e:
-    print("An error occurred:", str(e))
+    print("An error occurred: {}".format(str(e)))
     sys.exit(1)
