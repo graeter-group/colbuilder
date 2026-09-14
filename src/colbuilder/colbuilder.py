@@ -47,7 +47,6 @@ from colbuilder.core.utils.files import FileManager
 from colbuilder.core.utils.config import (
     ColbuilderConfig,
     get_config,
-    OperationMode,
     load_yaml_config,
     resolve_relative_paths,
     validate_config,

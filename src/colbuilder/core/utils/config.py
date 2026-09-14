@@ -52,7 +52,7 @@ config = get_config(
 
 # Access configuration attributes
 print(config.working_directory)  # Output: /path/to/working_dir
-print(config.mode)  # Output: OperationMode.SEQUENCE
+print(config.sequence_generator)  # Output: True
 
 # Validate paths and input files
 config.validate_paths()
@@ -71,7 +71,6 @@ print(output_path)  # Output: /path/to/working_dir/output_file.pdb
 # Copyright (c) 2024, Colbuilder Development Team
 # Distributed under the terms of the Apache License 2.0
 
-from enum import Flag, auto, Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union, Literal, Any
 from pydantic import (
@@ -98,17 +97,6 @@ from .exceptions import (
 from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
-
-
-class OperationMode(Flag):
-    """Operation modes for the Colbuilder pipeline."""
-
-    NONE = 0
-    SEQUENCE = auto()
-    GEOMETRY = auto()
-    TOPOLOGY = auto()
-    MIX = auto()
-    REPLACE = auto()
 
 
 def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
@@ -156,8 +144,6 @@ def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, 
 class ColbuilderConfig(BaseModel):
     """Main configuration class for the Colbuilder pipeline."""
 
-    # Operation mode
-    mode: Optional[OperationMode] = Field(None, description="Operation mode")
     debug: bool = Field(default=False, description="Enable debug logging")
     working_directory: Optional[Path] = Field(
         default=Path.cwd(), description="Working directory"
@@ -384,11 +370,10 @@ class ColbuilderConfig(BaseModel):
             data["working_directory"] = Path.cwd().resolve()
 
         super().__init__(**data)
-        # ratio_mix is converted/validated (incl. sum-to-100) by the
-        # validate_ratio_mix field validator; no extra conversion needed here.
-        self.solution_space = self._convert_to_tuple(self.solution_space)
-        self.files_mix = tuple(self.files_mix) if self.files_mix else None
-        self.set_mode()
+        # ratio_mix, solution_space, and files_mix are all already
+        # converted/validated by their respective field validators
+        # (validate_ratio_mix, validate_solution_space, validate_files_mix)
+        # during the super().__init__() call above.
 
     def get_project_data_path(self, relative_path: str) -> Path:
         """
@@ -454,8 +439,6 @@ class ColbuilderConfig(BaseModel):
         # broken/incomplete install early with a clear message instead of a
         # confusing failure deep inside whichever stage first needs the file.
         self.validate_paths()
-
-        self.set_mode()
 
     @model_validator(mode="after")
     def validate_geometry_requirements(self) -> "ColbuilderConfig":
@@ -529,35 +512,6 @@ class ColbuilderConfig(BaseModel):
     def convert_species_to_lowercase(cls, value: str) -> str:
         """Convert species name to lowercase."""
         return value.lower() if value else value
-
-    def _convert_ratio_mix(self, value: Union[str, Dict[str, int]]) -> Dict[str, int]:
-        """Convert string ratio mix to dictionary."""
-        if isinstance(value, str):
-            try:
-                return {
-                    item.split(":")[0]: int(item.split(":")[1])
-                    for item in value.split()
-                }
-            except (ValueError, IndexError):
-                raise ConfigurationError(
-                    "Invalid ratio_mix format. Expected 'Type:percentage Type:percentage'",
-                    error_code="CFG_ERR_004",
-                )
-        elif isinstance(value, dict):
-            return value
-        else:
-            raise ConfigurationError(
-                f"Invalid ratio_mix type. Expected string or dictionary, got {type(value).__name__}",
-                error_code="CFG_ERR_004",
-            )
-
-    def _convert_to_tuple(
-        self, value: Union[List[float], Tuple[float, float, float]]
-    ) -> Tuple[float, float, float]:
-        """Convert list to tuple for solution space."""
-        if isinstance(value, list):
-            return tuple(value)
-        return value
 
     @field_validator("solution_space", mode="before")
     def validate_solution_space(cls, value):
@@ -642,22 +596,6 @@ class ColbuilderConfig(BaseModel):
             f"Invalid manual_replacements type: {type(value).__name__}",
             error_code="CFG_ERR_006",
         )
-
-    def set_mode(self):
-        """Set operation mode based on configuration flags."""
-        self.mode = OperationMode.NONE
-        if self.sequence_generator:
-            self.mode |= OperationMode.SEQUENCE
-        if self.geometry_generator:
-            self.mode |= OperationMode.GEOMETRY
-        if self.topology_generator:
-            self.mode |= OperationMode.TOPOLOGY
-        if self.mix_bool:
-            self.mode |= OperationMode.MIX
-        if self.replace_bool:
-            self.mode |= OperationMode.REPLACE
-        if self.auto_fix_unpaired:
-            self.mode |= OperationMode.REPLACE
 
     def validate_paths(self):
         """Validate existence of required input paths and files."""
@@ -858,7 +796,7 @@ class ColbuilderConfig(BaseModel):
 
     def __str__(self):
         """String representation of the configuration."""
-        return f"ColbuilderConfig(mode={self.mode}, pdb_file={self.pdb_file}, output={self.output})"
+        return f"ColbuilderConfig(pdb_file={self.pdb_file}, output={self.output})"
 
     @property
     def output(self) -> str:
