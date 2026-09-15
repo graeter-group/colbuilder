@@ -308,26 +308,55 @@ class GeometryService:
                         finder = UnpairedCrosslinkFinder(base_dir=working_dir_root)
                         auto_manual_replacements, auto_manual_file = finder.run()
                         if auto_manual_replacements:
-                            temp_config.manual_replacements = auto_manual_replacements
-                            temp_config.replace_bool = True
-                            temp_config.auto_fix_unpaired = True
-
-                            # Propagate to shared config so downstream (topology) uses replace_manual
-                            try:
-                                self.config.auto_fix_unpaired = True
-                            except Exception:
-                                pass
-
-                            if (
-                                temp_config.ratio_replace is None
-                                and temp_config.replace_file is None
-                            ):
-                                temp_config.ratio_replace = 0
-
-                            LOG.info(
-                                "Auto-detected %d unpaired crosslink marker(s); enabling replacement.",
-                                len(auto_manual_replacements),
+                            user_requested_replacement = bool(
+                                (
+                                    temp_config.ratio_replace is not None
+                                    and temp_config.ratio_replace > 0
+                                )
+                                or temp_config.replace_file
+                                or temp_config.manual_replacements
                             )
+                            if user_requested_replacement:
+                                # Setting manual_replacements here would silently
+                                # discard the user's own ratio_replace/replace_file/
+                                # manual_replacements request: manual_replacements
+                                # takes precedence over ratio_replace by design (see
+                                # geometry_replacer.py), so auto-populating it with
+                                # just the auto-detected unpaired markers would mean
+                                # the user's explicit request never runs at all.
+                                # Leave their config alone instead -- the unpaired
+                                # markers only get fixed if the user's own selection
+                                # happens to include them.
+                                LOG.warning(
+                                    "Auto-detected %d unpaired crosslink marker(s), "
+                                    "but not auto-fixing them: a replacement was "
+                                    "already requested (ratio_replace/replace_file/"
+                                    "manual_replacements), which takes precedence. "
+                                    "These markers stay unpaired unless your own "
+                                    "replacement selection covers them.",
+                                    len(auto_manual_replacements),
+                                )
+                            else:
+                                temp_config.manual_replacements = auto_manual_replacements
+                                temp_config.replace_bool = True
+                                temp_config.auto_fix_unpaired = True
+
+                                # Propagate to shared config so downstream (topology) uses replace_manual
+                                try:
+                                    self.config.auto_fix_unpaired = True
+                                except Exception:
+                                    pass
+
+                                if (
+                                    temp_config.ratio_replace is None
+                                    and temp_config.replace_file is None
+                                ):
+                                    temp_config.ratio_replace = 0
+
+                                LOG.info(
+                                    "Auto-detected %d unpaired crosslink marker(s); enabling replacement.",
+                                    len(auto_manual_replacements),
+                                )
                         else:
                             LOG.debug("No unpaired crosslinks detected")
                     except Exception as e:
