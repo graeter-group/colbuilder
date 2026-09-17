@@ -314,6 +314,7 @@ class Martini:
             # 2) Inspect first/last residue per chain *after* the rename above
             first_res = {}   # chain -> resname
             last_res  = {}   # chain -> (resid, resname)
+            last_oxt  = {}   # chain -> whether the current last residue has an OXT atom
             for line in pdb:
                 if not line.startswith(("ATOM  ", "HETATM")):
                     continue
@@ -321,17 +322,22 @@ class Martini:
                 if ch not in self.is_chain:
                     continue
                 resname = line[17:20].strip()
+                atomname = line[12:16].strip()
                 try:
                     resid = int(line[22:26])
                 except ValueError:
                     continue
                 if ch not in first_res:
                     first_res[ch] = resname
-                if ch not in last_res or resid >= last_res[ch][0]:
+                if ch not in last_res or resid > last_res[ch][0]:
                     last_res[ch] = (resid, resname)
+                    last_oxt[ch] = atomname == "OXT"
+                elif resid == last_res[ch][0] and atomname == "OXT":
+                    last_oxt[ch] = True
 
             firsts = set(first_res.values()) if first_res else set()
             lasts  = {name for _, name in last_res.values()} if last_res else set()
+            any_last_has_oxt = any(last_oxt.values())
 
             # Residues meaning "this terminus is already capped / is a crosslink
             # block", so martinize2 must NOT add another terminal modification.
@@ -351,8 +357,18 @@ class Martini:
             nter_flag = "none"
 
             # C-terminus: apply the NME cap unless the chain already ends in a
-            # cap/crosslink block, in which case use 'none'.
-            cter_flag = "none" if (not lasts or (lasts & special_last)) else "NME"
+            # cap/crosslink block, or its last residue already carries its own
+            # OXT atom -- a complete, naturally-terminated carboxylic acid.
+            # Applying NME on top of an existing OXT is a modification conflict
+            # that crashes vermouth's modification-patching (ValueError: Cannot
+            # apply modification to block), confirmed by direct reproduction:
+            # martinize2 succeeds on the identical input once -cter is 'none'
+            # instead of 'NME' for such a residue.
+            cter_flag = (
+                "none"
+                if (not lasts or (lasts & special_last) or any_last_has_oxt)
+                else "NME"
+            )
 
             # LOG.debug(f"cap_pdb decided: -nter {nter_flag}, -cter {cter_flag} (first={firsts}, last={lasts})")
             return pdb, cter_flag, nter_flag
