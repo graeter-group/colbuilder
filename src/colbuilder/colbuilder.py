@@ -26,14 +26,12 @@ Dependencies:
 
 import sys
 import os
-import time
 import logging
 import asyncio
 import traceback
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, Union, List
+from typing import Dict, Any, Tuple, Optional
 import click
-import yaml
 from colorama import init, Fore, Style
 import shutil
 from datetime import datetime
@@ -49,27 +47,19 @@ from colbuilder.core.utils.files import FileManager
 from colbuilder.core.utils.config import (
     ColbuilderConfig,
     get_config,
-    OperationMode,
     load_yaml_config,
     resolve_relative_paths,
     validate_config,
 )
 from colbuilder.core.utils.exceptions import (
     ColbuilderError,
-    ColbuilderErrorDetail,
     ConfigurationError,
     SystemError,
     SequenceGenerationError,
     GeometryGenerationError,
     TopologyGenerationError,
-    ErrorCategory,
-    ErrorSeverity,
 )
 from colbuilder.core.geometry.system import System
-
-ConfigDict = Dict[str, Any]
-RatioDict = Dict[str, int]
-PathLike = Union[str, Path]
 
 LOG = setup_logger(__name__)
 
@@ -90,7 +80,6 @@ def print_version(ctx: click.Context, param: click.Parameter, value: bool) -> No
 
 
 from colbuilder.core.sequence.main_sequence import build_sequence
-from colbuilder.core.geometry.main_geometry import build_geometry_anywhere
 from colbuilder.core.topology.main_topology import build_topology
 
 
@@ -144,37 +133,6 @@ def copy_config_to_tmp(config_file_path: Path, tmp_dir: Path) -> Optional[Path]:
         return None
 
 
-def parse_ratio_mix(ratio_str: str) -> RatioDict:
-    """
-    Parse mixing ratio string into a dictionary.
-
-    Converts a string representation of mixing ratios into a
-    dictionary mapping types to percentages.
-
-    Args:
-        ratio_str: String in format "Type:percentage Type:percentage"
-
-    Returns:
-        Dictionary mapping types to percentages
-
-    Raises:
-        GeometryGenerationError: If parsing fails or ratios invalid
-    """
-    try:
-        ratio_mix = dict(item.split(":") for item in ratio_str.split())
-        ratio_mix = {k: int(v) for k, v in ratio_mix.items()}
-        if sum(ratio_mix.values()) != 100:
-            raise ValueError("Mix ratios must sum to 100%")
-        return ratio_mix
-    except (ValueError, IndexError) as e:
-        raise GeometryGenerationError(
-            message="Invalid mixing ratio format",
-            original_error=e,
-            error_code="GEO_ERR_003",
-            context={"ratio_string": ratio_str, "error_details": str(e)},
-        )
-
-
 def display_title() -> None:
     """Display the application title."""
     LOG.title("ColBuilder: Collagen Microfibril Builder")
@@ -220,7 +178,12 @@ async def run_geometry_generation(
     config: ColbuilderConfig, file_manager: Optional[FileManager] = None
 ) -> Tuple[Optional[System], Path]:
     """
-    Generate fibril geometry or handle mixing/replacement operations.
+    Handle mixing-only operation (mix_bool without geometry_generator).
+
+    The only caller guards this with `elif config.mix_bool and not
+    config.geometry_generator`, so that's the only case this needs to handle;
+    combined geometry + mixing/replacement goes through
+    GeometryService._handle_full_generation() directly instead.
 
     Args:
         config: Configuration settings
@@ -230,63 +193,17 @@ async def run_geometry_generation(
         Tuple containing the generated system (which might be None) and the output PDB path
 
     Raises:
-        GeometryGenerationError: If geometry generation or mixing fails
+        GeometryGenerationError: If mixing fails
     """
     try:
         LOG.subsection("Building Geometry or Mixing")
 
         current_file_manager = file_manager or FileManager(config)
 
-        # mixing-only
-        if config.mix_bool and not config.geometry_generator:
-            from colbuilder.core.geometry.main_geometry import GeometryService
+        from colbuilder.core.geometry.main_geometry import GeometryService
 
-            geometry_service = GeometryService(config, current_file_manager)
-            system, pdb_path = await geometry_service._handle_mixing_only()
-            return system, pdb_path
-
-        # geometry generation (or combined geometry + mixing/replacement)
-        if not config.pdb_file:
-            raise GeometryGenerationError(
-                message="PDB file not specified for geometry generation",
-                error_code="GEO_ERR_005",
-            )
-
-        pdb_path = Path(config.pdb_file).resolve()
-        if not pdb_path.exists():
-            raise GeometryGenerationError(
-                message=f"PDB file not found: {pdb_path}", error_code="GEO_ERR_005"
-            )
-
-        if config.contact_distance is None and not config.crystalcontacts_file:
-            raise GeometryGenerationError(
-                message="Either contact_distance or crystalcontacts_file must be provided",
-                error_code="GEO_ERR_001",
-                context={
-                    "contact_distance": config.contact_distance,
-                    "crystalcontacts_file": config.crystalcontacts_file,
-                },
-            )
-
-        output_path, pdb_path = await build_geometry_anywhere(
-            config, current_file_manager
-        )
-
-        if not pdb_path.exists():
-            raise GeometryGenerationError(
-                message=f"Expected output file not found: {pdb_path}",
-                error_code="GEO_ERR_001",
-            )
-
-        try:
-            from colbuilder.core.geometry.crystal import Crystal
-
-            crystal = Crystal(pdb=str(pdb_path))
-            system = System(crystal=crystal)
-        except Exception as e:
-            LOG.warning(f"Could not create system object from output PDB: {e}")
-            system = None
-
+        geometry_service = GeometryService(config, current_file_manager)
+        system, pdb_path = await geometry_service._handle_mixing_only()
         return system, pdb_path
 
     except Exception as e:
@@ -301,7 +218,6 @@ async def run_geometry_generation(
 
 
 @timeit
-#TODO: double check this!!
 async def run_topology_generation(
     config: ColbuilderConfig,
     system_path: Path,
@@ -406,8 +322,13 @@ async def run_topology_generation(
         # Generate topology files
         await build_topology(system, config, file_manager)
 
-        # Topology files are created in [species]_topology_files directory
-        topology_dir = Path(f"{config.species}_topology_files")
+        # Topology files are created in [species]_topology_files directory,
+        # except for Martini3 where main_topology.py names it
+        # [species]_[force_field]_topology_files (see the matching logic there).
+        if config.force_field == 'martini3':
+            topology_dir = Path(f"{config.species}_{config.force_field}_topology_files")
+        else:
+            topology_dir = Path(f"{config.species}_topology_files")
         if not topology_dir.exists():
             LOG.warning(f"Topology directory not found: {topology_dir}")
             topology_dir = Path()
@@ -549,12 +470,22 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
             results["sequence_msa"] = sequence_msa
             results["sequence_pdb"] = sequence_pdb
 
-            # Update PDB file for next steps if needed
-            if sequence_pdb and not config.pdb_file:
+            # Sequence generation just ran successfully: its output is always
+            # the correct input for the next stage, even if config.pdb_file
+            # was already set to something else (e.g. a stale leftover value).
+            if sequence_pdb:
                 config.pdb_file = sequence_pdb
                 LOG.info(
                     f"Using generated sequence PDB for further processing: {sequence_pdb}"
                 )
+
+        # Validate FASTA/PDB structural format (exactly 3 sequences/chains, TER
+        # records, CRYST1 for geometry input). Generated files match by
+        # construction, so this mainly guards user-provided input files.
+        # Logs its own warnings and raises ConfigurationError on hard failures.
+        from colbuilder.core.utils.config import validate_input_files as _validate_input_files
+
+        _validate_input_files(config)
 
         # Validate that the crosslinks present in an input PDB are consistent
         # with the crosslink types requested in the configuration. This catches
@@ -656,7 +587,6 @@ async def run_pipeline(config: ColbuilderConfig) -> Dict[str, Path]:
                     pdb_file=str(pdb_path),
                 )
                 model.type = structure_type
-                model.crosslink_type = structure_type
                 current_system.add_model(model=model)
                 LOG.debug(f"Added model {model_id} with type {structure_type}")
 
@@ -984,7 +914,8 @@ def initialize_logging(debug=False, working_dir=None, config_file=None):
     "-ratio_replace",
     "--ratio_replace",
     type=float,
-    help="Ratio of crosslinks to be replaced with Lysines",
+    help="Percentage (0-100) of crosslinks to REMOVE (replace with Lysines); "
+    "e.g. 70 removes 70%, leaving 30% — not the remaining density",
 )
 @click.option(
     "-replace_file",

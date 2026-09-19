@@ -14,7 +14,6 @@ class Model:
         transformation (List[float]): Transformation matrix.
         unit_cell (Optional[List[float]]): Unit cell parameters.
         connect (Optional[List[float]]): List of connected model IDs.
-        connect_id (Optional[float]): ID of the connection.
         crosslink (List[crosslink.Crosslink]): List of crosslink objects (empty if none present).
         type (str): Type of the model based on crosslinks ('NC' for non-crosslinked).
         cog (np.ndarray): Center of geometry of the model.
@@ -26,14 +25,12 @@ class Model:
         transformation: List[float],
         unit_cell: Optional[List[float]] = None,
         connect: Optional[List[float]] = None,
-        connect_id: Optional[float] = None,
         pdb_file: Optional[str] = None,
     ):
         self.id = id
         self.transformation = transformation
         self.unit_cell = unit_cell
         self.connect = connect
-        self.connect_id = connect_id
 
         self.crosslink = []
         if pdb_file:
@@ -44,16 +41,12 @@ class Model:
         crosslink_types = set(cross.type for cross in self.crosslink)
         self.type = "".join(sorted(crosslink_types)) if crosslink_types else "NC"
 
-        self.cog = self.get_cog()
-
-    def add_connect(self, connect_id: float, connect: List[float]) -> None:
+    def add_connect(self, connect: List[float]) -> None:
         """
         Add information about model's connections.
         Args:
-            connect_id (float): ID of the connection.
             connect (List[float]): List of connected model IDs.
         """
-        self.connect_id = connect_id
         self.connect = connect
 
     def delete_connect(self, connect_id: float) -> None:
@@ -88,21 +81,3 @@ class Model:
         if self.crosslink:
             return np.mean([cross.position for cross in self.crosslink], axis=0)
         return np.zeros(3)
-
-    def count_state(self, state: str) -> int:
-        """
-        Count crosslinks with certain state (no, replace, protect) in model.
-        Args:
-            state (str): State to count ('no', 'replace', or 'protect').
-        Returns:
-            int: Number of crosslinks with the specified state.
-        """
-        return sum(1 for cross in self.crosslink if cross.state == state)
-
-    def has_crosslinks(self) -> bool:
-        """
-        Check if the model has any crosslinks.
-        Returns:
-            bool: True if model has crosslinks, False otherwise.
-        """
-        return bool(self.crosslink)

@@ -179,8 +179,10 @@ class BioformatValidator:
         if current_header and current_sequence:
             sequences[current_header] = "".join(current_sequence)
 
-        if len(sequences) != 3:
-            errors.append(f"Expected exactly 3 sequences, found {len(sequences)}")
+        if sequence_count != 3:
+            errors.append(f"Expected exactly 3 sequences, found {sequence_count}")
+        elif len(sequences) != sequence_count:
+            errors.append("Duplicate FASTA headers found; each sequence must have a unique header")
 
         return sequences
 
@@ -198,11 +200,11 @@ class BioformatValidator:
 
     def _validate_pdb_content(self, content: str, errors: List[str]) -> None:
         """Validate PDB content and collect errors."""
-        lines = content.split("\n")
-        if not lines:
+        if not content.strip():
             raise GeometryGenerationError(
                 message="Empty PDB file provided", error_code="GEO_ERR_001"
             )
+        lines = content.split("\n")
 
         cryst_found = False
         chains = set()

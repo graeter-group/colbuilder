@@ -4,9 +4,6 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
-import numpy as np
-import os
-import shutil
 
 from colbuilder.core.utils.logger import setup_logger
 
@@ -68,20 +65,6 @@ class System:
         else:
             LOG.error(f"Model missing required attributes: {model}")
 
-    def set_crystal(self, crystal: Optional[Any] = None) -> None:
-        """
-        Set crystal information for all models in the system.
-
-        Parameters
-        ----------
-        crystal : Optional[Any], default=None
-            Crystal information to be set. If None, uses the system's crystal.
-        """
-        if crystal is None:
-            crystal = self.crystal
-        for model in self.system.values():
-            model.crystal = crystal
-
     def get_size(self) -> int:
         """
         Get the number of models in the system.
@@ -93,17 +76,6 @@ class System:
         """
         self.size = len(self.system)
         return self.size
-
-    def get_connect_size(self) -> int:
-        """
-        Get the number of connected models in the system.
-
-        Returns
-        -------
-        int
-            The number of connected models in the system.
-        """
-        return sum(1 for model in self.models if self.get_model(model_id=model).connect is not None)
 
     def get_model(self, model_id: float) -> Any:
         """
@@ -162,94 +134,6 @@ class System:
         del self.system[model_id]
         return self.system
 
-    def translate_system(self, crystal: Any, center: List[float]) -> None:
-        """
-        Translate the whole system to a certain position.
-
-        Parameters
-        ----------
-        crystal : Any
-            Crystal information for the translation.
-        center : List[float]
-            The target center position [x, y, z].
-        """
-        translate = [0, 0, center[2] - self.center_system(crystal=crystal)]
-        for model in self.system.values():
-            if model.connect is not None:
-                for connect_id in model.connect:
-                    crystal.translate_crystal(
-                        pdb=Path(model.type) / f"{int(connect_id)}.caps.pdb",
-                        translate=translate,
-                        bool_system=True
-                    )
-
-    def center_system(self, crystal: Any) -> float:
-        """
-        Calculate the center of the system.
-
-        Parameters
-        ----------
-        crystal : Any
-            Crystal information for the calculation.
-
-        Returns
-        -------
-        float
-            The z-coordinate of the system's center.
-        """
-        cog = []
-        for model_id in self.get_models():
-            if self.get_model(model_id=model_id).connect is not None:
-                for connect_id in self.get_model(model_id=model_id).connect:
-                    full_path = f"{self.get_model(model_id=model_id).type}/{int(connect_id)}.caps.pdb"
-                    try:
-                        cog.append(crystal.get_cog(pdb=full_path))
-                    except FileNotFoundError:
-                        LOG.error(f"File not found: {full_path}.pdb")
-                        continue
-        return np.mean(cog)
-
-    def count_states(self, state: str) -> int:
-        """
-        Count all models with a certain state.
-
-        Parameters
-        ----------
-        state : str
-            The state to count ('no', 'mut', or 'prot').
-
-        Returns
-        -------
-        int
-            The number of models with the specified state.
-        """
-        return sum(model.count_state(state=state) for model in self.system.values())
-    
-    def safe_remove_directory(self, directory: Union[str, Path]) -> None:
-        """
-        Safely remove a directory and all its contents.
-        
-        Parameters
-        ----------
-        directory : Union[str, Path]
-            The directory to remove
-        """
-        try:
-            directory_path = Path(directory).resolve() 
-            
-            if not directory_path.exists():
-                LOG.debug(f"Directory does not exist, nothing to remove: {directory_path}")
-                return
-                
-            if not any(directory_path.name == x for x in ['NC', 'T', 'D', 'TD', 'DT', 'M']):
-                LOG.warning(f"Refusing to remove directory that isn't a type directory: {directory_path}")
-                return
-                
-            shutil.rmtree(directory_path)
-            LOG.debug(f"Successfully removed directory: {directory_path}")
-        except Exception as e:
-            LOG.warning(f"Failed to remove directory {directory_path}: {str(e)}")
-            
     def write_pdb(self, pdb_out: Union[str, Path], fibril_length: float, cleanup: bool = True, temp_dir: Optional[Path] = None):
         """
         Write the system to a PDB file with proper type-specific caps handling.
@@ -334,13 +218,19 @@ class System:
             LOG.debug("System has no connectivity information")
         
         try:
-            # Get crystal header if available
+            # Get crystal header if available. Search for the CRYST1 record
+            # rather than assuming it is the first line, since a REMARK/TITLE/
+            # HEADER line ahead of it would otherwise be written out as a bogus
+            # "crystal header".
             crystal_header = None
             if self.crystal and self.crystal.pdb_file:
                 crystal_pdb = Path(self.crystal.pdb_file).with_suffix('.pdb')
                 if crystal_pdb.exists():
                     with open(crystal_pdb, 'r') as crystal_file:
-                        crystal_header = crystal_file.readline()
+                        for line in crystal_file:
+                            if line.startswith('CRYST1'):
+                                crystal_header = line
+                                break
             
             written_models = 0
             written_by_type = {}
@@ -351,7 +241,12 @@ class System:
                 # Write crystal header
                 if crystal_header:
                     f.write(crystal_header)
-                
+                else:
+                    LOG.warning(
+                        f"No CRYST1 record found for output PDB {pdb_out_path}; "
+                        f"downstream tools will use a default/arbitrary box."
+                    )
+
                 # Write model files if they exist (typically for initial crystal structures).
                 # Skip any model that will also be written from its caps file below, otherwise
                 # the same atoms are emitted twice (uncapped body + caps) -> 0 A overlaps.

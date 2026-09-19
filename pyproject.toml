@@ -28,8 +28,7 @@ dependencies = [
     "numpy>=1.25,<2",
     "vermouth==0.9.1",
     "pandas==2.2.2",
-    "biopython==1.84",
-    "scikit-learn",
+    "biopython>=1.87",
     "PyYAML",
     "pydantic>=2.0",
     "tqdm",
@@ -49,7 +48,7 @@ dev = [
 
 [project.scripts]
 colbuilder = "colbuilder.colbuilder:main"
-pdb2fasta = "colbuilder.utils.pdb2fasta:main"
+pdb2fasta = "colbuilder.core.utils.pdb2fasta:main"
 
 [project.urls]
 Homepage = "https://github.com/graeter-group/colbuilder"

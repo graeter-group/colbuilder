@@ -1,0 +1,23 @@
+# Step 3/3: build the microfibril from step 2's output PDB, then generate topology.
+geometry_generator: true
+topology_generator: true
+
+species: "rattus_norvegicus"
+pdb_file: "rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
+
+# Declares the crosslink types actually present in pdb_file above (PYD +
+# Glucosepane), so colbuilder's crosslink-type validation passes instead of
+# flagging a mismatch. additional_1_type must be repeated here even though no
+# sequence generation happens in this step.
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+additional_1_type: "Glucosepane"
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 25
+# Length of the assembled microfibril (nm).
+fibril_length: 67
+
+# Atomistic force field for topology generation.
+force_field: "amber99"

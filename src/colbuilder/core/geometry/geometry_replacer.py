@@ -1,28 +1,20 @@
 """
 Colbuilder Crosslink Replacement Module
 
-This module provides a unified approach to replacing crosslinks with standard amino acids
+This module provides an approach to replacing crosslinks with standard amino acids
 in a collagen microfibril, supporting both system-based and direct replacement approaches,
 including manual replacement lists and ratio-based automated selection.
 """
 
 import os
 import random
-import time
 import math
 import traceback
 import subprocess
 import shutil
-import numpy as np
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Tuple, cast, Set
-from colorama import init, Fore, Style
-
-# Import safe_load from yaml to parse raw config files
-try:
-    import yaml
-except ImportError:
-    yaml = None
+from typing import Optional, Dict, Any, List, Tuple, Set
+from colorama import Fore, Style
 
 from ..utils.exceptions import GeometryGenerationError
 from ..utils.logger import setup_logger
@@ -33,6 +25,152 @@ from .connect import Connect
 from .model import Model
 
 LOG = setup_logger(__name__)
+
+# ==================================================================================
+# Backbone Repair After Chimera Mutation
+# ==================================================================================
+#
+# Chimera's ``swapaa`` can silently drop the backbone O atom when the residue
+# being mutated is missing a sidechain atom the target residue needs (e.g.
+# LGX -> LYS: LGX's sidechain stops at CE, so Chimera has to build the extra
+# NZ via its rotamer library). Verified directly: mutating a residue that
+# already has every target atom keeps O; mutating one that is short a
+# sidechain atom drops it. AGS -> ARG is unaffected because AGS already
+# carries every ARG atom (only deletions, no additions). Backbone atom
+# *positions* never change with a sidechain mutation, so any that Chimera
+# drops can be restored verbatim from a pre-mutation snapshot.
+#
+# Shared between geometry_replacer.py's CrosslinkReplacer and
+# crosslink_mixer.py's per-type Chimera swapaa calls, since both drive
+# Chimera the same way and are subject to the same bug.
+
+_BACKBONE_ATOM_ORDER = ("N", "CA", "C", "O")
+
+
+def snapshot_residue_atoms(
+    type_dir: Path, instructions: List[str]
+) -> Dict[Tuple[str, str, str], Dict[str, str]]:
+    """Capture the atom lines of every residue about to be mutated.
+
+    Keyed by (pdb_file, resid, chain) -> {atom_name: original_line}.
+    """
+    targets: Dict[str, Set[Tuple[str, str]]] = {}
+    for instr in instructions:
+        parts = instr.split()
+        if len(parts) < 4:
+            continue
+        pdb_file, resid, chain = parts[0], parts[2], parts[3]
+        targets.setdefault(pdb_file, set()).add((resid, chain))
+
+    snapshot: Dict[Tuple[str, str, str], Dict[str, str]] = {}
+    for pdb_file, keys in targets.items():
+        path = type_dir / pdb_file
+        if not path.exists():
+            continue
+        with open(path, "r") as fh:
+            for line in fh:
+                if not line.startswith(("ATOM", "HETATM")) or len(line) < 54:
+                    continue
+                resid = line[22:26].strip()
+                chain = line[21].strip() or "A"
+                if (resid, chain) not in keys:
+                    continue
+                atom_name = line[12:16].strip()
+                snapshot.setdefault((pdb_file, resid, chain), {})[atom_name] = line
+    return snapshot
+
+
+def repair_missing_backbone_atoms(
+    type_dir: Path,
+    instructions: List[str],
+    snapshot: Dict[Tuple[str, str, str], Dict[str, str]],
+) -> None:
+    """Restore backbone atoms Chimera dropped while mutating a residue."""
+    by_file: Dict[str, List[Tuple[str, str, str]]] = {}
+    for instr in instructions:
+        parts = instr.split()
+        if len(parts) < 4:
+            continue
+        pdb_file, new_res, resid, chain = parts[0], parts[1].upper(), parts[2], parts[3]
+        by_file.setdefault(pdb_file, []).append((new_res, resid, chain))
+
+    for pdb_file, targets in by_file.items():
+        path = type_dir / pdb_file
+        if not path.exists():
+            continue
+        with open(path, "r") as fh:
+            lines = fh.readlines()
+
+        changed = False
+        for new_res, resid, chain in targets:
+            original_atoms = snapshot.get((pdb_file, resid, chain))
+            if not original_atoms:
+                continue
+
+            residue_indices = [
+                i
+                for i, line in enumerate(lines)
+                if line.startswith(("ATOM", "HETATM"))
+                and len(line) >= 26
+                and line[22:26].strip() == resid
+                and (line[21].strip() or "A") == chain
+            ]
+            if not residue_indices:
+                continue
+
+            present_names = {lines[i][12:16].strip() for i in residue_indices}
+            missing = [
+                n
+                for n in _BACKBONE_ATOM_ORDER
+                if n not in present_names and n in original_atoms
+            ]
+            if not missing:
+                continue
+
+            sidechain_idx = next(
+                (
+                    i
+                    for i in residue_indices
+                    if lines[i][12:16].strip() not in _BACKBONE_ATOM_ORDER
+                ),
+                residue_indices[-1] + 1,
+            )
+
+            new_lines = [
+                original_atoms[name][:17] + f"{new_res:<3}" + original_atoms[name][20:]
+                for name in missing
+            ]
+
+            LOG.warning(
+                "Restored backbone atom(s) %s in residue %s.%s of %s after Chimera "
+                "mutation (Chimera's swapaa can drop backbone atoms when it must "
+                "extend a truncated crosslink residue's sidechain).",
+                ", ".join(missing),
+                resid,
+                chain,
+                pdb_file,
+            )
+
+            lines[sidechain_idx:sidechain_idx] = new_lines
+            changed = True
+
+        if changed:
+            lines = renumber_atom_serials(lines)
+            with open(path, "w") as fh:
+                fh.writelines(lines)
+
+
+def renumber_atom_serials(lines: List[str]) -> List[str]:
+    """Renumber ATOM/HETATM serial numbers sequentially after inserting lines."""
+    out = []
+    serial = 0
+    for line in lines:
+        if line.startswith(("ATOM", "HETATM")):
+            serial += 1
+            line = f"{line[:6]}{serial:>5}{line[11:]}"
+        out.append(line)
+    return out
+
 
 # Residue mapping for paired crosslink replacement
 PAIRING_RULES = [
@@ -70,12 +208,16 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "LX5": "LYS",
     "LY4": "LYS",
     "LX4": "LYS",
-    # Enzymatic C/N-term markers (PYD)
     "LYX": "LYS",
     "LY3": "LYS",
     "LY2": "LYS",
 }
 DEFAULT_REPLACEMENT = "LYS"
+# For atom-specific Crosslink.position pairing only (true bond distance,
+# ~1.5-2.8 A measured). Methods that pair from _load_crosslinks_from_models'
+# whole-residue centroid positions need a looser cutoff (see the 10.0 A used
+# in _build_ratio_replacements_from_connect/_build_ratio_replacements_from_records)
+# since centroid-to-centroid distances for real bonded pairs run ~5-9 A.
 PAIR_DISTANCE_CUTOFF = 5.0
 
 PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4"}
@@ -109,6 +251,18 @@ ENZYMATIC_TRIOS = [
     ("L3X", "L2X", "LYY"),  # DPL
 ]
 PYD_THRESHOLD = 5.0  # distance cutoff to group enzymatic trios
+
+
+def _ratio_target(count: int, ratio_replace: float) -> int:
+    """Number of items to replace out of ``count`` for a requested percentage.
+
+    Rounds to the nearest integer so the requested percentage is the closest
+    achievable one. A requested ratio that rounds to 0 for a
+    given (small) system replaces nothing from that system.
+    """
+    if count <= 0 or ratio_replace <= 0:
+        return 0
+    return min(count, round(count * ratio_replace / 100.0))
 
 
 class CrosslinkReplacer:
@@ -147,7 +301,6 @@ class CrosslinkReplacer:
             
             # Calculate output path
             working_dir_root = Path(config.working_directory).resolve()
-            # Fix path corruption check
             str_wd = str(working_dir_root)
             if ".tmp" in str_wd and "geometry_gen" in str_wd:
                  working_dir_root = working_dir_root.parent.parent.parent 
@@ -245,6 +398,7 @@ class CrosslinkReplacer:
             # =================================================================================
 
             source_dir = geometry_gen_dir
+            auto_fix_applied = False
             if getattr(config, "auto_fix_unpaired", False) and getattr(config, "manual_replacements", None):
                 await self._apply_manual_replacements_to_dir(
                     source_dir=geometry_gen_dir,
@@ -258,6 +412,7 @@ class CrosslinkReplacer:
                     config=config,
                     system=system,
                 )
+                auto_fix_applied = True
                 if getattr(config, "_replacement_verbose", True):
                     LOG.section("Running crosslinks replacement")
                 source_dir = replace_manual_dir
@@ -340,8 +495,9 @@ class CrosslinkReplacer:
             )
             generated_from_ratio = False
 
-            # Check for manual replacements first
-            if not ratio_requested and getattr(config, "manual_replacements", None):
+            # Manual replacements take precedence over ratio-based replacement
+            # when both are configured (see config.yaml's documented contract).
+            if getattr(config, "manual_replacements", None):
                 manual_list = [
                     str(instr).strip()
                     for instr in config.manual_replacements
@@ -349,8 +505,8 @@ class CrosslinkReplacer:
                 ]
                 LOG.debug(f"Using {len(manual_list)} manual replacement instructions")
 
-            # If ratio requested and we have connect groups, use connect-based replacement
-            if ratio_requested:
+            # If ratio requested and no manual list took precedence, use connect-based replacement
+            if ratio_requested and not manual_list:
                 connect_groups = (
                     self._load_connect_groups(connect_file) if connect_file else []
                 )
@@ -444,21 +600,30 @@ class CrosslinkReplacer:
             # =================================================================================
             # STEP 3: EXECUTE CHIMERA REPLACEMENT
             # =================================================================================
-            
-            success = await self._run_chimera_command(
-                config, 
-                str(replace_file), 
-                type_dir, 
-                working_dir_root
-            )
-            
-            if not success:
-                raise GeometryGenerationError(
-                    message="Chimera execution failed.",
-                    error_code="GEO_ERR_004",
+            # Skip if _apply_manual_replacements_to_dir already mutated these exact
+            # instructions in STEP 1 (type_dir was populated from its output above).
+
+            if auto_fix_applied:
+                LOG.debug("Skipping redundant Chimera run; auto-fix already applied in STEP 1.")
+            else:
+                pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
+
+                success = await self._run_chimera_command(
+                    config,
+                    str(replace_file),
+                    type_dir,
+                    working_dir_root
                 )
 
-            LOG.debug("Chimera replacements executed.")
+                if not success:
+                    raise GeometryGenerationError(
+                        message="Chimera execution failed.",
+                        error_code="GEO_ERR_004",
+                    )
+
+                repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+
+                LOG.debug("Chimera replacements executed.")
 
             # =================================================================================
             # STEP 4: AGGRESSIVE BACK-PROPAGATION (FIX TOPOLOGY)
@@ -623,10 +788,6 @@ class CrosslinkReplacer:
                         if line.strip() and not line.startswith("#")
                     ]
 
-            # Check config dict for manual_replacements
-            if not manual_list and hasattr(config, "__dict__"):
-                manual_list = config.__dict__.get("manual_replacements") or []
-
             # No replacements to make
             if not manual_list:
                 LOG.warning(
@@ -660,6 +821,8 @@ class CrosslinkReplacer:
                     f.write(f"{clean_instr}\n")
 
             # Run Chimera
+            pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
+
             success = await self._run_chimera_command(
                 config,
                 str(replace_file),
@@ -672,6 +835,8 @@ class CrosslinkReplacer:
                     message="Chimera replacement failed in direct mode",
                     error_code="GEO_ERR_004",
                 )
+
+            repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
 
             # Combine caps files into output PDB
             output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
@@ -844,7 +1009,6 @@ class CrosslinkReplacer:
             search_paths = [
                 Path(config.CHIMERA_SCRIPTS_DIR) / "swapaa.py" if config.CHIMERA_SCRIPTS_DIR else None,
                 root_dir / "chimera_scripts" / "swapaa.py",
-                Path("/home/guido/miniforge3/envs/colbuilder/lib/python3.9/site-packages/colbuilder/chimera_scripts/swapaa.py")
             ]
             
             for p in search_paths:
@@ -880,7 +1044,7 @@ class CrosslinkReplacer:
             return False
 
     # ==================================================================================
-    # HELPER METHODS - Ratio-based Replacement Selection  
+    # HELPER METHODS - Ratio-based Replacement Selection
     # ==================================================================================
 
     def _build_ratio_replacements(
@@ -999,25 +1163,20 @@ class CrosslinkReplacer:
                     used_donors.add(i)
                     used_acceptors.add(best_idx)
 
-        # Group enzymatic markers into PYD trios
+        # Group enzymatic markers into trivalent trios (PYD, DPD, PYL, DPL)
         if scope in {"enzymatic", "all"}:
-            lyx_list = crosslinks_by_type.get("LYX", [])
-            ly2_list = crosslinks_by_type.get("LY2", [])
-            ly3_list = crosslinks_by_type.get("LY3", [])
-            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+            for central, arm1, arm2 in ENZYMATIC_TRIOS:
+                pyd_trios.extend(
+                    self._build_pyd_trios(
+                        crosslinks_by_type.get(central, []),
+                        crosslinks_by_type.get(arm1, []),
+                        crosslinks_by_type.get(arm2, []),
+                    )
+                )
 
         # Calculate how many to replace
-        num_pair_to_replace = (
-            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
-            if pairs
-            else 0
-        )
-
-        num_trio_to_replace = (
-            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
-            if pyd_trios
-            else 0
-        )
+        num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
+        num_trio_to_replace = _ratio_target(len(pyd_trios), ratio_replace)
 
         # Collect singletons (excluding those in pairs or trios)
         if scope in {"enzymatic", "all"}:
@@ -1025,7 +1184,7 @@ class CrosslinkReplacer:
                 if resname in PAIRED_RESIDUES:
                     continue
                 singles.extend(crosslinks_by_type.get(resname, []))
-            
+
             # Remove any singleton that is already part of a PYD trio
             trio_members = {
                 (getattr(x["crosslink"], "resid", ""), getattr(x["crosslink"], "chain", ""), x.get("model_id", 0.0))
@@ -1039,14 +1198,9 @@ class CrosslinkReplacer:
                 not in trio_members
             ]
 
-        num_single_to_replace = (
-            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
-            if singles
-            else 0
-        )
+        num_single_to_replace = _ratio_target(len(singles), ratio_replace)
 
         # Randomly select items to replace
-        random.seed(int(time.time()))
         random.shuffle(pairs)
         selected_pairs = pairs[:num_pair_to_replace] if num_pair_to_replace else []
         random.shuffle(pyd_trios)
@@ -1319,6 +1473,8 @@ class CrosslinkReplacer:
                 clean_instr = instruction.strip().strip('"').strip("'")
                 f.write(f"{clean_instr}\n")
 
+        pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
+
         success = await self._run_chimera_command(
             config=config,
             replace_file_path=str(replace_file),
@@ -1331,6 +1487,8 @@ class CrosslinkReplacer:
                 message="Chimera execution failed for auto-fix manual replacements.",
                 error_code="GEO_ERR_004",
             )
+
+        repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
 
         return True
 
@@ -1409,6 +1567,8 @@ class CrosslinkReplacer:
                         dist = self._calculate_distance(
                             donor["position"], acceptor["position"]
                         )
+                        # 10.0 A, not PAIR_DISTANCE_CUTOFF: donor/acceptor here are
+                        # whole-residue centroids (see PAIR_DISTANCE_CUTOFF's comment).
                         if dist <= 10.0 and dist < best_dist:
                             best_idx = j
                             best_dist = dist
@@ -1476,8 +1636,6 @@ class CrosslinkReplacer:
         if not eligible_entities:
             return []
 
-        random.seed(int(time.time()))
-
         selected_entities: List[Tuple[str, List[Dict[str, Any]]]] = []
         if scope == "all":
             buckets = {
@@ -1489,7 +1647,7 @@ class CrosslinkReplacer:
                 if not bucket:
                     continue
                 random.shuffle(bucket)
-                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                target = _ratio_target(len(bucket), ratio_replace)
                 selected_entities.extend(bucket[:target])
         elif scope == "enzymatic":
             buckets = {
@@ -1500,11 +1658,11 @@ class CrosslinkReplacer:
                 if not bucket:
                     continue
                 random.shuffle(bucket)
-                target = max(1, math.ceil(len(bucket) * ratio_replace / 100.0))
+                target = _ratio_target(len(bucket), ratio_replace)
                 selected_entities.extend(bucket[:target])
         else:
             random.shuffle(eligible_entities)
-            target = max(1, math.ceil(len(eligible_entities) * ratio_replace / 100.0))
+            target = _ratio_target(len(eligible_entities), ratio_replace)
             selected_entities = eligible_entities[:target]
 
         seen: Set[str] = set()
@@ -1604,6 +1762,8 @@ class CrosslinkReplacer:
                     if j in used_acceptors:
                         continue
                     dist = self._calculate_distance(donor["position"], acceptor["position"])
+                    # 10.0 A, not PAIR_DISTANCE_CUTOFF: donor/acceptor here are
+                    # whole-residue centroids (see PAIR_DISTANCE_CUTOFF's comment).
                     if dist <= 10.0 and dist < best_dist:
                         best_idx = j
                         best_dist = dist
@@ -1612,24 +1772,24 @@ class CrosslinkReplacer:
                     used_donors.add(i)
                     used_acceptors.add(best_idx)
 
-        # PYD trios when enzymatic scope is active
+        # Trivalent trios (PYD, DPD, PYL, DPL) when enzymatic scope is active.
+        # These records use whole-residue centroid positions (see
+        # _load_crosslinks_from_models), not atom-specific Crosslink.position,
+        # so they need the same looser 10.0 A cutoff used for pairing above
+        # rather than the tighter PYD_THRESHOLD default.
         if scope in {"enzymatic", "all"}:
-            lyx_list = by_type.get("LYX", [])
-            ly2_list = by_type.get("LY2", [])
-            ly3_list = by_type.get("LY3", [])
-            pyd_trios = self._build_pyd_trios(lyx_list, ly2_list, ly3_list)
+            for central, arm1, arm2 in ENZYMATIC_TRIOS:
+                pyd_trios.extend(
+                    self._build_pyd_trios(
+                        by_type.get(central, []),
+                        by_type.get(arm1, []),
+                        by_type.get(arm2, []),
+                        threshold=10.0,
+                    )
+                )
 
-        num_pair_to_replace = (
-            min(len(pairs), max(1, math.ceil(len(pairs) * ratio_replace / 100.0)))
-            if pairs
-            else 0
-        )
-
-        num_trio_to_replace = (
-            min(len(pyd_trios), max(1, math.ceil(len(pyd_trios) * ratio_replace / 100.0)))
-            if pyd_trios
-            else 0
-        )
+        num_pair_to_replace = _ratio_target(len(pairs), ratio_replace)
+        num_trio_to_replace = _ratio_target(len(pyd_trios), ratio_replace)
 
         if scope in {"enzymatic", "all"}:
             for resname in target_resnames:
@@ -1646,18 +1806,17 @@ class CrosslinkReplacer:
                 for s in singles
                 if (s.get("resid", ""), s.get("chain", ""), s.get("model_id", 0.0)) not in trio_members
             ]
-        
-        # Fallback: if we found no valid pairs or trios but still have candidates, treat them as singles
+
+        # Fallback: if we found no valid pairs or trios but still have candidates, treat
+        # them as singles. Still exclude PAIRED_RESIDUES: those markers must only ever
+        # be replaced together with their bonded partner, so falling back to the raw
+        # (unfiltered) candidate list here would let this pick just one side of a
+        # divalent crosslink, leaving its partner as an unconverted marker residue.
         if not pairs and not pyd_trios and filtered:
-            singles = filtered.copy()
+            singles = [r for r in filtered if r["resname"] not in PAIRED_RESIDUES]
 
-        num_single_to_replace = (
-            min(len(singles), max(1, math.ceil(len(singles) * ratio_replace / 100.0)))
-            if singles
-            else 0
-        )
+        num_single_to_replace = _ratio_target(len(singles), ratio_replace)
 
-        random.seed(int(time.time()))
         random.shuffle(pairs)
         random.shuffle(singles)
         random.shuffle(pyd_trios)
@@ -1766,9 +1925,17 @@ class CrosslinkReplacer:
         lyx_list: List[Dict[str, Any]],
         ly2_list: List[Dict[str, Any]],
         ly3_list: List[Dict[str, Any]],
+        threshold: float = PYD_THRESHOLD,
     ) -> List[List[Dict[str, Any]]]:
         """
         Group LYX/LY2/LY3 into PYD trios based on proximity.
+
+        ``threshold`` must match the position representation of the inputs:
+        callers using atom-specific ``Crosslink.position`` (e.g. the system-based
+        path) see true bond distances of ~1.5-2.8 A, well under the default
+        PYD_THRESHOLD; callers using whole-residue centroid positions (e.g.
+        ``_load_crosslinks_from_models``) see much larger distances (measured
+        ~5.4-8.9 A for real bonded PYD/DPD trios) and must pass a looser value.
         """
         trios: List[List[Dict[str, Any]]] = []
         used_ly2: Set[int] = set()
@@ -1783,12 +1950,12 @@ class CrosslinkReplacer:
                 try:
                     lyx_pos = self._extract_position(lyx)
                     ly2_pos = self._extract_position(ly2)
-                    if not lyx_pos or not ly2_pos:
+                    if lyx_pos is None or ly2_pos is None:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly2_pos)
                 except Exception:
                     continue
-                if dist <= PYD_THRESHOLD and dist < best_ly2_dist:
+                if dist <= threshold and dist < best_ly2_dist:
                     best_ly2 = (idx, ly2)
                     best_ly2_dist = dist
 
@@ -1800,12 +1967,12 @@ class CrosslinkReplacer:
                 try:
                     lyx_pos = self._extract_position(lyx)
                     ly3_pos = self._extract_position(ly3)
-                    if not lyx_pos or not ly3_pos:
+                    if lyx_pos is None or ly3_pos is None:
                         continue
                     dist = self._calculate_distance(lyx_pos, ly3_pos)
                 except Exception:
                     continue
-                if dist <= PYD_THRESHOLD and dist < best_ly3_dist:
+                if dist <= threshold and dist < best_ly3_dist:
                     best_ly3 = (jdx, ly3)
                     best_ly3_dist = dist
 
@@ -2020,23 +2187,3 @@ class CrosslinkReplacer:
                     fh.write("TER\n")
 
         return len(models)
-
-
-# Backward compatibility functions
-
-async def replace_in_system(system: Any, config: ColbuilderConfig) -> Any:
-    """
-    Backward compatibility function for system-based crosslink replacement.
-    """
-    replacer = CrosslinkReplacer()
-    return await replacer.replace_in_system(system, config)
-
-
-async def direct_replace_geometry(config: ColbuilderConfig) -> None:
-    """
-    Backward compatibility function for direct PDB-based crosslink replacement.
-    """
-    replacer = CrosslinkReplacer()
-    temp_dir = Path(config.working_directory) / ".tmp" / "replacement_direct"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    await replacer.replace_direct(config, temp_dir)

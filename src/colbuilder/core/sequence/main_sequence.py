@@ -50,7 +50,6 @@ print(f"PDB file saved to: {pdb_output}")
 
 from pathlib import Path
 from typing import Optional, Tuple
-from colorama import Fore, Style
 from colbuilder.core.utils.config import ColbuilderConfig
 from .sequence_generator import SequenceGenerator
 

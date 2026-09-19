@@ -261,14 +261,13 @@ def read_data(struct_pdb: str, file_contacts: str, file_BB: str, file_OV: str, f
         LOG.debug(traceback.format_exc())
         raise ValueError(f"Error processing input data: {e}")
 
-def get_go(indBB: np.ndarray, nameAA: List[str], map_OVrCSU: List[List[float]], cutoff_short: float, 
+def get_go(indBB: np.ndarray, map_OVrCSU: List[List[float]], cutoff_short: float,
            cutoff_long: float, go_eps: float, seqDist: int, missRes: int) -> List[List[float]]:
     """
     Calculate Go-like interaction parameters.
-    
+
     Args:
         indBB: Array of backbone indices and coordinates.
-        nameAA: List of amino acid names.
         map_OVrCSU: List of contact map data.
         cutoff_short: Lower cutoff distance for Go-like interactions.
         cutoff_long: Upper cutoff distance for Go-like interactions.
@@ -383,11 +382,11 @@ def get_go(indBB: np.ndarray, nameAA: List[str], map_OVrCSU: List[List[float]], 
         LOG.debug(traceback.format_exc())
         raise ValueError(f"Go calculation failed: {e}")
 
-def write_files(file_pref: str, sym_pairs: List[List[float]], missAt: int, indBB: np.ndarray, 
-                missRes: int, Natoms: int, nameAA: List[str], go_eps: float, c6c12: int) -> None:
+def write_files(file_pref: str, sym_pairs: List[List[float]], missAt: int, indBB: np.ndarray,
+                missRes: int, Natoms: int, go_eps: float, c6c12: int) -> None:
     """
     Write output files for the Go-like model.
-    
+
     Args:
         file_pref: Prefix for output files.
         sym_pairs: List of symmetric pairs with Go-like parameters.
@@ -395,7 +394,6 @@ def write_files(file_pref: str, sym_pairs: List[List[float]], missAt: int, indBB
         indBB: Array of backbone indices and coordinates.
         missRes: Missing residue offset.
         Natoms: Number of atoms in the structure.
-        nameAA: List of amino acid names.
         go_eps: Dissociation energy of the Lennard-Jones potential.
         c6c12: Flag for C6/C12 parameter format.
         
@@ -536,14 +534,14 @@ def main() -> None:
 
         # Calculate Go-like interactions
         sym_pairs = get_go(
-            indBB, nameAA, map_OVrCSU, args.cutoff_short, args.cutoff_long, 
+            indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long,
             args.go_eps, seqDist, missRes
         )
 
         # Write output files
         write_files(
-            args.moltype, sym_pairs, missAt, indBB, missRes, 
-            Natoms, nameAA, args.go_eps, c6c12
+            args.moltype, sym_pairs, missAt, indBB, missRes,
+            Natoms, args.go_eps, c6c12
         )
         
         # Clean up temporary files

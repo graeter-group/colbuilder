@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 import threading
-from typing import Optional, Dict, Any
+from typing import Optional
 from colorama import init, Fore, Style
 
 init(autoreset=True)
@@ -266,46 +266,6 @@ def initialize_root_logger(debug: bool = False, log_dir: Optional[Path] = None) 
     return root_logger
 
 
-def get_system_info() -> Dict[str, Any]:
-    """
-    Collect system information for debugging purposes.
-
-    Returns:
-        Dictionary with system information
-    """
-    import platform
-    import sys
-
-    return {
-        "platform": platform.platform(),
-        "python_version": sys.version,
-        "python_executable": sys.executable,
-        "cwd": os.getcwd(),
-        "environment_variables": {
-            k: v for k, v in os.environ.items()
-            if k.startswith(('COLBUILDER_', 'PYTHONPATH', 'PATH'))
-        }
-    }
-
-
-def log_system_info(logger: logging.Logger) -> None:
-    """
-    Log system information for debugging.
-
-    Parameters:
-        logger: Logger instance to use
-    """
-    info = get_system_info()
-    logger.debug("System Information:")
-    for key, value in info.items():
-        if isinstance(value, dict):
-            logger.debug(f"{key}:")
-            for k, v in value.items():
-                logger.debug(f"  {k}: {v}")
-        else:
-            logger.debug(f"{key}: {value}")
-
-
 def log_exception(logger: logging.Logger, exception: Exception) -> None:
     """
     Log an exception with traceback.
@@ -323,25 +283,3 @@ def log_exception(logger: logging.Logger, exception: Exception) -> None:
     )
     for line in tb_lines:
         logger.debug(line.rstrip())
-
-
-def reset_logging():
-    """
-    Reset the logging system. Useful for testing.
-    """
-    global _log_file_path, _console_handler, _file_handler, _loggers, _log_file_announced
-
-    if _console_handler:
-        _console_handler.close()
-    if _file_handler:
-        _file_handler.close()
-
-    _log_file_path = None
-    _console_handler = None
-    _file_handler = None
-    _loggers = {}
-    _log_file_announced = False
-
-    root = logging.getLogger()
-    while root.handlers:
-        root.removeHandler(root.handlers[0])

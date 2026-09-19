@@ -2,7 +2,6 @@
 # Distributed under the terms of the Apache License 2.0
 
 import numpy as np
-from sklearn.metrics import pairwise_distances as pdist
 from typing import List, Dict, Any, Optional, Tuple, Union
 import os
 
@@ -38,8 +37,6 @@ class Crosslink:
         self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
         self.crosslink_pdb: List[List[Any]] = []  # Mix of str and float
-        self.crosslink_neighbors: List[Any] = []
-        self.crosslink_connect: List[List[List[Any]]] = []
         self.crosslink_pairs: List[Tuple[List[Any], List[Any]]] = []  # Store valid pairs
         self.crosslink_bonded: Dict[str, List[List[Any]]] = {
             'bonds': [],
@@ -136,32 +133,6 @@ class Crosslink:
             LOG.error(f"Error reading PDB file {file}: {str(e)}")
 
         return self.crosslink_coords
-
-    def get_crosslink_connect(self, cnt_model: Optional[int] = None) -> List[List[List[Any]]]:
-        """
-        Get nearest crosslinks to determine connections.
-
-        This method is kept for backwards compatibility but now uses the improved
-        pair-finding algorithm internally.
-        """
-        LOG.debug("Using improved crosslink pair detection algorithm")
-
-        pairs = self.find_crosslink_pairs(cnt_model=cnt_model)
-
-        self.crosslink_connect = []
-        if pairs:
-            all_atoms = []
-            for pair in pairs:
-                if pair[0] not in all_atoms:
-                    all_atoms.append(pair[0])
-                if pair[1] not in all_atoms:
-                    all_atoms.append(pair[1])
-
-            if all_atoms:
-                self.crosslink_connect.append(all_atoms)
-                LOG.debug(f"Converted {len(pairs)} pairs to connection group with {len(all_atoms)} atoms")
-
-        return self.crosslink_connect
 
     def _match_nearest_pairs(
         self,

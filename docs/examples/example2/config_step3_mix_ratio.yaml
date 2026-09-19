@@ -1,0 +1,15 @@
+species: "homo_sapiens"
+
+# Mixing-only mode (no sequence/geometry_generator set): combine the two
+# sequence PDBs from config_human-D.yaml and config_human-T.yaml into one
+# microfibril at an 80:20 ratio.
+mix_bool: true
+ratio_mix: "A:80 B:20"       # A = HLKNL (divalent), B = PYD (trivalent)
+files_mix:
+  - "homosapiens_N_HLKNL_C_HLKNL.pdb"   # A
+  - "homosapiens_N_PYD_C_PYD.pdb"       # B
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 20
+# Length of the assembled microfibril (nm).
+fibril_length: 70.0

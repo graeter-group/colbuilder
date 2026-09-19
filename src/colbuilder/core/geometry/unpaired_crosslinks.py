@@ -4,14 +4,26 @@ Utility to detect unpaired crosslinks in a generated fibril.
 Scans the per-model PDB fragments in ``.tmp/geometry_gen`` and decides whether
 each crosslink marker is paired by the SAME criterion the geometry optimiser
 uses (``optimize.py``): a real cross-model distance between the crosslink marker
-atoms. A marker whose bonded partner atom is not within ``CROSSLINK_PAIR_CUTOFF``
-of a compatible marker in another model is considered unpaired and is emitted as
-a ``manual_replacements.txt`` entry that mutates it back to a standard residue.
+atoms. A marker whose bonded partner atom is not matched to a compatible marker
+in another model within ``CROSSLINK_PAIR_CUTOFF`` is considered unpaired and is
+emitted as a ``manual_replacements.txt`` entry that mutates it back to a standard
+residue.
 
-This replaces the previous connect-row-membership heuristic, which credited a
-marker as "paired" merely because its model shared a connect row with an
-unrelated partner-type model — silently leaving genuinely unpaired markers
-(notably AGE crosslinks) un-mutated.
+A marker is paired iff at least one ATOM-CORRECT partner in another model lies
+within ``CROSSLINK_PAIR_CUTOFF``:
+
+  * Compatibility is atom-specific. A trivalent central residue bonds each arm
+    through a *specific* atom -- C13 bonds the 3-arm, C12 bonds the 2-arm (see
+    TRIVALENT_ARMS). A C13 marker therefore may pair ONLY a 3-arm, never a
+    2-arm, and vice-versa. Divalent/AGE residues carry a single marker atom, so
+    residue compatibility suffices for them.
+  * The test is a simple presence test (any correct partner within the cutoff),
+    not a one-to-one assignment. These crosslinks bond across a web of
+    neighbouring models, so a one-to-one nearest assignment can "steal" a
+    marker's true partner for a slightly shorter competing edge and orphan a real
+    pair. A presence test avoids that and is unambiguous here because measured
+    distances fall into two well-separated bands -- formed bonds <= ~7.4 A and
+    genuine orphans >= ~22 A -- with a wide empty gap between them.
 """
 
 from __future__ import annotations
@@ -27,15 +39,14 @@ from .crosslink import read_crosslink
 
 LOG = setup_logger(__name__)
 
-PDB_SUBDIR_NAMES = ["D", "T", "NC", "DT"]
 OPT_ID_CANDIDATES = [
     Path(".tmp") / "geometry_gen" / "crystalcontacts_from_colbuilder_opt_id.txt",
     Path("crystalcontacts_from_colbuilder_opt_id.txt"),
 ]
 
-# Covalently bonded crosslink partners (undirected). A marker is paired iff a
-# marker of one of its partner types is within CROSSLINK_PAIR_CUTOFF in another
-# model. Trivalent central residues bond BOTH arms; the arms bond the central.
+# Covalently bonded crosslink partners (undirected), at the residue level. Used
+# to generate candidate pairs; trivalent pairs are further constrained by atom
+# (see TRIVALENT_ARMS / _compatible) so C13/C12 bond only their correct arm.
 CROSSLINK_PARTNERS: Dict[str, Set[str]] = {
     # AGE (non-enzymatic) divalent
     "LGX": {"AGS"}, "AGS": {"LGX"},          # Glucosepane
@@ -53,11 +64,19 @@ CROSSLINK_PARTNERS: Dict[str, Set[str]] = {
     "LYY": {"L2X", "L3X"}, "L2X": {"LYY"}, "L3X": {"LYY"},
 }
 
-# Angstrom. Matches the paper's 0.3 nm contact criterion and optimize.py's 3.0 A
-# unpaired-crosslink test. Measured formed crosslink marker distances are
-# 1.7-2.4 A (AGE and enzymatic alike), so 3.0 A cleanly separates paired from
-# unpaired (genuinely unpaired markers sit >20 A away).
-CROSSLINK_PAIR_CUTOFF = 3.0
+# Trivalent central residue -> which arm residue its C13 vs C12 atom bonds.
+# PYD:  C13(LYX)-CG(LY3), C12(LYX)-CB(LY2)
+# DPD:  C13(LXX)-CG(LX3), C12(LXX)-CB(LX2)
+# PYL:  C13(LXY)-CG(L3Y), C12(LXY)-CG(L2Y)
+# DPL:  C13(LYY)-CG(L3X), C12(LYY)-CG(L2X)
+TRIVALENT_ARMS: Dict[str, Dict[str, str]] = {
+    "LYX": {"C13": "LY3", "C12": "LY2"},
+    "LXX": {"C13": "LX3", "C12": "LX2"},
+    "LXY": {"C13": "L3Y", "C12": "L2Y"},
+    "LYY": {"C13": "L3X", "C12": "L2X"},
+}
+# Combined with atom-specific one-to-one matching, 12 A is safe against false pairing.
+CROSSLINK_PAIR_CUTOFF = 12.0
 
 RESIDUE_TO_MUTATION = {
     "AGS": "ARG",  # arginine-derived
@@ -68,6 +87,33 @@ RESIDUE_TO_MUTATION = {
     "LPS": "LYS",
 }
 DEFAULT_MUTATION = "LYS"  # all lysine/hydroxylysine-derived markers
+
+
+def _compatible(a: Dict, b: Dict) -> bool:
+    """True if markers a and b can be the two ends of one covalent crosslink.
+
+    Residue-level compatibility (CROSSLINK_PARTNERS) plus, for trivalent centrals,
+    atom-level correctness: a C13 central bonds only its 3-arm, a C12 central only
+    its 2-arm.
+    """
+    ra, rb = a["resname"], b["resname"]
+    if rb not in CROSSLINK_PARTNERS.get(ra, set()):
+        return False
+
+    # Identify a trivalent central (if any) and enforce the atom<->arm rule.
+    if ra in TRIVALENT_ARMS:
+        central, arm = a, b
+    elif rb in TRIVALENT_ARMS:
+        central, arm = b, a
+    else:
+        return True  # divalent / AGE: single marker atom, residue match is enough
+
+    want = TRIVALENT_ARMS[central["resname"]].get(central.get("atom", ""))
+    if want is None:
+        # Central marker with an unexpected atom name: fall back to residue-level
+        # compatibility rather than silently dropping a real pair
+        return True
+    return arm["resname"] == want
 
 
 class UnpairedCrosslinkFinder:
@@ -156,6 +202,7 @@ class UnpairedCrosslinkFinder:
                             "fname": caps.name,
                             "model": idx,
                             "resname": cl.resname,
+                            "atom": getattr(cl, "atom", ""),
                             "resid": str(cl.resid),
                             "chain": cl.chain,
                             "pos": np.asarray(cl.position, dtype=float),
@@ -164,19 +211,22 @@ class UnpairedCrosslinkFinder:
         return markers
 
     # ------------------------------------------------------------------ #
-    # Distance-based pairing (mirrors optimize.py._get_unpaired_crosslinks)
+    # Distance-based pairing: atom-specific presence test
     # ------------------------------------------------------------------ #
     def _find_unpaired_by_distance(self, markers: List[Dict]) -> List[Dict]:
         unpaired: List[Dict] = []
         for m in markers:
-            partners = CROSSLINK_PARTNERS.get(m["resname"], set())
+            if not CROSSLINK_PARTNERS.get(m["resname"]):
+                continue
+            pos_m = m["pos"]
+            model_m = m["model"]
             has_pair = False
             for other in markers:
-                if other["model"] == m["model"]:
+                if other["model"] == model_m:
                     continue  # a crosslink bonds ACROSS models, never within one
-                if other["resname"] not in partners:
+                if not _compatible(m, other):
                     continue
-                if float(np.linalg.norm(m["pos"] - other["pos"])) < self.cutoff:
+                if float(np.linalg.norm(pos_m - other["pos"])) < self.cutoff:
                     has_pair = True
                     break
             if not has_pair:
@@ -220,13 +270,21 @@ class UnpairedCrosslinkFinder:
     # File discovery
     # ------------------------------------------------------------------ #
     def _find_all_pdb_dirs(self) -> List[Path]:
+        """Find geom_root itself plus any immediate subdirectory holding caps files.
+
+        Subdirectories are discovered dynamically rather than matched against a
+        fixed name list: the standard (non-mixing) build path names them by the
+        model's crosslink-derived type ("D"/"T"/"NC"/"DT"), but the mixing
+        feature names them by the user's own, arbitrary ``ratio_mix`` labels
+        (e.g. "PYD"/"HLKNL"), so no fixed set of names covers both.
+        """
         dirs: List[Path] = []
         if list(self.geom_root.glob("*.caps.pdb")):
             dirs.append(self.geom_root)
-        for sub in PDB_SUBDIR_NAMES:
-            candidate = self.geom_root / sub
-            if candidate.is_dir() and list(candidate.glob("*.caps.pdb")):
-                dirs.append(candidate)
+        if self.geom_root.is_dir():
+            for candidate in sorted(self.geom_root.iterdir()):
+                if candidate.is_dir() and list(candidate.glob("*.caps.pdb")):
+                    dirs.append(candidate)
         return dirs
 
     def _find_opt_id(self) -> Optional[Path]:

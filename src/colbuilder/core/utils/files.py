@@ -13,158 +13,22 @@ from pathlib import Path
 from typing import (
     Generator,
     Optional,
-    Protocol,
-    TypeVar,
     Any,
     Set,
     Dict,
     List,
     Callable,
 )
-import functools
 import io
 import time
 import shutil
 import os
-from dataclasses import dataclass
 
-from colbuilder.core.utils.exceptions import SequenceGenerationError, SystemError
+from colbuilder.core.utils.exceptions import SequenceGenerationError
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
-
-OperationType = TypeVar("OperationType")
-
-
-@dataclass
-class OperationContext:
-    """
-    Base context for all operations.
-
-    Attributes:
-        config: Configuration for the operation
-        working_dir: Working directory path
-    """
-
-    config: ColbuilderConfig
-    working_dir: Path
-
-
-class Operation(Protocol[OperationType]):
-    """
-    Base protocol for all operations.
-
-    This protocol defines the common interface that all operations must implement,
-    allowing for consistent execution patterns throughout the system.
-    """
-
-    async def execute(self, input_data: Optional[Any] = None) -> OperationType:
-        """
-        Execute the operation.
-
-        Args:
-            input_data: Optional input data for the operation
-
-        Returns:
-            The operation result of type OperationType
-        """
-        pass
-
-
-@contextmanager
-def managed_resources(resource_name=None):
-    """
-    Decorator for methods that need temporary resource management.
-
-    This decorator ensures that a method properly initializes temporary
-    resources and cleans them up after execution, even if an exception occurs.
-
-    Args:
-        resource_name: Optional name for the resource category
-
-    Returns:
-        Decorated method
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(self, *args, **kwargs):
-            resource_context = resource_name or func.__name__
-            LOG.debug(f"Managing resources for {resource_context}")
-
-            original_dir = None
-            temp_dir = None
-
-            try:
-                # Store original directory
-                original_dir = Path.cwd()
-
-                # Create a temporary directory if needed
-                if hasattr(self, "file_manager") and self.file_manager:
-                    temp_dir = self.file_manager.get_temp_path(
-                        resource_context, create_dir=True
-                    )
-                    if hasattr(self, "temp_dir"):
-                        self.temp_dir = temp_dir
-                    LOG.debug(
-                        f"Created temporary directory for {resource_context}: {temp_dir}"
-                    )
-
-                # Call the decorated method
-                return await func(self, *args, **kwargs)
-
-            except Exception as e:
-                LOG.error(f"Error in {resource_context}: {str(e)}")
-                raise
-
-            finally:
-                # Return to original directory
-                if original_dir:
-                    os.chdir(original_dir)
-                    LOG.debug(f"Returned to original directory: {original_dir}")
-
-                # Don't clean up if debug mode is enabled
-                if (
-                    hasattr(self, "config")
-                    and hasattr(self.config, "debug")
-                    and self.config.debug
-                ):
-                    LOG.info(
-                        f"Debug mode enabled, preserving temporary directory: {temp_dir}"
-                    )
-                    # Create a marker file in temp dir with info
-                    if temp_dir and temp_dir.exists():
-                        try:
-                            with open(temp_dir / "_DEBUG_INFO.txt", "w") as f:
-                                f.write(f"Debug information for {resource_context}\n")
-                                f.write(f"Created at: {time.ctime()}\n")
-                                f.write(f"Function: {func.__name__}\n")
-                                if hasattr(self, "config"):
-                                    f.write(f"Configuration:\n")
-                                    for key, value in vars(self.config).items():
-                                        if not key.startswith("_"):
-                                            f.write(f"  {key}: {value}\n")
-                        except Exception as e:
-                            LOG.warning(f"Failed to create debug info file: {e}")
-                else:
-                    # Clean up unless debugging
-                    if hasattr(self, "file_manager") and self.file_manager:
-                        LOG.debug(f"Cleaning up resources for {resource_context}")
-                        if resource_context in [
-                            "geometry_operation",
-                            "replacement",
-                            "replace_generation",
-                        ]:
-                            LOG.debug(
-                                f"Skipping cleanup of important directories: {resource_context}"
-                            )
-                        else:
-                            self.file_manager.cleanup()
-
-        return wrapper
-
-    return decorator
 
 
 @contextmanager
@@ -176,23 +40,15 @@ def suppress_output() -> Generator[None, None, None]:
     during its execution scope, which is useful when calling noisy external
     libraries or tools where their console output is not relevant.
 
+    Exceptions raised by the wrapped code are not caught here and propagate
+    to the caller unchanged -- this only manages the output streams.
+
     Yields:
         None
-
-    Raises:
-        SystemError: If there's an error managing output streams
     """
-    try:
-        with io.StringIO() as stdout_buf, io.StringIO() as stderr_buf:
-            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
-                yield
-    except Exception as e:
-        raise SystemError(
-            message="Failed to manage output streams",
-            original_error=e,
-            error_code="SYS_ERR_001",
-            context={"action": "suppress_output"},
-        )
+    with io.StringIO() as stdout_buf, io.StringIO() as stderr_buf:
+        with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+            yield
 
 
 class ProgressTracker:
@@ -688,49 +544,6 @@ class FileManager:
         dir_path.mkdir(exist_ok=True, parents=True)
         return dir_path
 
-    @contextmanager
-    def temp_file_context(
-        self, basename: str, suffix: Optional[str] = None
-    ) -> Generator[Path, None, None]:
-        """
-        Context manager for temporary file operations.
-
-        Creates a temporary file path, yields it for use, and ensures
-        it gets tracked for cleanup later.
-
-        Args:
-            basename: Base name for the file
-            suffix: Optional suffix/extension
-
-        Yields:
-            Path to the temporary file
-        """
-        temp_path = self.get_temp_path(basename, suffix)
-        try:
-            yield temp_path
-        finally:
-            self.temp_files.add(temp_path)
-
-    @contextmanager
-    def temp_dir_context(self, dirname: str) -> Generator[Path, None, None]:
-        """
-        Context manager for temporary directory operations.
-
-        Creates a temporary directory, yields it for use, and ensures
-        it gets tracked for cleanup later.
-
-        Args:
-            dirname: Name for the directory
-
-        Yields:
-            Path to the temporary directory
-        """
-        temp_dir = self.get_temp_path(dirname, create_dir=True)
-        try:
-            yield temp_dir
-        finally:
-            self.temp_dirs.add(temp_dir)
-
     def find_file(
         self, filename_or_path: str, search_paths: Optional[List[Path]] = None
     ) -> Optional[Path]:
@@ -762,7 +575,6 @@ class FileManager:
                 Path.cwd(),  # Python process working directory
                 self.project_root,  # Project root from config
                 self.project_root / "data",  # Project data directory
-                self.project_root / "colbuilder" / "data",  # Package data directory
                 self.config.DATA_DIR,  # Data directory from config
                 self.config.HOMOLOGY_LIB_DIR,  # Homology lib directory from config
                 self.config.FORCE_FIELD_DIR,  # Force field directory from config
@@ -822,35 +634,6 @@ class FileManager:
         except Exception as e:
             LOG.error(f"Failed to copy {source} to {dest_path}: {str(e)}")
             raise
-
-    def get_type_dir(self, model_type: str, parent_dir: Optional[Path] = None) -> Path:
-        """
-        Get or create the directory for a specific model type.
-
-        Args:
-            model_type (str): The type of the model (e.g., "D", "NC").
-            parent_dir (Optional[Path]): Optional parent directory (defaults to geometry_dir).
-
-        Returns:
-            Path: Path to the directory for the specified model type.
-
-        Raises:
-            FileNotFoundError: If the directory cannot be created or accessed.
-        """
-        try:
-            base_dir = parent_dir or self.geometry_dir
-
-            type_dir = base_dir / model_type
-
-            type_dir.mkdir(parents=True, exist_ok=True)
-            self.temp_dirs.add(type_dir)
-            LOG.info(f"Using type directory: {type_dir}")
-
-            return type_dir
-        except Exception as e:
-            raise FileNotFoundError(
-                f"Failed to locate or create type directory for model type: {model_type}"
-            ) from e
 
     def get_temp_dir(self, dirname: str) -> Path:
         """

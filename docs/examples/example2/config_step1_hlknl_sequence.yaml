@@ -1,0 +1,10 @@
+species: "homo_sapiens"
+sequence_generator: true
+
+# HLKNL: divalent (2-residue) enzymatic crosslink. This is "variant D" (divalent)
+# for the mix in config_mix.yaml.
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 947.A"
+c_term_combination: "1047.C - 104.C"

@@ -47,7 +47,10 @@ class Crystal:
         """
         pdb = pdb or self.pdb_file
         with open(pdb.with_suffix(".pdb"), "r") as f:
-            return dict(zip(self.crystal.keys(), f.readline().split()[1:]))
+            for line in f:
+                if line.startswith("CRYST1"):
+                    return dict(zip(self.crystal.keys(), line.split()[1:]))
+        raise ValueError(f"No CRYST1 record found in {pdb}")
 
     def read_spacegroup(self, pdb: Optional[Path] = None) -> int:
         """
@@ -65,7 +68,10 @@ class Crystal:
         """
         pdb = pdb or self.pdb_file
         with open(pdb.with_suffix(".pdb"), "r") as f:
-            return int(f.readline().split()[-2])
+            for line in f:
+                if line.startswith("CRYST1"):
+                    return int(line.split()[-2])
+        raise ValueError(f"No CRYST1 record found in {pdb}")
 
     def get_default_transformation(self) -> List[float]:
         """

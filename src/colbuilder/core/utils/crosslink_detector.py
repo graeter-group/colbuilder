@@ -31,6 +31,7 @@ class CrosslinkDetector:
         'LY5', 'LX5', 'L5Y', 'L5X',
         'LGX', 'LPS',
         'AGS', 'APD',
+        'LZS', 'LZD',
     }
     
     # Trivalent crosslink residues (T-type)

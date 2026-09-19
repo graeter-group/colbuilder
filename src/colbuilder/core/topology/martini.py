@@ -13,7 +13,6 @@ with a focus on collagen microfibrils. It provides functionality for:
 The module requires the Martinize2 tool and custom contact map utilities.
 """
 
-import cmd
 import os
 import sys
 import subprocess
@@ -25,7 +24,6 @@ from tqdm import tqdm
 from colorama import Fore, Style
 
 from colbuilder.core.topology.itp import Itp
-from colbuilder.core.topology.crosslink import Crosslink
 from colbuilder.core.topology.backbone_repair import repair_backbone_bonds
 from colbuilder.core.geometry.system import System
 from colbuilder.core.utils.dec import timeit
@@ -120,7 +118,7 @@ class Martini:
                         with open(cg_path, "r") as infile:
                             lines_written = 0
                             for line in infile:
-                                if line[0:6] in self.is_line:
+                                if line[0:6] in self.is_line or line.startswith("TER"):
                                     f.write(line)
                                     lines_written += 1
                             LOG.debug(f"Merged {lines_written} lines from {cg_path.name}")
@@ -143,15 +141,23 @@ class Martini:
                     with open(input_file, "r") as infile:
                         lines_written = 0
                         for line in infile:
-                            if line[0:6] in self.is_line:
+                            if line[0:6] in self.is_line or line.startswith("TER"):
                                 f.write(line)
                                 lines_written += 1
                         LOG.debug(f"Merged {lines_written} lines from {input_file}")
                         merged_count += 1
                 f.write("END\n")
 
-            if merged_count == 0:
-                LOG.error(f"No CG files were merged for model {model_id}")
+            if merged_count < len(sys_connect_ids):
+                # A partial merge silently drops the failed connect_id's entire
+                # triple helix from the output (e.g. a crosslink partner whose
+                # martinize2 run failed) while still looking like a complete,
+                # successful group. Treat any missing member as a full failure
+                # so it surfaces as one instead of shipping an incomplete topology.
+                LOG.error(
+                    f"Incomplete merge for model {model_id}: {merged_count}/"
+                    f"{len(sys_connect_ids)} connection(s) succeeded"
+                )
                 if os.path.exists(output_file):
                     os.remove(output_file)
                 return None
@@ -191,7 +197,7 @@ class Martini:
                 if file_path.exists():
                     try:
                         with open(file_path, "r") as file:
-                            pdb = [line for line in file if line[0:6] in self.is_line]
+                            pdb = [line for line in file if line[0:6] in self.is_line or line.startswith("TER")]
                         return pdb
                     except Exception as e:
                         LOG.error(f"Error reading PDB file {file_path}: {str(e)}")
@@ -206,7 +212,7 @@ class Martini:
             if path and path.exists():
                 try:
                     with open(path, "r") as file:
-                        pdb = [line for line in file if line[0:6] in self.is_line]
+                        pdb = [line for line in file if line[0:6] in self.is_line or line.startswith("TER")]
                     return pdb
                 except Exception as e:
                     LOG.error(f"Error reading PDB file {path}: {str(e)}")
@@ -308,6 +314,7 @@ class Martini:
             # 2) Inspect first/last residue per chain *after* the rename above
             first_res = {}   # chain -> resname
             last_res  = {}   # chain -> (resid, resname)
+            last_oxt  = {}   # chain -> whether the current last residue has an OXT atom
             for line in pdb:
                 if not line.startswith(("ATOM  ", "HETATM")):
                     continue
@@ -315,17 +322,22 @@ class Martini:
                 if ch not in self.is_chain:
                     continue
                 resname = line[17:20].strip()
+                atomname = line[12:16].strip()
                 try:
                     resid = int(line[22:26])
                 except ValueError:
                     continue
                 if ch not in first_res:
                     first_res[ch] = resname
-                if ch not in last_res or resid >= last_res[ch][0]:
+                if ch not in last_res or resid > last_res[ch][0]:
                     last_res[ch] = (resid, resname)
+                    last_oxt[ch] = atomname == "OXT"
+                elif resid == last_res[ch][0] and atomname == "OXT":
+                    last_oxt[ch] = True
 
             firsts = set(first_res.values()) if first_res else set()
             lasts  = {name for _, name in last_res.values()} if last_res else set()
+            any_last_has_oxt = any(last_oxt.values())
 
             # Residues meaning "this terminus is already capped / is a crosslink
             # block", so martinize2 must NOT add another terminal modification.
@@ -345,8 +357,18 @@ class Martini:
             nter_flag = "none"
 
             # C-terminus: apply the NME cap unless the chain already ends in a
-            # cap/crosslink block, in which case use 'none'.
-            cter_flag = "none" if (not lasts or (lasts & special_last)) else "NME"
+            # cap/crosslink block, or its last residue already carries its own
+            # OXT atom -- a complete, naturally-terminated carboxylic acid.
+            # Applying NME on top of an existing OXT is a modification conflict
+            # that crashes vermouth's modification-patching (ValueError: Cannot
+            # apply modification to block), confirmed by direct reproduction:
+            # martinize2 succeeds on the identical input once -cter is 'none'
+            # instead of 'NME' for such a residue.
+            cter_flag = (
+                "none"
+                if (not lasts or (lasts & special_last) or any_last_has_oxt)
+                else "NME"
+            )
 
             # LOG.debug(f"cap_pdb decided: -nter {nter_flag}, -cter {cter_flag} (first={firsts}, last={lasts})")
             return pdb, cter_flag, nter_flag
@@ -574,23 +596,6 @@ class Martini:
             else:
                 translated.append(line)
         return translated
-
-
-    def write_gro(
-        self,
-        system: Optional[Any] = None,
-        gro_file: Optional[str] = None,
-        processed_models: Optional[List[int]] = None,
-    ) -> None:
-        """
-        Write a GRO (Gromos87) file for the processed models.
-
-        This is a placeholder method for API compatibility with the Amber class.
-        Martini uses PDB files primarily, but this method could be implemented
-        to convert PDB to GRO format if needed.
-        """
-        LOG.debug("Write_gro called but not implemented for Martini - using PDB format instead")
-        return None
 
 
 def _build_connected_groups(system: System) -> List[List[Any]]:

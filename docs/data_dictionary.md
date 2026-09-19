@@ -59,9 +59,8 @@ The most commonly used parameters for ColBuilder configuration:
 | Parameter | Type | Description | Valid Values | Default |
 |-----------|------|-------------|--------------|---------|
 | debug | boolean | Keep intermediate files for debugging | true/false | false |
-| working_directory | string/Path | Working directory for input/output files | Any valid path | "./" |
+| working_directory | string/Path | Working directory for input/output files | Any valid path | current directory |
 | config_file | Path | Path to configuration YAML file | Any valid path | None |
-| mode | OperationMode | Computed operation mode flags | Combination of SEQUENCE, GEOMETRY, TOPOLOGY, MIX, REPLACE | Computed from other flags |
 
 **Notes**:
 - `working_directory` sets the base directory for all input and output files
@@ -77,12 +76,13 @@ The most commonly used parameters for ColBuilder configuration:
 | fasta_file | Path/null | Path to input FASTA file | Valid FASTA file path or null | Auto-generated based on species |
 | crosslink | boolean | Enable crosslinking in the model | true/false | false |
 
-*Supported species: homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii, mus_musculus, rattus_norvegicus, bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana, danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus, pelodiscus_sinensis
+*Supported (built-in) species: homo_sapiens, pan_troglodytes, pongo_abelii, callithrix_jacchus, otolemur_garnettii, mus_musculus, rattus_norvegicus, bos_taurus, canis_lupus, ailuropoda_melanoleuca, mustela_putorius, myotis_lucifugus, loxodonta_africana, danio_rerio, oreochromis_niloticus, oryzias_latipes, tetraodon_nigroviridis, xiphophorus_maculatus, pelodiscus_sinensis
 
 **Notes**:
 - **Mutated PDB workflow**: When `mutated_pdb` is provided, ColBuilder adds crosslinks to the existing structure instead of generating from sequence
 - This is particularly useful for adding AGE crosslinks on top of existing enzymatic crosslinks
 - The mutated PDB must have compatible terminal crosslinks specified in `n_term_*` and `c_term_*`
+- **Custom species**: `species` is not restricted to the built-in list above — any name works as long as `fasta_file` is also provided (ColBuilder raises `CFG_ERR_003` otherwise). Crosslinking a genuinely novel species additionally requires adding matching rows to `crosslinks.csv` yourself, since crosslink positions are looked up by exact species name. See [`docs/examples/example8`](examples/example8/) for the full workflow, including generating a FASTA from an existing PDB with the bundled `pdb2fasta` script.
 
 #### Crosslink Configuration
 
@@ -107,10 +107,18 @@ The most commonly used parameters for ColBuilder configuration:
 - "PYL": Pyrrole (alternative trivalent pathway)
 - "DPL": Deoxypyrrole (alternative trivalent pathway)
 
-**Non-Enzymatic (AGE) - Use as additional crosslinks:**
+**Non-Enzymatic Divalent, LYS-LYS derived (2 residues):**
+- "MOLD": Methylglyoxal-lysine dimer
+
+**Non-Enzymatic (AGE), LYS-ARG derived (2 residues):**
 - "Pentosidine": Well-characterized AGE crosslink
 - "Glucosepane": Most abundant AGE in human tissue
-- "MOLD": Methylglyoxal-lysine dimer
+
+Non-enzymatic types can be used as terminal crosslinks (`n_term_type`/`c_term_type`)
+just like the enzymatic ones, or added on top of an existing structure via the
+mutated PDB workflow (`additional_1_type`/`additional_2_type`) — most commonly
+the latter, since AGE crosslinks are typically combined with an existing
+enzymatic crosslink rather than used alone.
 
 **Format for residue combinations:
 - **Divalent**: "ResNum.Chain - ResNum.Chain" (e.g., "9.C - 947.A")
@@ -127,6 +135,11 @@ The most commonly used parameters for ColBuilder configuration:
 - Divalent format validation: must match pattern "^\d+\.[A-C]\s*-\s*\d+\.[A-C]$"
 - Trivalent format validation: must match pattern "^\d+\.[A-C]\s*-\s*\d+\.[A-C]\s*-\s*\d+\.[A-C]$"
 
+**Crosslink type validation against an input PDB**:
+- When a `pdb_file` is provided together with `n_term_type`/`c_term_type` (and `crosslink` or `replace_bool` is enabled), ColBuilder checks that the crosslink residues actually present in the PDB match the declared types.
+- This check considers `additional_1_type`/`additional_2_type` as well, not just the terminal types — so a mixed structure from the AGE workflow (e.g. terminal PYD plus an additional Glucosepane) validates correctly as long as every type actually present is declared somewhere across those four fields.
+- A mismatch (e.g. a trivalent structure with only a divalent type declared) raises `GEO_ERR_008`, listing the detected crosslink residues.
+
 #### Additional Crosslinks (Mutated PDB Workflow)
 
 | Parameter | Type | Description | Valid Values | Example |
@@ -135,13 +148,13 @@ The most commonly used parameters for ColBuilder configuration:
 | additional_1_combination | string/null | Position for first additional crosslink | "ResNum.Chain - ResNum.Chain" | "1008.A - 767.B" |
 | additional_2_type | string/null | Second additional crosslink type (optional) | AGE crosslink types or null | "Pentosidine" |
 | additional_2_combination | string/null | Position for second additional crosslink | "ResNum.Chain - ResNum.Chain" | "950.B - 710.C" |
-| crosslink_copies | list of strings | Periodic copies for distance optimization | Exactly 2 elements from D0-D5 or ranges | ["D0", "D5"] |
+| crosslink_copies | list of strings | Periodic copies for distance optimization | Exactly 2 different elements from D0-D5 | ["D0", "D5"] |
 
 **Notes**:
 - Additional crosslinks are used in the **mutated PDB workflow** to add AGE or other crosslinks on top of existing enzymatic crosslinks
 - Requires `mutated_pdb` to be set to an existing PDB file
-- **Workflow**: Run sequence generation with `mutated_pdb` and `additional_*` parameters separately, then use output in geometry generation
-- `crosslink_copies` pairs such as D0-D1, D1-D2, D2-D3, D3-D4
+- **Workflow**: Run sequence generation with `mutated_pdb` and `additional_*` parameters separately, then use output in geometry generation, declaring the additional type(s) there too so crosslink-type validation matches the structure
+- `crosslink_copies` must be exactly 2 different elements from D0, D1, D2, D3, D4, D5 (duplicates and any other value are rejected — there is no range syntax)
 - Default `crosslink_copies` is ["D0", "D5"] if not specified
 
 *Check available crosslinks and respective combinations at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
@@ -152,13 +165,17 @@ The most commonly used parameters for ColBuilder configuration:
 |-----------|------|-------------|--------------|---------|
 | geometry_generator | boolean | Enable geometry generation | true/false | false |
 | pdb_file | Path/null | Input PDB file (if sequence_generator=false) | Valid PDB file path or null | null |
-| contact_distance | float | Contact distance for microfibril (Å) | Positive number (typically 15-40) | None (required) |
-| fibril_length | float | Length of microfibril (nm) | 0 < value ≤ 334 | None (required)  |
+| contact_distance | float | Contact distance for microfibril (Å) | Positive number (typically 15-40) | None (required*) |
+| fibril_length | float | Length of microfibril (nm) | Positive number | None (required*) |
 | crystalcontacts_file | Path/null | File with crystal contacts | Valid file path or null | null |
 | connect_file | Path/null | File with connection information | Valid file path or null | null |
-| crystalcontacts_optimize | boolean | Optimize crystal contacts | true/false | true |
+| crystalcontacts_optimize | boolean | Optimize crystal contacts | true/false | false |
 | solution_space | List/Tuple | Solution space dimensions [dx, dy, dz] | Three positive numbers | [1, 1, 1] |
 | pdb_first_line | string | Crystal contacts information | Valid PDB CRYST1 line | Default crystal parameters |
+
+\* `fibril_length` is required for geometry generation, with one exception: in
+mixing mode (`mix_bool: true`) it defaults to 40.0 nm if not set.
+`contact_distance` is required unless `crystalcontacts_file` is provided instead.
 
 **Notes**:
 - Either `contact_distance` or `crystalcontacts_file` must be provided when geometry_generator is true
@@ -170,12 +187,14 @@ The most commonly used parameters for ColBuilder configuration:
 | Parameter | Type | Description | Valid Values | Default |
 |-----------|------|-------------|--------------|---------|
 | mix_bool | boolean | Generate mixed crosslinked microfibril | true/false | false |
-| ratio_mix | Dict or string | Ratio for mix-crosslink setup | Format: "Type:percentage Type:percentage" or Dict[str, int] | {} |
-| files_mix | List of Paths | PDB files with different crosslink types | Valid PDB file paths (≥2 files) | [] |
-| replace_bool | boolean | Replace crosslinks with lysines | true/false | false |
-| ratio_replace | float | Percentage of crosslinks to replace | 0-100 | None |
+| ratio_mix | Dict or string | Ratio for mix-crosslink setup | Format: "Type:percentage Type:percentage" or Dict[str, int] | None |
+| files_mix | List of Paths | PDB files with different crosslink types | Valid PDB file paths (≥2 files) | None |
+| replace_bool | boolean | Replace crosslinks with standard residues | true/false | false |
+| auto_fix_unpaired | boolean | Automatically detect crosslink markers left without a partner and replace them | true/false | false |
+| ratio_replace | float | Percentage of eligible crosslinks to REMOVE (replace with standard residues) | 0-100 | None |
 | ratio_replace_scope | string | Which crosslinks are eligible for ratio-based replacement | "enzymatic", "non_enzymatic", "all" | "enzymatic" |
 | replace_file | Path/null | Input PDB file of fibril with crosslinks | Valid file path or null | null |
+| manual_replacements | list of strings/null | Explicit, deterministic replacement directives | One `"<caps_file> <RES> <resid> <chain>"` entry per residue | null |
 
 **Validation Rules**:
 - When `mix_bool=true`:
@@ -184,15 +203,18 @@ The most commonly used parameters for ColBuilder configuration:
   - Percentages in `ratio_mix` must sum to 100
   - Number of files in `files_mix` must match number of types in `ratio_mix`
 - When `replace_bool=true`:
-  - `ratio_replace` must be between 0 and 100
+  - Choose exactly one replacement mechanism: `ratio_replace` (0-100, with `ratio_replace_scope`) or `manual_replacements`
   - Either `geometry_generator=true` OR `replace_file` must be provided
   - If `geometry_generator=false`, must provide `replace_file`
   - `ratio_replace_scope` must be one of `enzymatic`, `non_enzymatic`, or `all`
 
 **Notes**:
 - **Mixing** creates heterogeneous microfibrils with different crosslink types (e.g., 80% divalent + 20% trivalent)
-- **Replacement** simulates partial crosslinking or aged collagen by replacing some crosslinks with unmodified lysine residues
-- `ratio_replace_scope` selects which crosslinks may be replaced. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues); `non_enzymatic` targets AGE crosslinks (Glucosepane, Pentosidine, MOLD); `all` considers both
+- **Replacement** simulates partial crosslinking or aged collagen by replacing some crosslinks with standard residues. There are two mechanisms:
+  - **Ratio-based** (`ratio_replace` + `ratio_replace_scope`): a random percentage of eligible crosslinks, drawn from the chosen scope. `ratio_replace` is the fraction **removed**, not the remaining density — e.g. `ratio_replace: 70` removes 70% of eligible crosslinks, leaving 30%.
+  - **Manual** (`manual_replacements`): exact residues named explicitly, for reproducible, targeted edits. Each entry targets a residue inside a per-model `{id}.caps.pdb` file, only written to disk under `debug: true`.
+- `ratio_replace_scope` selects which crosslinks may be replaced by ratio-based replacement. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues); `non_enzymatic` targets AGE crosslinks (Glucosepane, Pentosidine) and MOLD; `all` considers both
+- `auto_fix_unpaired` automatically finds crosslink markers that would otherwise be left without a geometric partner and converts them to standard residues. If you've already configured your own replacement (`ratio_replace`, `replace_file`, or `manual_replacements`), ColBuilder defers to it instead of silently overriding it with its own auto-fix list — it logs a warning rather than changing your config.
 - Set `replace_file: null` to use geometry generation output for replacement
 
 ### Topology Generation Parameters
@@ -203,12 +225,11 @@ The most commonly used parameters for ColBuilder configuration:
 | force_field | string | Force field for simulations | "amber99", "martini3" | None |
 | topology_debug | boolean | Save intermediate topology files | true/false | false |
 | martinize2_command | string | Detected Martinize2 command path | Valid executable path | Auto-detected |
-| martinize2_env | string | Detected Martinize2 conda environment | Valid conda environment name | Auto-detected |
-| use_conda_run | boolean | Use conda run for Martinize2 | true/false | false |
 | go_epsilon | float | GO epsilon for Martini3-CG parametrization | Positive number | 9.414 |
 
 **Notes**:
 - **Topology-only mode**: When both `sequence_generator=false` and `geometry_generator=false` but `topology_generator=true`, ColBuilder generates topology from an existing fibril PDB
+- Martini3 crosslink parametrization currently only covers PYD and HLKNL; other crosslink types (DPD, PYL, DPL, MOLD, and the non-enzymatic AGE types) are not yet parametrized for Martini3 and will not produce correct coarse-grained bonded terms — use `force_field: "amber99"` for those
 - Set `topology_debug: true` to preserve intermediate files for troubleshooting
 
 ## Internal Data Structures
@@ -218,7 +239,7 @@ The most commonly used parameters for ColBuilder configuration:
 | Name | Type | Description |
 |------|------|-------------|
 | CrosslinkPair | class | Represents a pair of residues involved in a crosslink |
-| ResiduePosition | class | Represents a residue position with residue type, atom name, and position string |
+| CrosslinkPosition | class | Represents a residue position with residue type, atom name, and position string |
 | SequenceGenerator | class | Manages the generation of collagen structure from sequences |
 | OptimizationState | class | Tracks state during crosslink optimization |
 
@@ -274,8 +295,7 @@ The most commonly used parameters for ColBuilder configuration:
 |------|------|-------------|
 | Amber | class | Handles amber99 force field topology generation |
 | Martini | class | Handles martini3 force field topology generation |
-| TopologyService | class | Coordinates topology generation operations |
-| ITP | class | Manages ITP file generation and crosslink bonded terms |
+| Itp | class | Manages ITP file generation and crosslink bonded terms |
 
 **Key Functions**:
 - `build_topology()`: Main entry point for topology generation
@@ -301,7 +321,7 @@ The most commonly used parameters for ColBuilder configuration:
 - **Crosslink**: Covalent bond connecting collagen chains, providing structural stability
 - **Enzymatic crosslink**: Crosslink formed through lysyl oxidase (LOX) enzyme activity
 - **Non-enzymatic crosslink (AGE)**: Advanced Glycation End-product formed spontaneously, typically accumulating with aging
-- **Divalent crosslink**: Crosslink connecting 2 residues (e.g., HLKNL, LKNL)
+- **Divalent crosslink**: Crosslink connecting 2 residues (e.g., HLKNL, LKNL, MOLD)
 - **Trivalent crosslink**: Crosslink connecting 3 residues (e.g., PYD, DPD)
 - **Mutated PDB workflow**: Method to add additional crosslinks to existing structures
 - **Homology modeling**: Method to predict protein structure based on related proteins

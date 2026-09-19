@@ -74364,6 +74364,7 @@ col_19  3
  7658  7662  7660  7661     4 
  7660  7664  7662  7663     4 
 
+
 ; Include Position restraint file
 #ifdef POSRES
 #include "posre_19.itp"

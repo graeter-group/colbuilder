@@ -1,33 +1,31 @@
 <div align="center">
     <h1>Example 1</h1>
-    <p> A complete workflow demonstrating sequence generation, geometry generation, and topology generation
-</p>
+    <p>A complete workflow: sequence generation, geometry generation, and topology generation in a single run.</p>
 </div>
 
-## Files and Usage
+Builds a divalent (HLKNL) crosslinked collagen microfibril for *homo_sapiens*
+from scratch, and generates its amber99 topology, all from one config file.
 
-- `config_replace.yaml`  
-  → Input config file for `colbuilder`  
-  → Usage:  
-  ```bash
-  colbuilder --config_file config_ex1.yaml
+## Usage
 
-## Output Files:
+```bash
+colbuilder --config_file config_full_pipeline.yaml
+```
 
-- `collagen_fibril_homo_sapiens.pdb` 
-- `gen_fibril_homo_sapiens.gro`
-  → Main structure output 
+## Files
 
-# further output files (from sequence/gemetry/crosslink settings):
-- `connect_from_colbuilder.txt`
-- `crystalcontacts_from_colbuilder_opt_id.txt`
-- `crystalcontacts_from_colbuilder_opt.txt`
-- `crystalcontacts_from_colbuilder.txt`
--  homosapiens_alignment.fasta`
-- `homosapiens_N_HLKNL_C_HLKNL_original.pdb`
-- `homosapiens_N_HLKNL_C_HLKNL.pdb`
-- `homo_sapiens_topology_files/`
-   → folder with the topology files
+- `config_full_pipeline.yaml` — runs all three stages (sequence, geometry, topology) sequentially.
 
-- `output_terminal.txt`  
-  → Captured example terminal output
+## Output Files
+
+- `homosapiens_alignment.fasta` — MSA from sequence generation.
+- `homosapiens_N_HLKNL_C_HLKNL.pdb` — crosslinked sequence PDB, input to geometry generation.
+- `collagen_fibril_homo_sapiens.pdb` — final microfibril structure.
+- `homo_sapiens_topology_files/` — amber99 topology: `collagen_fibril_homo_sapiens.top`,
+  `collagen_fibril_homo_sapiens.gro`, per-group `col_*.itp`/`posre_*.itp`, and the force-field directory.
+
+## Notes
+
+- Intermediate files (`connect_from_colbuilder.txt`, `crystalcontacts_from_colbuilder*.txt`,
+  `*_original.pdb`) are only written under `debug: true`, and even then land in
+  `.tmp/geometry_gen/`, not the working directory.

@@ -27,13 +27,7 @@ from dataclasses import asdict
 import numpy as np
 import pandas as pd
 
-from colbuilder.core.utils.constants import (
-    TEMP_FILE_SUFFIX,
-    DISORIENTED_SUFFIX,
-    PDB_EXTENSION,
-    FASTA_EXTENSION,
-)
-from colbuilder.core.utils.data_structures import CrosslinkPair, OptimizationState
+from colbuilder.core.utils.data_structures import CrosslinkPair
 from colbuilder.core.utils.crosslinks import (
     CrosslinkOptimizer,
     extract_crosslinks_from_dataframe,
@@ -77,7 +71,6 @@ class SequenceGenerator:
         self._additional_crosslinks: List[CrosslinkPair] = []
         self._additional_crosslinks_1: List[CrosslinkPair] = []
         self._additional_crosslinks_2: List[CrosslinkPair] = []
-        self._original_crosslinks: List[CrosslinkPair] = []
         self._state: Dict[str, Any] = {}
 
         if config.mutated_pdb:
@@ -115,6 +108,7 @@ class SequenceGenerator:
                 )
 
             temp_dir = self.file_manager.get_temp_path("sequence_gen", create_dir=True)
+            self._temp_dir = temp_dir
             os.chdir(temp_dir)
 
             yield

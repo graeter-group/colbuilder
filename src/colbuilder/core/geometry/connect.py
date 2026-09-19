@@ -12,6 +12,13 @@ from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
 
+# Shared cutoff (Angstrom) for "is this crosslink marker pair genuinely
+# connected" wherever that question drives lattice-growth decisions (adding a
+# whole new model to the fibril): Connect.get_connect()'s default below, and
+# Optimizer._get_unpaired_crosslinks() in optimize.py. Kept tight -- see
+# get_connect()'s docstring for why a looser value breaks system building.
+LATTICE_GROWTH_CUTOFF = 3.0
+
 
 class Connect:
     """
@@ -48,6 +55,7 @@ class Connect:
                 "L5Y",
                 "L4Y",
                 "L5X",
+                "L4X",
                 "LY5",
                 "LX5",
                 "LY4",
@@ -178,64 +186,6 @@ class Connect:
         """
         return contactpairs
 
-    def _model_has_marker(self, model_id: float, caps_dir: Optional[Path], system: Any) -> bool:
-        """
-        Check if a model has any marker residue. Prefer scanning the caps file
-        if available; fallback to the in-memory crosslink list.
-        
-        Args:
-            model_id: ID of the model to check
-            caps_dir: Directory containing cap files
-            system: System object containing models
-            
-        Returns:
-            True if model has crosslink markers, False otherwise
-        """
-        candidate_paths: List[Path] = []
-        if caps_dir:
-            try:
-                model_type = getattr(system.get_model(model_id=model_id), "type", None)
-            except Exception:
-                model_type = None
-
-            # Build list of candidate paths to check
-            candidate_paths.append(caps_dir / f"{int(float(model_id))}.caps.pdb")
-            if model_type:
-                candidate_paths.append(
-                    caps_dir / str(model_type) / f"{int(float(model_id))}.caps.pdb"
-                )
-            
-            # As a fallback, check all subdirectories in caps_dir
-            if caps_dir.exists():
-                for sub in caps_dir.iterdir():
-                    if sub.is_dir():
-                        candidate_paths.append(
-                            sub / f"{int(float(model_id))}.caps.pdb"
-                        )
-
-            # Try to find and read a caps file
-            for caps_path in candidate_paths:
-                if caps_path.exists():
-                    try:
-                        with caps_path.open("r") as f:
-                            for line in f:
-                                if not line.startswith(("ATOM", "HETATM")):
-                                    continue
-                                resn = line[17:20].strip()
-                                if resn in self.marker_resnames:
-                                    return True
-                        # If we found a caps file but no marker, treat as marker-less
-                        return False
-                    except Exception:
-                        continue
-
-        # Only fall back to crosslink attribute if we could not read any caps file
-        try:
-            model_obj = system.get_model(model_id=model_id)
-            return bool(getattr(model_obj, "crosslink", []))
-        except Exception:
-            return False
-
     def _connections_from_model_graph(self, system: Any) -> List[str]:
         """
         Fallback: build connectivity lines from the in-memory model.connect graph.
@@ -348,24 +298,25 @@ class Connect:
             LOG.debug("No markers found in caps files, using model.connect graph")
             return self._connections_from_model_graph(system)
 
-        # Build connectivity based on marker proximity (< 4.0 Å)
+        # Build connectivity based on marker proximity (< 5.0 Å, matching the
+        # cutoff amber.py uses to form crosslink bonds -- see get_connect above).
         connect_pairs: Dict[float, Set[float]] = {
             mid: set() for mid in marker_positions
         }
         mids = sorted(marker_positions.keys())
-        
+
         for i, m1 in enumerate(mids):
             for m2 in mids[i + 1 :]:
                 pos1 = marker_positions.get(m1, [])
                 pos2 = marker_positions.get(m2, [])
                 if not pos1 or not pos2:
                     continue
-                
+
                 min_dist = min(
                     np.linalg.norm(a - b) for a in pos1 for b in pos2
                 )
-                
-                if min_dist < 4.0:
+
+                if min_dist < 5.0:
                     connect_pairs[m1].add(m2)
                     connect_pairs[m2].add(m1)
 
@@ -421,30 +372,9 @@ class Connect:
             for connection in unique_connections:
                 f.write(f"{connection}\n")
 
-    def print_connection_summary(self, system):
-        """
-        Prints a summary of connections for all models in the system.
-        
-        Args:
-            system: System object containing models
-        """
-        print("Models in the system:")
-        for model_id in system.get_models():
-            model = system.get_model(model_id=model_id)
-            if model.connect:
-                print(
-                    f"Model ID: {model_id}, Type: {model.type}, Connect: {model.connect}"
-                )
-            else:
-                print(
-                    f"Model ID: {model_id}, Type: {model.type}, Connect: [{model_id}] (self only)"
-                )
-
-        print("\nConnections as they will appear in the file:")
-        for connection in self._get_unique_connections(system):
-            print(connection)
-
-    def get_connect(self, ref_model: Any, model: Any, cut_off: float = 3.0) -> bool:
+    def get_connect(
+        self, ref_model: Any, model: Any, cut_off: float = LATTICE_GROWTH_CUTOFF
+    ) -> bool:
         """
         Calculates distance between models: distance below cut_off (3.0 A) keep model.
 

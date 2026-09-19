@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple, Set, Union
 import shutil
 from colorama import Fore, Style
 import os
@@ -15,6 +15,10 @@ from colbuilder.core.geometry.crystalcontacts import CrystalContacts
 from colbuilder.core.geometry.mix import Mix
 from colbuilder.core.geometry.optimize import Optimizer
 from colbuilder.core.geometry.unpaired_crosslinks import UnpairedCrosslinkFinder
+from colbuilder.core.geometry.geometry_replacer import (
+    snapshot_residue_atoms,
+    repair_missing_backbone_atoms,
+)
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
@@ -82,49 +86,26 @@ class CrosslinkMixer:
         self.config: Optional[ColbuilderConfig] = None
 
     @staticmethod
-    def _ensure_pdb_extension(filename: str) -> str:
-        """Ensure filename has .pdb extension."""
-        if not filename.endswith(".pdb"):
-            return filename + ".pdb"
-        return filename
-
-    @staticmethod
-    def _build_system(
-        crystal: Crystal, crystalcontacts: Optional[CrystalContacts] = None
-    ) -> System:
+    def _build_system(crystal: Crystal, crystalcontacts: CrystalContacts) -> System:
         """Build a system from crystal and crystal contacts."""
         system = System(crystal=crystal, crystalcontacts=crystalcontacts)
 
-        if crystalcontacts is None:
-            LOG.warning("No crystal contacts provided. Adding a default model.")
-            from colbuilder.core.geometry.model import Model
+        transformation = system.crystalcontacts.read_t_matrix()
+        unit_cell: Dict[float, Any] = {
+            k: system.crystal.get_s_matrix(t_matrix=transformation[k])
+            for k in transformation
+        }
 
-            default_transformation = crystal.get_default_transformation()
-            default_unit_cell = crystal.get_s_matrix(t_matrix=default_transformation)
-            default_model = Model(
-                id=0,
-                transformation=default_transformation,
-                unit_cell=default_unit_cell,
+        from colbuilder.core.geometry.model import Model
+
+        for key_m in transformation:
+            model = Model(
+                id=key_m,
+                transformation=transformation[key_m],
+                unit_cell=unit_cell[key_m],
                 pdb_file=crystal.pdb_file,
             )
-            system.add_model(model=default_model)
-        else:
-            transformation = system.crystalcontacts.read_t_matrix()
-            unit_cell: Dict[float, Any] = {
-                k: system.crystal.get_s_matrix(t_matrix=transformation[k])
-                for k in transformation
-            }
-
-            from colbuilder.core.geometry.model import Model
-
-            for key_m in transformation:
-                model = Model(
-                    id=key_m,
-                    transformation=transformation[key_m],
-                    unit_cell=unit_cell[key_m],
-                    pdb_file=crystal.pdb_file,
-                )
-                system.add_model(model=model)
+            system.add_model(model=model)
 
         LOG.debug(f"Built system with {len(system.get_models())} models")
         return system
@@ -191,7 +172,7 @@ class CrosslinkMixer:
 
         for key_m in system_connect:
             system.get_model(model_id=key_m).add_connect(
-                connect_id=key_m, connect=system_connect[key_m]
+                connect=system_connect[key_m]
             )
 
         return system, connect
@@ -253,11 +234,24 @@ class CrosslinkMixer:
 
             replace_file.write_text("\n".join(lines) + "\n")
 
+            pre_mutation_snapshot = snapshot_residue_atoms(system_dir, lines)
+
             chim = Chimera(cfg, pdb=str(system_dir))
             result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
             if result.returncode != 0:
-                LOG.error("Chimera swapaa failed for %s: %s", system_dir, result.stderr.decode() if hasattr(result, "stderr") else result.stderr)
+                # Chimera.swapaa runs subprocess.run with text=True on its normal
+                # completion path, so result.stderr is already a str there; only
+                # its internal exception-handling fallback returns bytes. Calling
+                # .decode() unconditionally raised AttributeError on the (far more
+                # common) str case, masking the real Chimera error under a generic
+                # "'str' object has no attribute 'decode'" from the outer except.
+                stderr = result.stderr
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode()
+                LOG.error("Chimera swapaa failed for %s: %s", system_dir, stderr)
                 return False
+
+            repair_missing_backbone_atoms(system_dir, lines, pre_mutation_snapshot)
             return True
         except Exception as e:
             LOG.warning("Chimera swapaa application failed: %s", e)
@@ -310,10 +304,23 @@ class CrosslinkMixer:
         finally:
             os.chdir(original_dir)
 
-    def _matrixset_system(self, system: System) -> System:
-        """Update system after cutting to specified length."""
+    def _matrixset_system(
+        self, system: System, crystalcontacts_file: Optional[Union[str, Path]] = None
+    ) -> System:
+        """Update system after cutting to specified length.
 
-        id_file = Path(f"{self.crystalcontacts_file}_opt_id.txt")
+        ``crystalcontacts_file`` is the same crystalcontacts base name/path
+        just used for the chimera.matrixset() call that produced the ID file
+        (may be an absolute path when the system was built by a prior
+        geometry-generation step in a different directory, e.g. when
+        geometry_generator and mix_bool are both enabled). Falling back to
+        ``self.crystalcontacts_file`` only covers the case where this system
+        was built by this mixer itself, relative to its own cwd.
+        """
+        base = str(crystalcontacts_file) if crystalcontacts_file else f"{self.crystalcontacts_file}_opt"
+        if base.endswith(".txt"):
+            base = base[: -len(".txt")]
+        id_file = Path(f"{base}_id.txt")
 
         if not id_file.exists():
             raise FileNotFoundError(f"Crystal contacts ID file not found: {id_file}")
@@ -353,23 +360,14 @@ class CrosslinkMixer:
             self.path_wd = temp_dir if temp_dir else Path(config.working_directory)
             if not self.path_wd.exists():
                 self.path_wd.mkdir(parents=True, exist_ok=True)
+            # Normalize: the rest of this method uses temp_dir directly, which
+            # must resolve the same way self.path_wd just did.
+            temp_dir = self.path_wd
 
             os.chdir(self.path_wd)
 
             self.fibril_length = config.fibril_length
             self.contact_distance = config.contact_distance
-
-            if isinstance(config.ratio_mix, str):
-                ratio_dict = {}
-                for part in config.ratio_mix.split():
-                    if ":" in part:
-                        key, value = part.split(":")
-                        try:
-                            ratio_dict[key] = int(value)
-                        except ValueError:
-                            LOG.error(f"Invalid ratio value in {part}")
-                            ratio_dict[key] = 0
-                config.ratio_mix = ratio_dict
 
             if not config.ratio_mix or not isinstance(config.ratio_mix, dict):
                 LOG.error(f"Invalid ratio_mix format in config: {config.ratio_mix}")
@@ -428,8 +426,6 @@ class CrosslinkMixer:
 
             system_size = system.get_size()
 
-            AGE_RESN = {"AGS", "LGX", "APD", "LPS"}
-
             if hasattr(system, "crystalcontacts") and system.crystalcontacts:
                 LOG.debug(
                     f"Crystalcontacts file: {system.crystalcontacts.crystalcontacts_file}"
@@ -482,7 +478,7 @@ class CrosslinkMixer:
                 )
 
                 LOG.info(f"     Cutting system to {fibril_length_nm} nm")
-                system = self._matrixset_system(system)
+                system = self._matrixset_system(system, crystalcontacts_file)
 
                 type_dir = temp_dir / str(key)
                 type_dir.mkdir(parents=True, exist_ok=True)
@@ -527,27 +523,6 @@ class CrosslinkMixer:
                     allowed_resnames=None,
                     config=config,
                 )
-
-            # After fixing per-type caps, compute average AGE markers per model for each type
-            per_type_age_avg: Dict[str, float] = {}
-            for key in mix_pdb.keys():
-                type_dir = temp_dir / str(key)
-                caps_files = list(type_dir.glob("*.caps.pdb"))
-                if not caps_files:
-                    per_type_age_avg[key] = 1.0
-                    continue
-                marker_count = 0
-                for cf in caps_files:
-                    try:
-                        with cf.open("r") as fh:
-                            for line in fh:
-                                if not line.startswith(("ATOM", "HETATM")):
-                                    continue
-                                if line[17:20].strip() in AGE_RESN:
-                                    marker_count += 1
-                    except Exception:
-                        continue
-                per_type_age_avg[key] = marker_count / float(len(caps_files) or 1) or 1.0
 
             LOG.info("Step 2/2 Mixing systems")
 

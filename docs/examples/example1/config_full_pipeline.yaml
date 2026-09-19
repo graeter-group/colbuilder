@@ -1,0 +1,22 @@
+# Run all three stages in one pass: sequence -> geometry -> topology.
+sequence_generator: true
+geometry_generator: true
+topology_generator: true
+
+species: "homo_sapiens"
+
+# HLKNL is a divalent (2-residue) enzymatic crosslink, applied at both termini.
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+# Residue positions for homo_sapiens/HLKNL, from crosslinks.csv.
+n_term_combination: "9.C - 947.A"
+c_term_combination: "1047.C - 104.C"
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 20
+# Length of the assembled microfibril (nm).
+fibril_length: 60.0
+
+# Atomistic force field for topology generation.
+force_field: "amber99"

@@ -1,0 +1,10 @@
+# Step 3/7: standard sequence generation with terminal PYD (trivalent
+# enzymatic) crosslinks. Produces one of three inputs for the eventual mix.
+sequence_generator: true
+
+species: "rattus_norvegicus"
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1046.C - 1046.A - 103.C"

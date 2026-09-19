@@ -2,10 +2,8 @@
 # Distributed under the terms of the Apache License 2.0
 
 from pymol import cmd, editor
-import subprocess
 from typing import List, Dict, Any, Optional
 import os
-import shutil
 from pathlib import Path
 
 from colbuilder.core.utils.logger import setup_logger
@@ -160,10 +158,8 @@ class Caps:
 
         cmd.save("tmp.pdb")
         cmd.delete(name=str(pdb_id))
-        caps_output_file = output_dir / f"{pdb_id}.caps.pdb"
 
-        result = self.write_caps(pdb="tmp.pdb", pdb_id=pdb_id, output_dir=output_dir)
-        return result
+        return self.write_caps(pdb="tmp.pdb", pdb_id=pdb_id, output_dir=output_dir)
 
     def write_caps(self, pdb: str, pdb_id: int, output_dir: Path) -> str:
         """
@@ -192,9 +188,19 @@ class Caps:
                         line = "ATOM  " + line[6:]
                     f_out.write(line)
                     if (line[17:20] == "NME" and line[12:16] == "3HH3") or (
-                        line[17:20] == "ALA" and line[13:16] == "OXT"
+                        line[13:16] == "OXT"
                     ):
-                        f_out.write("TER \n")
+                        # Pad to the standard 6-char PDB record-name field
+                        # ("TER   "), matching amber.py/martini.py/system.py's
+                        # is_line tuples. An under-padded "TER \n" silently
+                        # fails their line.startswith(pdb_line_types) /
+                        # line[0:6] in is_line checks and gets dropped during
+                        # merging -- and since pdb2gmx runs with -merge all,
+                        # a missing TER is the only thing separating two
+                        # chains, so pdb2gmx can misidentify a real chain
+                        # terminus as internal (wrong rtp entry, e.g. "Atom
+                        # OXT ... not found in rtp entry ALA").
+                        f_out.write("TER   \n")
 
         # Cleanup temporary files
         try:

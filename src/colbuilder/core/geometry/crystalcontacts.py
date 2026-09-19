@@ -72,14 +72,14 @@ class CrystalContacts:
 
     def write_crystalcontacts(
         self,
-        system: Optional[Any] = None,
+        system: Any,
         crystalcontacts_file: Optional[Union[str, Path]] = None,
     ) -> None:
         """
         Writes crystal contacts to txt file for Chimera.
 
         Args:
-            system (Optional[Any]): System object containing model information.
+            system (Any): System object containing model information.
             crystalcontacts_file (Optional[Union[str, Path]]): Path to the output crystal contacts file.
         """
         file_path = (
@@ -89,43 +89,11 @@ class CrystalContacts:
         )
 
         with open(file_path.with_suffix(".txt"), "w") as f:
-            if system is None:
-                contacts = self.read_crystalcontacts(file_path)
-                for key_cc, val_cc in self.t_matrix.items():
-                    f.write(f"Model {key_cc}\n")
-                    for i, val in enumerate(val_cc):
-                        f.write(
-                            f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
-                        )
-            else:
-                for model in system.get_models():
-                    f.write(f"Model {model}\n")
-                    for i, val in enumerate(
-                        system.get_model(model_id=model).transformation
-                    ):
-                        f.write(
-                            f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
-                        )
-
-    def find_contact(self, model_id: float) -> List[float]:
-        """
-        Finds the translation vector for one specific model-id.
-
-        Args:
-            model_id (float): ID of the model to find the contact for.
-
-        Returns:
-            List[float]: Translation vector for the specified model.
-
-        Raises:
-            KeyError: If the model_id is not found in the t_matrix.
-        """
-        if not self.t_matrix:
-            self.t_matrix = self.read_t_matrix(self.crystalcontacts_file)
-
-        if model_id not in self.t_matrix:
-            raise KeyError(
-                f"Model ID {model_id} not found in the transformation matrix."
-            )
-
-        return self.t_matrix[model_id]
+            for model in system.get_models():
+                f.write(f"Model {model}\n")
+                for i, val in enumerate(
+                    system.get_model(model_id=model).transformation
+                ):
+                    f.write(
+                        f"         {'1' if i == 0 else '0'} {'1' if i == 1 else '0'} {'1' if i == 2 else '0'} {val:.3f}\n"
+                    )

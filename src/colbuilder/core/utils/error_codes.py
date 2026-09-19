@@ -287,6 +287,24 @@ GEOMETRY_ERRORS: Dict[str, ErrorInfo] = {
         ],
         docs_url="https://colbuilder.readthedocs.io/en/latest/geometry.html#input-requirements",
     ),
+    "GEO_ERR_009": ErrorInfo(
+        code="GEO_ERR_009",
+        message="Invalid ratio_mix format for crosslink mixing",
+        suggestions=[
+            "Provide ratio_mix as a dictionary or a 'Type:percentage Type:percentage' string",
+            "Ensure the percentages sum to 100",
+            "Check that type labels match the files_mix entries",
+        ],
+    ),
+    "GEO_ERR_012": ErrorInfo(
+        code="GEO_ERR_012",
+        message="Failed to create output PDB file",
+        suggestions=[
+            "Check write permissions in the output directory",
+            "Ensure sufficient disk space",
+            "Verify the mixing or geometry generation step completed successfully",
+        ],
+    ),
 }
 
 # Topology-related errors
@@ -359,6 +377,15 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
             "Ensure sufficient disk space",
             "Verify topology generation completed successfully",
             "Check for conflicting file names",
+        ],
+    ),
+    "TOP_ERR_008": ErrorInfo(
+        code="TOP_ERR_008",
+        message="PDB file required or not found for topology-only mode",
+        suggestions=[
+            "Provide a valid pdb_file when running topology_generator without sequence or geometry generation",
+            "Check that the specified pdb_file path exists",
+            "Verify the path is correct relative to the working directory",
         ],
     ),
     "TOP_MART_001": ErrorInfo(

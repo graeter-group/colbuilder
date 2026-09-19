@@ -52,7 +52,7 @@ config = get_config(
 
 # Access configuration attributes
 print(config.working_directory)  # Output: /path/to/working_dir
-print(config.mode)  # Output: OperationMode.SEQUENCE
+print(config.sequence_generator)  # Output: True
 
 # Validate paths and input files
 config.validate_paths()
@@ -71,7 +71,6 @@ print(output_path)  # Output: /path/to/working_dir/output_file.pdb
 # Copyright (c) 2024, Colbuilder Development Team
 # Distributed under the terms of the Apache License 2.0
 
-from enum import Flag, auto, Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union, Literal, Any
 from pydantic import (
@@ -85,8 +84,6 @@ from pydantic import (
 import yaml
 import re
 import os
-import subprocess
-import json
 from functools import lru_cache
 
 from .validators import BioformatValidator
@@ -100,17 +97,6 @@ from .exceptions import (
 from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
-
-
-class OperationMode(Flag):
-    """Operation modes for the Colbuilder pipeline."""
-
-    NONE = 0
-    SEQUENCE = auto()
-    GEOMETRY = auto()
-    TOPOLOGY = auto()
-    MIX = auto()
-    REPLACE = auto()
 
 
 def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
@@ -158,8 +144,6 @@ def resolve_relative_paths(config: Dict[str, Any], base_dir: Path) -> Dict[str, 
 class ColbuilderConfig(BaseModel):
     """Main configuration class for the Colbuilder pipeline."""
 
-    # Operation mode
-    mode: Optional[OperationMode] = Field(None, description="Operation mode")
     debug: bool = Field(default=False, description="Enable debug logging")
     working_directory: Optional[Path] = Field(
         default=Path.cwd(), description="Working directory"
@@ -263,7 +247,12 @@ class ColbuilderConfig(BaseModel):
         description="Scope of residues considered for ratio-based replacement",
     )
     ratio_replace: Optional[float] = Field(
-        None, description="Ratio of crosslinks to be replaced"
+        None,
+        description=(
+            "Percentage (0-100) of eligible crosslinks to REMOVE (replace with "
+            "standard residues). This is the fraction removed, NOT the remaining "
+            "density: e.g. 70 removes 70% of crosslinks, leaving 30%."
+        ),
     )
     replace_file: Optional[Path] = Field(
         None, description="File with crosslinks to be replaced"
@@ -284,12 +273,6 @@ class ColbuilderConfig(BaseModel):
     )
     martinize2_command: Optional[str] = Field(
         None, description="Detected Martinize2 command"
-    )
-    martinize2_env: Optional[str] = Field(
-        None, description="Detected Martinize2 environment"
-    )
-    use_conda_run: bool = Field(
-        default=False, description="Whether to use conda run for Martinize2"
     )
     go_epsilon: float = Field(
         default=9.414,
@@ -387,11 +370,10 @@ class ColbuilderConfig(BaseModel):
             data["working_directory"] = Path.cwd().resolve()
 
         super().__init__(**data)
-        # ratio_mix is converted/validated (incl. sum-to-100) by the
-        # validate_ratio_mix field validator; no extra conversion needed here.
-        self.solution_space = self._convert_to_tuple(self.solution_space)
-        self.files_mix = tuple(self.files_mix) if self.files_mix else None
-        self.set_mode()
+        # ratio_mix, solution_space, and files_mix are all already
+        # converted/validated by their respective field validators
+        # (validate_ratio_mix, validate_solution_space, validate_files_mix)
+        # during the super().__init__() call above.
 
     def get_project_data_path(self, relative_path: str) -> Path:
         """
@@ -452,7 +434,11 @@ class ColbuilderConfig(BaseModel):
                     error_code="CFG_ERR_003",
                 )
 
-        self.set_mode()
+        # Bundled package resources (templates, libraries, data files) should
+        # always exist regardless of which stages this run enables -- catch a
+        # broken/incomplete install early with a clear message instead of a
+        # confusing failure deep inside whichever stage first needs the file.
+        self.validate_paths()
 
     @model_validator(mode="after")
     def validate_geometry_requirements(self) -> "ColbuilderConfig":
@@ -463,8 +449,6 @@ class ColbuilderConfig(BaseModel):
                     "Either contact_distance or crystalcontacts_file must be provided for geometry generation",
                     error_code="CFG_ERR_006",
                 )
-            if self.contact_distance == 0 and self.crystalcontacts_file is None:
-                pass
         return self
 
     @field_validator("contact_distance")
@@ -529,35 +513,6 @@ class ColbuilderConfig(BaseModel):
         """Convert species name to lowercase."""
         return value.lower() if value else value
 
-    def _convert_ratio_mix(self, value: Union[str, Dict[str, int]]) -> Dict[str, int]:
-        """Convert string ratio mix to dictionary."""
-        if isinstance(value, str):
-            try:
-                return {
-                    item.split(":")[0]: int(item.split(":")[1])
-                    for item in value.split()
-                }
-            except (ValueError, IndexError):
-                raise ConfigurationError(
-                    "Invalid ratio_mix format. Expected 'Type:percentage Type:percentage'",
-                    error_code="CFG_ERR_004",
-                )
-        elif isinstance(value, dict):
-            return value
-        else:
-            raise ConfigurationError(
-                f"Invalid ratio_mix type. Expected string or dictionary, got {type(value).__name__}",
-                error_code="CFG_ERR_004",
-            )
-
-    def _convert_to_tuple(
-        self, value: Union[List[float], Tuple[float, float, float]]
-    ) -> Tuple[float, float, float]:
-        """Convert list to tuple for solution space."""
-        if isinstance(value, list):
-            return tuple(value)
-        return value
-
     @field_validator("solution_space", mode="before")
     def validate_solution_space(cls, value):
         """Validate solution space format."""
@@ -619,17 +574,6 @@ class ColbuilderConfig(BaseModel):
         
         return self
     
-    @field_validator("mutated_pdb", mode="before")
-    def validate_mutated_pdb_path(cls, value):
-        """Validate mutated PDB path."""
-        if value is not None:
-            path = Path(value)
-            if not path.is_absolute():
-                # Will be resolved relative to working directory later
-                return value
-            return value
-        return None
-
     @field_validator("files_mix", mode="before")
     def validate_files_mix(cls, value):
         """Validate files mix format."""
@@ -652,22 +596,6 @@ class ColbuilderConfig(BaseModel):
             f"Invalid manual_replacements type: {type(value).__name__}",
             error_code="CFG_ERR_006",
         )
-
-    def set_mode(self):
-        """Set operation mode based on configuration flags."""
-        self.mode = OperationMode.NONE
-        if self.sequence_generator:
-            self.mode |= OperationMode.SEQUENCE
-        if self.geometry_generator:
-            self.mode |= OperationMode.GEOMETRY
-        if self.topology_generator:
-            self.mode |= OperationMode.TOPOLOGY
-        if self.mix_bool:
-            self.mode |= OperationMode.MIX
-        if self.replace_bool:
-            self.mode |= OperationMode.REPLACE
-        if self.auto_fix_unpaired:
-            self.mode |= OperationMode.REPLACE
 
     def validate_paths(self):
         """Validate existence of required input paths and files."""
@@ -866,50 +794,9 @@ class ColbuilderConfig(BaseModel):
 
         return self
 
-    def get_conda_env_path(self) -> Optional[str]:
-        """
-        Get the full path to the conda environment for martinize2.
-
-        Returns:
-            Optional[str]: Full path to the conda environment or None if not found
-        """
-        if not self.martinize2_env:
-            return None
-
-        try:
-            # Run conda info command to get environment paths
-            result = subprocess.run(
-                ["conda", "info", "--envs", "--json"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            env_data = json.loads(result.stdout)
-
-            # Look for the specified environment in the paths
-            for env_path in env_data["envs"]:
-                if os.path.basename(env_path) == self.martinize2_env:
-                    LOG.info(f"Found conda environment path: {env_path}")
-                    return env_path
-
-            LOG.warning(
-                f"Could not find conda environment path for: {self.martinize2_env}"
-            )
-            return None
-        except Exception as e:
-            LOG.error(f"Error determining conda environment path: {e}")
-            return None
-
-    def update(self, new_config: Dict[str, Any]):
-        """Update configuration with new values."""
-        for key, value in new_config.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-        self.set_mode()
-
     def __str__(self):
         """String representation of the configuration."""
-        return f"ColbuilderConfig(mode={self.mode}, pdb_file={self.pdb_file}, output={self.output})"
+        return f"ColbuilderConfig(pdb_file={self.pdb_file}, output={self.output})"
 
     @property
     def output(self) -> str:

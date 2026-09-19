@@ -416,15 +416,12 @@ class CrosslinkOptimizer:
         """Convert CrosslinkPair objects to the format needed by optimize_structure."""
         return [
             {
-                "chain1_id": pair.position1.chain_id,
                 "residue1_position": str(pair.position1.residue_number),
                 "residue1_type": pair.position1.residue_type,
                 "atom1": pair.position1.atom_name,
-                "chain2_id": pair.position2.chain_id,
                 "residue2_position": str(pair.position2.residue_number),
                 "residue2_type": pair.position2.residue_type,
                 "atom2": pair.position2.atom_name,
-                "chain3_id": pair.position3.chain_id if pair.position3 else "NONE",
                 "residue3_position": (
                     str(pair.position3.residue_number) if pair.position3 else "NONE"
                 ),

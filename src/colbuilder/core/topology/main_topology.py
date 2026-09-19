@@ -12,7 +12,7 @@ from typing import Any, Optional, Set, List
 import shutil
 from colorama import init, Fore, Style
 
-from colbuilder.core.utils.files import FileManager, managed_resources
+from colbuilder.core.utils.files import FileManager
 from colbuilder.core.geometry.system import System
 from colbuilder.core.topology.amber import Amber, build_amber99
 from colbuilder.core.topology.martini import Martini, build_martini3
@@ -25,7 +25,6 @@ from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
 
-REQUIRED_FF_FILES: List[str] = ['residuetypes.dat', 'specbond.dat']
 TEMP_FILES_TO_CLEAN: Set[str] = {
     'col_*.*_go-*.itp', 
     'col_*.*.itp', 
@@ -104,32 +103,6 @@ def setup_topology_directory(system_name: str, ff_name: str) -> Path:
     return topology_dir
 
 
-def organize_topology_files(topology_dir: Path, species: str) -> None:
-    """
-    Organize and move topology files to their final location.
-    
-    Parameters
-    ----------
-    topology_dir : Path
-        Destination directory for topology files
-    species : str
-        Species identifier used in file naming
-    """
-    try:
-        for top_file in Path().glob(f"collagen_fibril_*.top"):
-            shutil.copy2(top_file, topology_dir / top_file.name)
-
-        for gro_file in Path().glob(f"collagen_fibril_*.gro"):
-            shutil.copy2(gro_file, topology_dir / gro_file.name)
-            
-        for itp_file in Path().glob("*.itp"):
-            shutil.copy2(itp_file, topology_dir / itp_file.name)
-            os.remove(itp_file)  
-            
-    except Exception as e:
-        LOG.warning(f"Error organizing topology files: {str(e)}")
-
-
 @timeit
 async def build_topology(system: System, config: ColbuilderConfig, file_manager: Optional[FileManager] = None) -> Any:
     """
@@ -169,35 +142,25 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
         try:
             os.chdir(topology_dir)
             
-            # Determine which directory to search for cap files based on operation mode
+            # Determine which directory to search for cap files based on operation mode.
+            # Always absolute: cwd is topology_dir at this point (chdir above), so a
+            # relative ".tmp/..." candidate would resolve under topology_dir itself
+            # and never exist.
             if config.replace_bool:
-                cap_dir_candidates = [
-                    Path(".tmp/replace_crosslinks"),
-                    Path(original_dir) / ".tmp" / "replace_crosslinks",
-                ]
+                geometry_dir_candidate = original_dir / ".tmp" / "replace_crosslinks"
             elif getattr(config, "auto_fix_unpaired", False):
-                cap_dir_candidates = [
-                    Path(".tmp/replace_manual"),
-                    Path(original_dir) / ".tmp" / "replace_manual",
-                ]
+                geometry_dir_candidate = original_dir / ".tmp" / "replace_manual"
             elif getattr(config, "mix_bool", False):
-                cap_dir_candidates = [
-                    Path(".tmp/mixing_crosslinks"),
-                    Path(original_dir) / ".tmp" / "mixing_crosslinks",
-                ]
+                geometry_dir_candidate = original_dir / ".tmp" / "mixing_crosslinks"
             else:
                 # Standard geometry generation or topology-only mode
-                cap_dir_candidates = [
-                    Path(".tmp/geometry_gen"),
-                    Path(original_dir) / ".tmp" / "geometry_gen",
-                ]
+                geometry_dir_candidate = original_dir / ".tmp" / "geometry_gen"
 
-            # Find the first existing directory
-            geometry_dir = next((p for p in cap_dir_candidates if p.exists()), None)
+            geometry_dir = geometry_dir_candidate if geometry_dir_candidate.exists() else None
             
             if geometry_dir is None:
                 LOG.warning("No caps directory found in expected locations")
-                LOG.debug(f"Searched: {[str(p) for p in cap_dir_candidates]}")
+                LOG.debug(f"Searched: {geometry_dir_candidate}")
                 # This is not necessarily fatal - caps might be created by extract_and_cap_models_from_pdb
             
             # Collect cap files if geometry_dir exists
@@ -277,8 +240,19 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     context={"force_field": force_field}
                 )
             
-            # Create output directory and copy all generated files
-            output_topology_dir = file_manager.ensure_dir(f"{config.species}_topology_files")
+            # Create output directory and copy all generated files. Martini3's
+            # own builder (build_martini3) already assembles a complete output
+            # directory named "{species}_{force_field}_topology_files" -- reuse
+            # that same name here so this generic copy pass lands in the one
+            # directory that actually has the Martini base force-field files
+            # (martini_v3.0.0*.itp), instead of creating a second, incomplete
+            # "{species}_topology_files" directory whose #include directives
+            # would point at files that were never copied there.
+            if force_field == 'martini3':
+                output_dir_name = f"{config.species}_{force_field}_topology_files"
+            else:
+                output_dir_name = f"{config.species}_topology_files"
+            output_topology_dir = file_manager.ensure_dir(output_dir_name)
 
             # Copy coarse-grained PDB files (Martini3)
             for cg_pdb_file in Path().glob("collagen_fibril_CG_*.pdb"):

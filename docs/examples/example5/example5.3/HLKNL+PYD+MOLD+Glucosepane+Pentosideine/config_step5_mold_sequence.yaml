@@ -1,0 +1,12 @@
+# Step 5/7: standard sequence generation with terminal MOLD (divalent,
+# LYS-LYS derived non-enzymatic) crosslinks. Produces the third input for the
+# eventual mix; MOLD shares the same terminal positions as HLKNL/PYD since all
+# three are LYS-LYS derived.
+sequence_generator: true
+
+species: "rattus_norvegicus"
+crosslink: true
+n_term_type: "MOLD"
+c_term_type: "MOLD"
+n_term_combination: "9.C - 944.B"
+c_term_combination: "1046.C - 103.C"

@@ -122,8 +122,6 @@ class Chimera(object):
         expected_file = f"{crystalcontacts_str}_id.txt"
         if os.path.exists(expected_file):
             LOG.debug(f"        File created successfully: {expected_file}")
-            with open(expected_file, "r") as f:
-                pass
         else:
             LOG.error(f"    File not created: {expected_file}")
             raise FileNotFoundError(f"Expected file not created: {expected_file}")
@@ -177,9 +175,12 @@ class Chimera(object):
             return result
         except Exception as e:
             LOG.error(f"Error executing Chimera command: {str(e)}")
+            # subprocess.run above uses text=True, so its normal-completion
+            # result carries str stdout/stderr; match that type here so
+            # callers don't have to guess which path produced this result.
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=1,
-                stdout=b"",
-                stderr=str(e).encode() if hasattr(str(e), "encode") else str(e),
+                stdout="",
+                stderr=str(e),
             )

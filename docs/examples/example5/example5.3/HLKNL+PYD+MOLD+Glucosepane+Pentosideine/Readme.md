@@ -1,77 +1,49 @@
 <div align="center">
-    <h1>Example 3B</h1>
-    <p>
-        Mixed-crosslink microfibril: HLKNL + PYD + MOLD combined with
-        Glucosepane + Pentosidine and mixed by ratio.
-    </p>
+    <h1>Example 5.3B</h1>
+    <p>Mixed-crosslink microfibril: HLKNL+Glucosepane, PYD+Pentosidine, and MOLD+Pentosidine combined by ratio.</p>
 </div>
 
-This example extends the mixed-crosslink workflow by adding MOLD. MOLD is
-non-enzymatic, but it is LYS-LYS derived like enzymatic crosslinks, so it must
-share the same terminal positions as HLKNL/PYD for mixing. Glucosepane and
-Pentosidine are LYS-ARG derived and must share positions with each other (at
-non-enzymatic sites), not with the enzymatic positions.
+Extends Example 5.3A with a third variant: MOLD (divalent, LYS-LYS derived,
+non-enzymatic) + Pentosidine. All three enzymatic/LYS-LYS-derived positions
+(HLKNL, PYD, MOLD) share the same terminal definitions, and both AGEs
+(Glucosepane, Pentosidine) share the same non-enzymatic positions, so the three
+variants can be mixed together into one microfibril.
 
-## Run Order
+## Usage
 
 ```bash
-# 1) Enzymatic-position sequences (HLKNL, PYD, MOLD)
-colbuilder --config_file config_ex5_step1_HLKNL.yaml --debug
-colbuilder --config_file config_ex5_step3_PYD.yaml --debug
-colbuilder --config_file config_ex5_step5_MOLD.yaml --debug
-
-# 2) Add non-enzymatic crosslinks
-colbuilder --config_file config_ex5_step2_HLKNL+Glucosepane.yaml --debug
-colbuilder --config_file config_ex5_step4_PYD+Pentosidine.yaml --debug
-colbuilder --config_file config_ex5_step6_MOLD+Pentosidine.yaml --debug
-
-# 3) Mix the three inputs and generate topology
-colbuilder --config_file config_ex5_step7.yaml --debug
+colbuilder --config_file config_step1_hlknl_sequence.yaml --debug
+colbuilder --config_file config_step2_add_glucosepane.yaml --debug
+colbuilder --config_file config_step3_pyd_sequence.yaml --debug
+colbuilder --config_file config_step4_add_pentosidine.yaml --debug
+colbuilder --config_file config_step5_mold_sequence.yaml --debug
+colbuilder --config_file config_step6_add_pentosidine.yaml --debug
+colbuilder --config_file config_step7_mix_topology.yaml --debug
 ```
 
-## What Each Step Does
+## Files
 
-### 1) `config_ex5_step1_HLKNL.yaml`, `config_ex5_step3_PYD.yaml`, `config_ex5_step5_MOLD.yaml`
-Standard sequence generation with terminal crosslinks at both N and C termini.
-HLKNL and PYD are enzymatic; MOLD is LYS-LYS derived and must use the same
-terminal positions for mix-compatibility.
+- `config_step1_hlknl_sequence.yaml` — sequence generation, terminal HLKNL crosslinks (variant A).
+- `config_step2_add_glucosepane.yaml` — mutated-PDB workflow, adds Glucosepane to variant A.
+- `config_step3_pyd_sequence.yaml` — sequence generation, terminal PYD crosslinks (variant B).
+- `config_step4_add_pentosidine.yaml` — mutated-PDB workflow, adds Pentosidine to variant B.
+- `config_step5_mold_sequence.yaml` — sequence generation, terminal MOLD crosslinks (variant C).
+- `config_step6_add_pentosidine.yaml` — mutated-PDB workflow, adds Pentosidine to variant C.
+- `config_step7_mix_topology.yaml` — mixing-only mode: combines variants A, B, C at a 60:20:20 ratio
+  (`ratio_mix: "A:60 B:20 C:20"`), then builds amber99 topology.
 
-Key outputs:
-- `rattusnorvegicus_N_HLKNL_C_HLKNL.pdb`
-- `rattusnorvegicus_N_PYD_C_PYD.pdb`
-- `rattusnorvegicus_N_MOLD_C_MOLD.pdb`
-- `rattusnorvegicus_alignment.fasta`
+## Output Files
 
-### 2) `config_ex5_step2_HLKNL+Glucosepane.yaml`, `config_ex5_step4_PYD+Pentosidine.yaml`, `config_ex5_step6_MOLD+Pentosidine.yaml`
-Mutated-PDB workflow that adds non-enzymatic crosslinks (AGEs) on top of each
-enzymatic-position input. In this example, one AGE is added per input, but the
-workflow supports multiple non-enzymatic crosslinks.
-Use the crosslink-specific shift for this second sequence step; it is listed in
-`src/colbuilder/data/sequence/crosslinks.csv` alongside each crosslink entry.
-
-Key outputs:
-- `rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb`
-- `rattusnorvegicus_N_PYD_C_PYD+ADD1_Pentosidine.pdb`
-- `rattusnorvegicus_N_MOLD_C_MOLD+ADD1_Pentosidine.pdb`
-
-### 3) `config_ex5_step7.yaml`
-Mixes the three PDBs into a single microfibril using the requested ratio and
-then generates GROMACS topologies.
-
-Key settings in the YAML:
-- `files_mix` lists the three input PDBs to mix.
-- `ratio_mix: "A:60 B:20 C:20"` sets the composition.
-
-Key outputs:
-- `collagen_fibril_rattus_norvegicus.pdb`
-- `rattus_norvegicus_topology_files/`
-  - `collagen_fibril_rattus_norvegicus.top`
-  - `collagen_fibril_rattus_norvegicus.gro`
-  - `col_*.itp`
-  - `posre_*.itp`
-  - `amber99sb-star-ildnp.ff/`
+- `rattusnorvegicus_alignment.fasta` — MSA; only the last sequence-generation step's
+  alignment survives here, since all three write to the same filename.
+- `rattusnorvegicus_N_HLKNL_C_HLKNL.pdb`, `rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb` — variant A.
+- `rattusnorvegicus_N_PYD_C_PYD.pdb`, `rattusnorvegicus_N_PYD_C_PYD+ADD1_Pentosidine.pdb` — variant B.
+- `rattusnorvegicus_N_MOLD_C_MOLD.pdb`, `rattusnorvegicus_N_MOLD_C_MOLD+ADD1_Pentosidine.pdb` — variant C.
+- `collagen_fibril_rattus_norvegicus.pdb` — final mixed microfibril.
+- `rattus_norvegicus_topology_files/` — amber99 topology: `.top`, `.gro`, per-group
+  `col_*.itp`/`posre_*.itp`, and the force-field directory.
 
 ## Notes
-- HLKNL, PYD, and MOLD must share identical terminal position definitions.
-- Glucosepane and Pentosidine must share the same non-enzymatic positions,
-  distinct from the enzymatic positions.
+
+- The achieved 60:20:20 split can land off by one model either way between runs — which
+  specific models get selected for each type isn't seeded.

@@ -34,55 +34,55 @@ class Amber:
         self.system = system
         self.ff = ff + '.ff' if ff else None
         self.pdb_line_types = ('ATOM  ', 'HETATM', 'ANISOU', 'TER   ')
-    
+
     def get_connected_groups(self) -> List[List[int]]:
         """Group models that are connected together."""
         if not self.system:
             return []
-            
+
         all_models = list(self.system.get_models())
         processed = set()
         groups = []
-        
+
         for model_id in all_models:
             if model_id in processed:
                 continue
-                
+
             model = self.system.get_model(model_id=model_id)
             if not model or not model.connect:
                 groups.append([model_id])
                 processed.add(model_id)
                 continue
-            
+
             group = set()
             to_process = [model_id]
-            
+
             while to_process:
                 current_id = to_process.pop()
                 if current_id in group:
                     continue
-                    
+
                 group.add(current_id)
                 current_model = self.system.get_model(model_id=current_id)
-                
+
                 if current_model and current_model.connect:
                     for connected_id in current_model.connect:
                         if connected_id not in group:
                             to_process.append(connected_id)
-            
+
             if group:
                 groups.append(sorted(list(group)))
                 processed.update(group)
-        
+
         return groups
-    
+
     def merge_connected_models(
-        self, 
+        self,
         model_group: List[int]
     ) -> Optional[Tuple[str, str, List[Tuple[Crosslink, Crosslink]]]]:
         """
         Merge connected models and detect crosslink pairs from individual model files.
-        
+
         Returns:
             Tuple of (model_type, group_id, crosslink_pairs) or None
         """
@@ -98,12 +98,12 @@ class Amber:
 
         group_id = "_".join(str(int(mid)) for mid in sorted(model_group))
         output_file = os.path.join(model_type, f"{group_id}.merge.pdb")
-        
+
         # DETECT CROSSLINKS FROM INDIVIDUAL MODEL FILES BEFORE MERGING
         crosslink_pairs = []
         if len(model_group) > 1:
             all_crosslinks = []
-            
+
             for mid in model_group:
                 caps_file = os.path.join(model_type, f"{int(mid)}.caps.pdb")
                 if os.path.exists(caps_file):
@@ -115,14 +115,7 @@ class Amber:
                         LOG.debug(f"Found {len(cls)} crosslinks in model {int(mid)}")
                     except Exception as e:
                         LOG.warning(f"Could not read crosslinks from {caps_file}: {e}")
-            
-            # Each crosslink marker atom forms exactly ONE covalent bond, so pair
-            # them by GREEDY one-to-one nearest-neighbour matching: collect every
-            # compatible cross-model pair within the cutoff, then assign shortest
-            # first, using each marker atom at most once. This is what guarantees
-            # a trivalent LYX yields only its two true bonds (C13-CG, C12-CB) and
-            # not the 4 that "bond every compatible pair < 5 A" produced — C13 and
-            # C12 are adjacent ring atoms, so both fall within range of both arms.
+
             candidate_pairs = []
             for i, cl1 in enumerate(all_crosslinks):
                 for j in range(i + 1, len(all_crosslinks)):
@@ -148,7 +141,7 @@ class Amber:
                     f"  Crosslink pair: model {cl1.model_id} ({cl1.resname}{getattr(cl1, 'atom', '')}) - "
                     f"model {cl2.model_id} ({cl2.resname}{getattr(cl2, 'atom', '')}), distance: {distance:.2f} Å"
                 )
-            
+
             if crosslink_pairs:
                 LOG.info(f"Found {len(crosslink_pairs)} crosslink pairs for group {group_id}")
 
@@ -156,7 +149,12 @@ class Amber:
             if os.path.exists(path):
                 with open(path, "r") as f_in:
                     for line in f_in:
-                        if line.startswith(self.pdb_line_types):
+                        # Loose "TER" fallback: a TER record not padded to
+                        # the full 6-char pdb_line_types entry must still be
+                        # kept -- dropping it silently merges two chains,
+                        # which pdb2gmx (-merge all) then relies solely on
+                        # TER to separate.
+                        if line.startswith(self.pdb_line_types) or line.startswith("TER"):
                             out.write(line)
             else:
                 LOG.debug(f"Caps file not found: {path}")
@@ -178,25 +176,25 @@ class Amber:
 
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             return (model_type, group_id, crosslink_pairs)
-        
+
         LOG.error(f"Failed to create merged PDB for group {model_group}")
         return None
 
     def _are_compatible_crosslinks(self, cl1: Crosslink, cl2: Crosslink) -> bool:
         """
         Check if two crosslinks are compatible for bonding.
-        
+
         Args:
             cl1: First crosslink
             cl2: Second crosslink
-            
+
         Returns:
             True if crosslinks can form a bond
         """
         # Divalent crosslinks (D-type)
         divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS', 'LZD'}
         divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD', 'LZS'}
-        
+
         # Trivalent crosslinks (T-type). Each aldehyde (ring) residue bonds two
         # specific arms — one via ring carbon C13, one via C12 — fixed per type
         # (data/sequence/crosslinks.csv). Blocks cross-arm and cross-type bonds.
@@ -206,13 +204,13 @@ class Amber:
             "LXY": {"C13": "L3Y", "C12": "L2Y"},  # PYL
             "LYY": {"C13": "L3X", "C12": "L2X"},  # DPL
         }
-        
+
         # Divalent pairs: aldehyde + amine
         if cl1.resname in divalent_aldehyde and cl2.resname in divalent_amine:
             return True
         if cl1.resname in divalent_amine and cl2.resname in divalent_aldehyde:
             return True
-        
+
         # Trivalent pairs: the aldehyde ring carbon must bond its designated arm.
         def _trivalent_ok(aldehyde: Crosslink, amine: Crosslink) -> bool:
             arms = trivalent_bond_map.get(aldehyde.resname)
@@ -222,16 +220,16 @@ class Amber:
             if atom in arms:
                 return arms[atom] == amine.resname
             # Atom name unknown: restrict to this central's two valid arms (still
-            # blocks cross-type; the greedy 1-to-1 match below resolves C13 vs C12).
+            # blocks cross-type; the 1-to-1 match below resolves C13 vs C12).
             return amine.resname in arms.values()
-        
+
         if _trivalent_ok(cl1, cl2):
             return True
         if _trivalent_ok(cl2, cl1):
             return True
-        
+
         return False
-    
+
     def find_atom_indices_for_crosslinks(
         self,
         itp_file: str,
@@ -369,128 +367,10 @@ class Amber:
             elif resname in ("AGS", "APD") and atom_name == "NZ":
                 return True
             elif resname in ("LZD") and atom_name == "CE":
-                return True   
-            elif resname in ("LZS") and atom_name == "NZ1":
-                return True  
-
-        return False
-
-    def parse_topology_sections(self, itp_file: str) -> Dict[str, List[List[int]]]:
-        """Parse existing topology to get bonds, angles, and dihedrals."""
-        topology = {'bonds': [], 'angles': [], 'dihedrals': []}
-        
-        try:
-            with open(itp_file, 'r') as f:
-                lines = f.readlines()
-        except Exception as e:
-            LOG.warning(f"Could not read {itp_file}: {e}")
-            return topology
-        
-        current_section = None
-        
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith(';'):
-                continue
-                
-            if line.startswith('[ bonds ]'):
-                current_section = 'bonds'
-            elif line.startswith('[ angles ]'):
-                current_section = 'angles'
-            elif line.startswith('[ dihedrals ]'):
-                current_section = 'dihedrals'
-            elif line.startswith('['):
-                current_section = None
-            elif current_section and not line.startswith(';'):
-                parts = line.split()
-                try:
-                    if len(parts) >= 3 and current_section == 'bonds':
-                        topology['bonds'].append([int(parts[0]), int(parts[1])])
-                    elif len(parts) >= 4 and current_section == 'angles':
-                        topology['angles'].append([int(parts[0]), int(parts[1]), int(parts[2])])
-                    elif len(parts) >= 5 and current_section == 'dihedrals':
-                        topology['dihedrals'].append([int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])])
-                except (ValueError, IndexError):
-                    continue
-        
-        return topology
-
-    def build_connectivity_graph(self, bonds: List[List[int]]) -> Dict[int, Set[int]]:
-        """Build a connectivity graph from bond list."""
-        graph = {}
-        for bond in bonds:
-            atom1, atom2 = bond[0], bond[1]
-            if atom1 not in graph:
-                graph[atom1] = set()
-            if atom2 not in graph:
-                graph[atom2] = set()
-            graph[atom1].add(atom2)
-            graph[atom2].add(atom1)
-        
-        return graph
-
-    def generate_crosslink_angles(self, crosslink_bonds: List[Tuple[int, int]], connectivity: Dict[int, Set[int]]) -> List[Tuple[int, int, int]]:
-        """Generate angles involving crosslink bonds."""
-        angles = []
-        
-        for atom1, atom2 in crosslink_bonds:
-            if atom1 in connectivity:
-                for x in connectivity[atom1]:
-                    if x != atom2:
-                        angles.append((x, atom1, atom2))
-            
-            if atom2 in connectivity:
-                for y in connectivity[atom2]:
-                    if y != atom1:
-                        angles.append((atom1, atom2, y))
-        
-        return angles
-
-    def generate_crosslink_dihedrals(self, crosslink_bonds: List[Tuple[int, int]], connectivity: Dict[int, Set[int]]) -> List[Tuple[int, int, int, int]]:
-        """Generate dihedrals involving crosslink bonds."""
-        dihedrals = []
-        
-        for atom1, atom2 in crosslink_bonds:
-            if atom1 in connectivity and atom2 in connectivity:
-                for x in connectivity[atom1]:
-                    if x != atom2:
-                        for y in connectivity[atom2]:
-                            if y != atom1 and y != x:
-                                dihedrals.append((x, atom1, atom2, y))
-        
-        return dihedrals
-
-    def _is_backbone_atom(self, atom_name: str) -> bool:
-        """Check if an atom is a backbone atom."""
-        return atom_name in ('N', 'CA', 'C', 'O', 'H')
-
-    def _get_atom_name_by_index(self, itp_file: str, atom_index: int) -> Optional[str]:
-        """Get atom name by its index from the topology file."""
-        try:
-            with open(itp_file, 'r') as f:
-                lines = f.readlines()
-            
-            atoms_section = False
-            for line in lines:
-                if line.strip().startswith('[ atoms ]'):
-                    atoms_section = True
-                    continue
-                elif atoms_section and line.strip().startswith('['):
-                    break
-                elif atoms_section and not line.strip().startswith(';') and line.strip():
-                    parts = line.split()
-                    if len(parts) >= 5 and int(parts[0]) == atom_index:
-                        return parts[4]
-        except Exception:
-            pass
-        return None
-
-    def _dihedral_involves_backbone(self, itp_file: str, dihedral: Tuple[int, int, int, int]) -> bool:
-        """Check if a dihedral involves any backbone atoms."""
-        for atom_idx in dihedral:
-            atom_name = self._get_atom_name_by_index(itp_file, atom_idx)
-            if atom_name and self._is_backbone_atom(atom_name):
                 return True
+            elif resname in ("LZS") and atom_name == "NZ1":
+                return True
+
         return False
 
     def add_crosslink_topology_to_itp(
@@ -545,17 +425,20 @@ class Amber:
                 LOG.warning(f"No valid crosslink topology to add to {itp_file}")
                 return
 
+            # Add the crosslink bonds, then complete the bonded topology around
+            # them in a single graph pass (angles, proper dihedrals, 1-4 pairs).
             self._add_crosslink_bonds(itp_file, valid_bond_data)
 
             try:
-                self._add_crosslink_angles_and_dihedrals(itp_file, valid_bond_data)
+                self._complete_crosslink_topology(itp_file, valid_bond_data)
             except Exception as e:
-                LOG.warning(f"Failed to add angles/dihedrals, but bonds were added successfully: {str(e)}")
+                LOG.warning(f"Failed to complete crosslink angles/dihedrals/pairs, "
+                            f"but bonds were added: {str(e)}")
 
-            try:
-                self._add_crosslink_exclusions(itp_file, valid_bond_data)
-            except Exception as e:
-                LOG.warning(f"Failed to add crosslink exclusions, bonds/angles still added: {str(e)}")
+            # No explicit [ exclusions ] are written: grompp derives all nonbonded
+            # exclusions from the final bond graph of the moleculetype (nrexcl=3),
+            # including the crosslink bonds added above, so an explicit block would
+            # only duplicate what grompp already does.
 
             LOG.debug(f"    Successfully added crosslink topology to {itp_file}")
 
@@ -563,25 +446,47 @@ class Amber:
             LOG.error(f"Failed to add crosslink topology to {itp_file}: {str(e)}")
 
     def _add_crosslink_bonds(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
-        """Add crosslink bonds using standard GROMACS format."""
+        """Add crosslink bonds, skipping any pdb2gmx already wrote via specbond.dat
+        (adding it twice would double-count the bond)."""
         with open(itp_file, 'r') as f:
             lines = f.readlines()
-        
+
+        def _canon(a: int, b: int) -> Tuple[int, int]:
+            return (a, b) if a < b else (b, a)
+
+        # Bonds already present (e.g. written by pdb2gmx from specbond.dat).
+        existing_bonds: Set[Tuple[int, int]] = set()
+        in_bonds = False
+        for line in lines:
+            s = line.strip()
+            if s.startswith('[ bonds ]'):
+                in_bonds = True
+                continue
+            if in_bonds and s.startswith('['):
+                break
+            if in_bonds and s and not s.startswith(';'):
+                p = s.split()
+                if len(p) >= 2:
+                    try:
+                        existing_bonds.add(_canon(int(p[0]), int(p[1])))
+                    except ValueError:
+                        pass
+
         bonds_section_start = -1
         bonds_section_end = -1
-        
+
         for i, line in enumerate(lines):
             if line.strip().startswith('[ bonds ]'):
                 bonds_section_start = i
             elif bonds_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ bonds ]'):
                 bonds_section_end = i
                 break
-        
+
         if bonds_section_start >= 0:
             if bonds_section_end >= 0:
                 last_content_line = bonds_section_end - 1
-                while (last_content_line > bonds_section_start and 
-                       (not lines[last_content_line].strip() or 
+                while (last_content_line > bonds_section_start and
+                       (not lines[last_content_line].strip() or
                         lines[last_content_line].strip().startswith(';'))):
                     last_content_line -= 1
                 insert_pos = last_content_line + 1
@@ -596,403 +501,216 @@ class Amber:
                             insert_pos = j
                             break
                     break
-            
+
             if insert_pos >= 0:
                 lines.insert(insert_pos, '\n[ bonds ]\n')
                 lines.insert(insert_pos + 1, ';   ai    aj funct\n')
                 insert_pos += 2
-        
+
         if insert_pos >= 0:
             crosslink_entries = []
+            skipped = 0
             for i, bond_data in enumerate(valid_bond_data):
                 atom1_idx, atom2_idx = bond_data['atoms']
                 cl1, cl2 = bond_data['cl1'], bond_data['cl2']
-                
+
+                if _canon(atom1_idx, atom2_idx) in existing_bonds:
+                    # Already written by pdb2gmx (specbond.dat) -> don't duplicate.
+                    skipped += 1
+                    continue
+
                 comment = f"; Crosslink bond {i+1}: {cl1.resname}{cl1.resid}{cl1.chain} - {cl2.resname}{cl2.resid}{cl2.chain} (Type: {cl1.type}-{cl2.type})\n"
                 bond_entry = f"{atom1_idx} {atom2_idx}     1\n"
-                
+
                 crosslink_entries.append(comment)
                 crosslink_entries.append(bond_entry)
-            
+
+            if skipped:
+                LOG.debug(
+                    f"    Skipped {skipped} crosslink bond(s) already present "
+                    f"(pdb2gmx/specbond.dat) in {os.path.basename(itp_file)}"
+                )
+
             for entry in reversed(crosslink_entries):
                 lines.insert(insert_pos, entry)
-            
+
             final_pos = insert_pos + len(crosslink_entries)
-            if (final_pos < len(lines) and 
-                lines[final_pos].strip().startswith('[') and 
+            if (final_pos < len(lines) and
+                lines[final_pos].strip().startswith('[') and
                 (final_pos == 0 or lines[final_pos - 1].strip())):
                 lines.insert(final_pos, '\n')
-        
+
         with open(itp_file, 'w') as f:
             f.writelines(lines)
-            
-    def _add_crosslink_exclusions(
-        self,
-        itp_file: str,
-        valid_bond_data: List[Dict],
-        cutoff: float = 4.5,
-    ) -> None:
-        """Write explicit [ exclusions ] between each pair of crosslinked residues.
 
-        nrexcl=3 only excludes atoms within 3 bonds along the bond graph. Covalently
-        joining two residues (e.g. HLKNL: L4Y CE - L5Y NZ) brings several heavy atoms
-        into close contact that are more than 3 bonds apart through the new bond, so
-        they are NOT auto-excluded and clash during equilibration. Here we exclude all
-        atom pairs between the two joined residues that lie within `cutoff` Angstrom
-        (falling back to excluding every inter-residue pair if no coordinates exist).
+    def _complete_crosslink_topology(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
+        """Complete the bonded topology around the crosslink bonds in one graph
+        pass, basically same enumeration pdb2gmx performs from connectivity.
+
+        From the final covalent graph (pdb2gmx's bonds plus the crosslink bonds
+        added just before this), emit every term that uses a crosslink bond:
+          * angles    : every 2-bond path  i-j-k     -> function 1
+          * dihedrals : every 3-bond path  i-j-k-l   -> function 9 (proper)
+          * 1-4 pairs : the end atoms of each such 3-bond path, at graph distance
+                        exactly 3, excluding H-H       -> function 1
+        Terms pdb2gmx already wrote are skipped. No impropers are inferred 
+        and no explicit exclusions are written (grompp derives them from nrexcl). 
+        Parameters are resolved by grompp from the atom types, as for pdb2gmx-generated terms.
         """
         if not valid_bond_data:
             return
 
-        with open(itp_file, "r") as f:
+        with open(itp_file, 'r') as f:
             lines = f.readlines()
 
-        # Map atom index -> (residue_nr, residue_name) and residue -> [indices]
-        atom_res: Dict[int, Tuple[int, str]] = {}
-        res_atoms: Dict[Tuple[int, str], List[int]] = {}
-        atoms_section = False
+        def canon2(a: int, b: int) -> Tuple[int, int]:
+            return (a, b) if a < b else (b, a)
+
+        def canon3(t: Tuple[int, int, int]) -> Tuple[int, int, int]:
+            return t if t[0] <= t[2] else (t[2], t[1], t[0])
+
+        def canon4(t: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+            return t if t[0] <= t[3] else (t[3], t[2], t[1], t[0])
+
+        atom_name: Dict[int, str] = {}
+        bonds: List[Tuple[int, int]] = []
+        have_angles: Set[Tuple[int, int, int]] = set()
+        have_diheds: Set[Tuple[int, int, int, int]] = set()
+        have_pairs: Set[Tuple[int, int]] = set()
+        section = None
         for line in lines:
             s = line.strip()
-            if s.startswith("[ atoms ]"):
-                atoms_section = True
+            if s.startswith('['):
+                toks = s.strip('[] ').split()
+                section = toks[0].lower() if toks else None
                 continue
-            if atoms_section and s.startswith("["):
-                break
-            if atoms_section and s and not s.startswith(";"):
-                parts = s.split()
-                if len(parts) >= 8:
-                    idx = int(parts[0])
-                    key = (int(parts[2]), parts[3])
-                    atom_res[idx] = key
-                    res_atoms.setdefault(key, []).append(idx)
-
-        # Coordinates (Angstrom) from the matching GRO, if present
-        gro_file = str(Path(itp_file).with_suffix(".gro"))
-        coords: Dict[int, np.ndarray] = {}
-        if os.path.exists(gro_file):
-            with open(gro_file, "r") as f:
-                glines = f.readlines()
-            for line in glines[2:-1]:
-                if len(line) >= 44:
-                    try:
-                        aidx = int(line[15:20].strip())
-                        coords[aidx] = np.array([
-                            float(line[20:28]) * 10,
-                            float(line[28:36]) * 10,
-                            float(line[36:44]) * 10,
-                        ])
-                    except (ValueError, IndexError):
-                        continue
-
-        # Build exclusion sets between each crosslinked residue pair
-        excl: Dict[int, Set[int]] = {}
-        pairs_added = 0
-        for bond_data in valid_bond_data:
-            a1, a2 = bond_data["atoms"]
-            r1 = atom_res.get(a1)
-            r2 = atom_res.get(a2)
-            if not r1 or not r2 or r1 == r2:
+            if not s or s.startswith((';', '#')):
                 continue
-            for i in res_atoms.get(r1, []):
-                for j in res_atoms.get(r2, []):
-                    if i == j:
-                        continue
-                    if coords:
-                        pi, pj = coords.get(i), coords.get(j)
-                        if pi is not None and pj is not None and np.linalg.norm(pi - pj) > cutoff:
-                            continue
-                    lo, hi = (i, j) if i < j else (j, i)
-                    if hi not in excl.setdefault(lo, set()):
-                        excl[lo].add(hi)
-                        pairs_added += 1
+            p = s.split()
+            try:
+                if section == 'atoms' and len(p) >= 5:
+                    atom_name[int(p[0])] = p[4]
+                elif section == 'bonds' and len(p) >= 2:
+                    bonds.append((int(p[0]), int(p[1])))
+                elif section == 'angles' and len(p) >= 3:
+                    have_angles.add(canon3((int(p[0]), int(p[1]), int(p[2]))))
+                elif section == 'dihedrals' and len(p) >= 4:
+                    have_diheds.add(canon4((int(p[0]), int(p[1]), int(p[2]), int(p[3]))))
+                elif section == 'pairs' and len(p) >= 2:
+                    have_pairs.add(canon2(int(p[0]), int(p[1])))
+            except ValueError:
+                continue
 
-        if not pairs_added:
+        # Final covalent graph (crosslink bonds already present in [ bonds ]).
+        adj: Dict[int, Set[int]] = {}
+        for a, b in bonds:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+
+        def is_H(i: int) -> bool:
+            return atom_name.get(i, '').startswith('H')
+
+        def graph_dist(u: int, v: int, cap: int = 3):
+            if u == v:
+                return 0
+            seen = {u}
+            frontier = [u]
+            for d in range(1, cap + 1):
+                nxt = []
+                for a in frontier:
+                    for w in adj.get(a, ()):
+                        if w == v:
+                            return d
+                        if w not in seen:
+                            seen.add(w)
+                            nxt.append(w)
+                frontier = nxt
+            return None
+
+        xbonds = {canon2(*bd['atoms']) for bd in valid_bond_data}
+
+        angles: Set[Tuple[int, int, int]] = set()
+        dihedrals: Set[Tuple[int, int, int, int]] = set()
+        for (a1, a2) in xbonds:
+            n1 = adj.get(a1, set())
+            n2 = adj.get(a2, set())
+            # angles using the crosslink bond as an edge
+            for x in n1:
+                if x != a2:
+                    angles.add(canon3((x, a1, a2)))
+            for y in n2:
+                if y != a1:
+                    angles.add(canon3((a1, a2, y)))
+            # dihedrals using the crosslink bond as first, central or last bond
+            for x in n1:
+                if x == a2:
+                    continue
+                for y in n2:
+                    if y != a1 and y != x:
+                        dihedrals.add(canon4((x, a1, a2, y)))
+            for y in n2:
+                if y == a1:
+                    continue
+                for z in adj.get(y, set()):
+                    if z != a1 and z != a2:
+                        dihedrals.add(canon4((a1, a2, y, z)))
+            for x in n1:
+                if x == a2:
+                    continue
+                for w in adj.get(x, set()):
+                    if w != a1 and w != a2:
+                        dihedrals.add(canon4((a2, a1, x, w)))
+
+        # 1-4 pairs = the two end atoms of each dihedral, when their shortest
+        # graph distance is exactly 3 (a genuine 1-4, not a 1-2/1-3 via a shorter
+        # route) and they are not both hydrogens.
+        pairs: Set[Tuple[int, int]] = set()
+        for (i, j, k, l) in dihedrals:
+            if i == l or (is_H(i) and is_H(l)):
+                continue
+            if graph_dist(i, l) == 3:
+                pairs.add(canon2(i, l))
+
+        new_angles = sorted(a for a in angles if a not in have_angles)
+        new_diheds = sorted(d for d in dihedrals if d not in have_diheds)
+        new_pairs = sorted(pr for pr in pairs if pr not in have_pairs and pr not in xbonds)
+
+        if not (new_angles or new_diheds or new_pairs):
             return
 
-        # Locate an existing [ exclusions ] section (amber pdb2gmx output has none)
-        start = end = -1
-        for i, line in enumerate(lines):
-            if line.strip().startswith("[ exclusions ]"):
-                start = i
-            elif start >= 0 and line.strip().startswith("[") and not line.strip().startswith("[ exclusions ]"):
-                end = i
-                break
+        def append_to_section(header: str, entries: List[str]) -> None:
+            if not entries:
+                return
+            start = end = -1
+            for idx, line in enumerate(lines):
+                if line.strip().startswith(header):
+                    start = idx
+                elif start >= 0 and line.strip().startswith('[') and not line.strip().startswith(header):
+                    end = idx
+                    break
+            if start >= 0:
+                insert_at = end if end >= 0 else len(lines)
+                while insert_at - 1 > start and (
+                    not lines[insert_at - 1].strip() or lines[insert_at - 1].strip().startswith(';')
+                ):
+                    insert_at -= 1
+                for entry in reversed(entries):
+                    lines.insert(insert_at, entry)
+            else:
+                lines.append(f"\n{header}\n")
+                lines.extend(entries)
 
-        body = [f"{ai} " + " ".join(str(x) for x in sorted(excl[ai])) + "\n" for ai in sorted(excl)]
+        append_to_section('[ angles ]', [f"{a} {b} {c}     1\n" for (a, b, c) in new_angles])
+        append_to_section('[ pairs ]', [f"{a} {b}     1\n" for (a, b) in new_pairs])
+        append_to_section('[ dihedrals ]', [f"{a} {b} {c} {d}     9\n" for (a, b, c, d) in new_diheds])
 
-        if start >= 0:
-            insert_at = end if end >= 0 else len(lines)
-            for entry in reversed(body):
-                lines.insert(insert_at, entry)
-        else:
-            lines.append("\n[ exclusions ]\n")
-            lines.append("; crosslink through-space exclusions (beyond nrexcl)\n")
-            lines.extend(body)
-
-        with open(itp_file, "w") as f:
+        with open(itp_file, 'w') as f:
             f.writelines(lines)
 
         LOG.debug(
-            f"Added {pairs_added} crosslink exclusion pair(s) "
-            f"({'distance-filtered' if coords else 'all inter-residue'}) "
-            f"to {os.path.basename(itp_file)}"
+            f"    Completed crosslink topology in {os.path.basename(itp_file)}: "
+            f"+{len(new_angles)} angles, +{len(new_diheds)} dihedrals, +{len(new_pairs)} pairs"
         )
-
-    def _filter_angles_by_bonds(
-        self,
-        angles: List[Tuple[int, int, int]],
-        bond_set: Set[Tuple[int, int]],
-    ) -> List[Tuple[int, int, int]]:
-        """Keep i–j–k only if (i–j) and (j–k) are real bonds."""
-        def as_bond(a, b): return (a, b) if a < b else (b, a)
-        out = []
-        for i, j, k in angles:
-            if as_bond(i, j) in bond_set and as_bond(j, k) in bond_set:
-                out.append((i, j, k))
-        return out
-
-    def _filter_dihedrals_by_bonds(
-        self,
-        dihs: List[Tuple[int, int, int, int]],
-        bond_set: Set[Tuple[int, int]],
-    ) -> List[Tuple[int, int, int, int]]:
-        """Keep i–j–k–l only if (i–j), (j–k) and (k–l) are real bonds."""
-        def as_bond(a, b): return (a, b) if a < b else (b, a)
-        out = []
-        for i, j, k, l in dihs:
-            if (as_bond(i, j) in bond_set and
-                as_bond(j, k) in bond_set and
-                as_bond(k, l) in bond_set):
-                out.append((i, j, k, l))
-        return out
-
-    def _add_crosslink_angles_and_dihedrals(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
-        """Add angles/dihedrals around crosslink bonds."""
-        try:
-            existing_topology = self.parse_topology_sections(itp_file)
-
-            all_bonds = existing_topology['bonds'].copy()
-            crosslink_bonds = [tuple(bd['atoms']) for bd in valid_bond_data]
-            all_bonds.extend(crosslink_bonds)
-
-            as_bond = lambda a, b: (a, b) if a < b else (b, a)
-            bond_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in all_bonds}
-            xlink_set: Set[Tuple[int, int]] = {as_bond(a, b) for (a, b) in crosslink_bonds}
-
-            connectivity = self.build_connectivity_graph(all_bonds)
-
-            proposed_angles = self.generate_crosslink_angles(crosslink_bonds, connectivity)
-            proposed_dihedrals = self.generate_crosslink_dihedrals(crosslink_bonds, connectivity)
-
-            angles_seq = self._filter_angles_by_bonds(proposed_angles, bond_set)
-            diheds_seq = self._filter_dihedrals_by_bonds(proposed_dihedrals, bond_set)
-
-            atom_info: Dict[int, Dict[str, Any]] = {}
-            with open(itp_file, "r") as f:
-                lines = f.readlines()
-            atoms_section = False
-            for line in lines:
-                s = line.strip()
-                if s.startswith("[ atoms ]"):
-                    atoms_section = True
-                    continue
-                if atoms_section and s.startswith("["):
-                    break
-                if atoms_section and s and not s.startswith(";"):
-                    parts = s.split()
-                    if len(parts) >= 8:
-                        idx = int(parts[0])
-                        atom_info[idx] = {
-                            "name": parts[4],
-                            "resid": int(parts[2]),
-                            "resname": parts[3],
-                        }
-
-            def is_H(i: int) -> bool:
-                return atom_info.get(i, {}).get("name", "").startswith("H")
-
-            def same_res(i: int, j: int) -> bool:
-                ai, aj = atom_info.get(i), atom_info.get(j)
-                return bool(ai and aj and ai["resid"] == aj["resid"] and ai["resname"] == aj["resname"])
-
-            # Angles: only keep if the middle pair is the crosslink bond and the outer atom
-            # is in the same residue as its adjacent crosslink atom (and heavy).
-            filtered_angles: List[Tuple[int, int, int]] = []
-            for i, j, k in angles_seq:
-                jk_is_xlink = as_bond(j, k) in xlink_set
-                ij_is_xlink = as_bond(i, j) in xlink_set
-                if jk_is_xlink:
-                    # angle (i, j=atom1, k=atom2): i must belong to j's residue; i,k must be heavy
-                    if not is_H(i) and not is_H(k) and same_res(i, j):
-                        filtered_angles.append((i, j, k))
-                elif ij_is_xlink:
-                    # angle (i=atom1, j=atom2, k): k must belong to j's residue; i,k heavy
-                    if not is_H(i) and not is_H(k) and same_res(k, j):
-                        filtered_angles.append((i, j, k))
-                # else: angle doesn't center on crosslink bond (shouldn't happen from our generator)
-
-            # Dihedrals: must be (i, j, k, l) with (j,k) the crosslink bond,
-            # i in j's residue, l in k's residue, all heavy for robustness.
-            filtered_diheds: List[Tuple[int, int, int, int]] = []
-            for i, j, k, l in diheds_seq:
-                if as_bond(j, k) not in xlink_set:
-                    continue
-                if is_H(i) or is_H(j) or is_H(k) or is_H(l):
-                    continue
-                if not (same_res(i, j) and same_res(k, l)):
-                    continue
-                filtered_diheds.append((i, j, k, l))
-
-            # Remove duplicates
-            existing_angles = set(tuple(a) for a in existing_topology["angles"])
-            existing_diheds = set(tuple(d) for d in existing_topology["dihedrals"])
-
-            def unique_new(seq, existing):
-                out = []
-                seen = set()
-                for t in seq:
-                    if t in existing or t in seen:
-                        continue
-                    seen.add(t)
-                    out.append(t)
-                return out
-
-            crosslink_angles = unique_new(filtered_angles, existing_angles)
-            crosslink_dihedrals = unique_new(filtered_diheds, existing_diheds)
-
-            if not (crosslink_angles or crosslink_dihedrals):
-                return
-
-            with open(itp_file, 'r') as f:
-                lines = f.readlines()
-
-            if crosslink_angles:
-                lines = self._add_angles_to_lines(lines, crosslink_angles)
-            if crosslink_dihedrals:
-                lines = self._add_dihedrals_to_lines(lines, crosslink_dihedrals)
-
-            with open(itp_file, 'w') as f:
-                f.writelines(lines)
-
-        except Exception as e:
-            LOG.warning(f"Could not add angles/dihedrals: {str(e)}")
-
-    def _add_angles_to_lines(self, lines: List[str], crosslink_angles: List[Tuple[int, int, int]]) -> List[str]:
-        """Add crosslink angles using standard GROMACS format."""
-        if not crosslink_angles:
-            return lines
-            
-        angles_section_start = -1
-        angles_section_end = -1
-        
-        for i, line in enumerate(lines):
-            if line.strip().startswith('[ angles ]'):
-                angles_section_start = i
-            elif angles_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ angles ]'):
-                angles_section_end = i
-                break
-        
-        if angles_section_start >= 0:
-            if angles_section_end >= 0:
-                last_content_line = angles_section_end - 1
-                while (last_content_line > angles_section_start and 
-                       (not lines[last_content_line].strip() or 
-                        lines[last_content_line].strip().startswith(';'))):
-                    last_content_line -= 1
-                insert_pos = last_content_line + 1
-            else:
-                insert_pos = len(lines)
-        else:
-            insert_pos = self._find_section_end(lines, '[ bonds ]')
-            if insert_pos >= 0:
-                lines.insert(insert_pos, '\n[ angles ]\n')
-                lines.insert(insert_pos + 1, ';   ai    aj    ak funct\n')
-                insert_pos += 2
-        
-        if insert_pos >= 0:
-            angle_entries = []
-            angle_entries.append("; Crosslink angles\n")
-            for atom1, atom2, atom3 in crosslink_angles:
-                angle_entry = f"{atom1} {atom2} {atom3}     1\n"
-                angle_entries.append(angle_entry)
-            
-            for entry in reversed(angle_entries):
-                lines.insert(insert_pos, entry)
-            
-            final_pos = insert_pos + len(angle_entries)
-            if (final_pos < len(lines) and 
-                lines[final_pos].strip().startswith('[') and 
-                (final_pos == 0 or lines[final_pos - 1].strip())):
-                lines.insert(final_pos, '\n')
-        
-        return lines
-
-    def _add_dihedrals_to_lines(self, lines: List[str], crosslink_dihedrals: List[Tuple[int, int, int, int]]) -> List[str]:
-        """Add crosslink dihedrals; if type 4 is selected, append fixed params 105.4 0.75 1."""
-        if not crosslink_dihedrals:
-            return lines
-
-        temp_itp_file = "temp_for_backbone_check.itp"
-        with open(temp_itp_file, 'w') as f:
-            f.writelines(lines)
-
-        dihedrals_section_start = -1
-        dihedrals_section_end = -1
-        for i, line in enumerate(lines):
-            if line.strip().startswith('[ dihedrals ]'):
-                dihedrals_section_start = i
-            elif dihedrals_section_start >= 0 and line.strip().startswith('[') and not line.strip().startswith('[ dihedrals ]'):
-                dihedrals_section_end = i
-                break
-
-        if dihedrals_section_start >= 0:
-            if dihedrals_section_end >= 0:
-                last_content_line = dihedrals_section_end - 1
-                while (last_content_line > dihedrals_section_start and
-                    (not lines[last_content_line].strip() or
-                        lines[last_content_line].strip().startswith(';'))):
-                    last_content_line -= 1
-                insert_pos = last_content_line + 1
-            else:
-                insert_pos = len(lines)
-        else:
-            insert_pos = self._find_section_end(lines, '[ angles ]')
-            lines.insert(insert_pos, '\n[ dihedrals ]\n')
-            lines.insert(insert_pos + 1, ';   ai    aj    ak    al funct\n')
-            insert_pos += 2
-
-        dihedral_entries = []
-        dihedral_entries.append("; Crosslink dihedrals\n")
-        for a, b, c, d in crosslink_dihedrals:
-            dihedral_type = 4 if self._dihedral_involves_backbone(temp_itp_file, (a, b, c, d)) else 9
-            if dihedral_type == 4:
-                dihedral_entries.append(f"{a} {b} {c} {d}     4    105.4       0.75       1\n")
-            else:
-                dihedral_entries.append(f"{a} {b} {c} {d}     9\n")
-
-        for entry in reversed(dihedral_entries):
-            lines.insert(insert_pos, entry)
-        final_pos = insert_pos + len(dihedral_entries)
-        if (final_pos < len(lines) and
-            lines[final_pos].strip().startswith('[') and
-            (final_pos == 0 or lines[final_pos - 1].strip())):
-            lines.insert(final_pos, '\n')
-
-        try:
-            os.remove(temp_itp_file)
-        except Exception:
-            pass
-
-        return lines
-
-    def _find_section_end(self, lines: List[str], section_header: str) -> int:
-        """Find the end of a given section."""
-        for i, line in enumerate(lines):
-            if line.strip().startswith(section_header):
-                for j in range(i+1, len(lines)):
-                    if lines[j].strip().startswith('['):
-                        return j
-        return len(lines)
 
     def ensure_posre_include(self, itp_path, group_id):
         """Normalize POSRES include placement."""
@@ -1054,15 +772,15 @@ class Amber:
         itp_path.write_text("\n".join(lines) + "\n")
 
     def write_itp(
-        self, 
-        itp_file: Union[str, Path], 
-        molecule_name: str, 
+        self,
+        itp_file: Union[str, Path],
+        molecule_name: str,
         merged_pdb_file: Optional[str] = None,
         crosslink_pairs: Optional[List[Tuple[Crosslink, Crosslink]]] = None
     ) -> None:
         """Process and write Include Topology (ITP) file with crosslink bonds."""
         itp_file = Path(itp_file)
-        
+
         with open(itp_file, 'r') as f:
             itp_model = f.readlines()
 
@@ -1070,7 +788,7 @@ class Amber:
             itp_file.unlink()
         except Exception:
             pass
-        
+
         output_file = itp_file.with_suffix(".itp")
 
         # pdb2gmx writes a single moleculetype block. GROMACS <2023 names it
@@ -1100,20 +818,20 @@ class Amber:
             raise ValueError("processed_groups cannot be empty")
         if not self.ff:
             raise ValueError("Force field (self.ff) is not set")
-            
+
         with open(topology_file, 'w') as f:
             f.write('; Topology for Collagen Microfibril from Colbuilder 2.0\n')
             f.write(f'#include "./{self.ff}/forcefield.itp"\n')
-            
+
             for group_type, group_id in processed_groups:
                 itp_file = f"col_{group_id}.itp"
                 if os.path.exists(itp_file):
                     f.write(f'#include "{itp_file}"\n')
-            
+
             f.write(f'#include "./{self.ff}/ions.itp"\n')
             f.write(f'#include "./{self.ff}/tip3p.itp"\n')
             f.write('\n\n[ system ]\n ;name\nCollagen Microfibril in Water\n\n[ molecules ]\n;name  number\n')
-            
+
             for group_type, group_id in processed_groups:
                 itp_file = f"col_{group_id}.itp"
                 if os.path.exists(itp_file):
@@ -1125,7 +843,6 @@ class Amber:
             raise ValueError("processed_groups cannot be empty")
 
         all_atom_lines = []
-        last_box_line = "   1.00000   1.00000   1.00000\n"
 
         for group_type, group_id in processed_groups:
             group_gro = f"col_{group_id}.gro"
@@ -1133,17 +850,39 @@ class Amber:
                 with open(group_gro, 'r') as gro_f:
                     gro_lines = gro_f.readlines()
                     all_atom_lines.extend(gro_lines[2:-1])
-                    last_box_line = gro_lines[-1]
                 os.remove(group_gro)
             else:
                 LOG.warning(f"GRO file not found for group: {group_id}")
+
+        # Each per-group GRO carries a box sized for just that one (small)
+        # molecule, computed independently by pdb2gmx. Reusing any single
+        # group's box for the whole merged multi-helix system is too small
+        # in the packing directions and causes atoms to clash with their own
+        # periodic images. Build a box from the merged system's own extent
+        # instead, padded well beyond a typical nonbonded cutoff.
+        padding_nm = 2.0
+        min_x = min_y = min_z = float("inf")
+        max_x = max_y = max_z = float("-inf")
+        for line in all_atom_lines:
+            x, y, z = float(line[20:28]), float(line[28:36]), float(line[36:44])
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+            min_z, max_z = min(min_z, z), max(max_z, z)
+
+        if all_atom_lines:
+            box_x = (max_x - min_x) + padding_nm
+            box_y = (max_y - min_y) + padding_nm
+            box_z = (max_z - min_z) + padding_nm
+        else:
+            box_x = box_y = box_z = 1.0
+        box_line = f"{box_x:10.5f}{box_y:10.5f}{box_z:10.5f}\n"
 
         with open(gro_file, 'w') as f:
             f.write("GROMACS GRO-FILE\n")
             f.write(f"{len(all_atom_lines)}\n")
             for line in all_atom_lines:
                 f.write(line)
-            f.write(last_box_line)
+            f.write(box_line)
 
         LOG.info(f"GRO file written with {len(all_atom_lines)} atoms from {len(processed_groups)} groups")
 
@@ -1156,7 +895,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
     source_ff_dir = config.FORCE_FIELD_DIR / ff_name
     working_dir = Path.cwd()
     copied_ff_dir = working_dir / ff_name
-    
+
     amber = Amber(system=system, ff=ff)
     file_manager = file_manager or FileManager(config)
     steps = 3
@@ -1193,10 +932,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 )
 
         LOG.info(f'Step 2/{steps} Grouping connected models and processing with GROMACS')
-        
+
         connected_groups = amber.get_connected_groups()
         LOG.debug(f"    Found {len(connected_groups)} molecular groups: {connected_groups}")
-        
+
         processed_groups = []
 
         for group in connected_groups:
@@ -1205,10 +944,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 if merge_result is None:
                     LOG.warning(f"Skipping group {group} - merge failed")
                     continue
-                
+
                 model_type, group_id, crosslink_pairs = merge_result
                 merge_pdb_path = working_dir / model_type / f"{group_id}.merge.pdb"
-                
+
                 if not merge_pdb_path.exists() or not os.path.getsize(merge_pdb_path):
                     LOG.error(f'Invalid merged PDB file: {merge_pdb_path}')
                     continue
@@ -1217,7 +956,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                           f'-ignh -merge all -ff {ff} -water tip3p '
                           f'-p col_{group_id}.top -o col_{group_id}.gro '
                           f'-i posre_{group_id}.itp')
-                
+
                 result = await asyncio.create_subprocess_shell(
                     gmx_cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -1263,10 +1002,10 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
         try:
             topology_file = str(working_dir / f"collagen_fibril_{config.species}.top")
             gro_file = str(working_dir / f"collagen_fibril_{config.species}.gro")
-            
+
             amber.write_topology(topology_file=topology_file, processed_groups=processed_groups)
             amber.write_gro(gro_file=gro_file, processed_groups=processed_groups)
-            
+
             LOG.info(f"Successfully generated topology for {len(processed_groups)} molecular groups")
             LOG.debug(f"    Groups processed: {[group_id for _, group_id in processed_groups]}")
 
@@ -1277,9 +1016,9 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
                 error_code="TOP_ERR_007",
                 context={"output": config.species}
             )
-            
+
         return amber
-    
+
     except TopologyGenerationError:
         raise
     except Exception as e:

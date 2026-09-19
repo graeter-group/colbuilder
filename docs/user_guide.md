@@ -270,15 +270,31 @@ files_mix:                  # Required if mix_bool is true
 ### Replacement Options
 
 ```yaml
-replace_bool: false         # Enable replacement of crosslinks with lysines
-ratio_replace: 30           # Percentage of crosslinks to replace
-ratio_replace_scope: "enzymatic"  # Crosslinks to replace: "enzymatic" (default), "non_enzymatic" (AGEs), or "all"
+replace_bool: false         # Enable replacement of crosslinks with standard residues
+ratio_replace: 30           # Percentage of eligible crosslinks to remove (see note below)
+ratio_replace_scope: "enzymatic"  # Crosslinks to replace: "enzymatic" (default), "non_enzymatic" (AGEs + MOLD), or "all"
 replace_file: null          # File with crosslinks to be replaced
+manual_replacements: null   # Alternative to ratio-based: explicit residues to replace (see below)
 ```
 
 The `ratio_replace_scope` parameter controls which crosslinks are eligible for ratio-based
 replacement. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues);
-use `non_enzymatic` to target AGE crosslinks (Glucosepane, Pentosidine, MOLD), or `all` for both.
+use `non_enzymatic` to target the non-enzymatic ones (Glucosepane, Pentosidine, and MOLD), or
+`all` for both. `ratio_replace` is the percentage **removed**, not the remaining density — e.g.
+`ratio_replace: 70` removes 70% of eligible crosslinks, leaving 30%.
+
+Instead of a random ratio-based selection, `manual_replacements` lets you name exact residues
+to replace — useful for reproducible, targeted edits (e.g. removing one specific crosslink to
+test its mechanical contribution). Each entry has the form
+`"<caps_file> <RES> <resid> <chain>"`, where `<caps_file>` is a per-model `{id}.caps.pdb` file
+(only written to disk under `debug: true`). If you set `manual_replacements`, don't also set
+`ratio_replace` — pick one replacement mechanism.
+
+There's also `auto_fix_unpaired` (default `false`): if enabled, ColBuilder automatically finds
+crosslink markers left without a geometric partner (which would otherwise produce an
+incomplete, non-physical crosslink) and converts them to standard residues. It defers to any
+replacement mechanism you've already configured (`ratio_replace`, `replace_file`, or
+`manual_replacements`) rather than overriding it.
 
 ### Topology Options
 
@@ -287,7 +303,7 @@ topology_generator: false   # Enable topology generation
 force_field: "amber99"      # Force field to use (amber99 or martini3)
 ```
 
-For a complete reference of configuration options, see the [Configuration Reference](configuration_reference.md).
+For a complete reference of configuration options, see the [Configuration Reference](configuration.md). For complete, runnable configs covering each workflow described in this guide, see [`docs/examples/`](examples/).
 
 ## Working with Different Species
 
@@ -327,7 +343,9 @@ c_term_combination: "1046.C - 103.C"
 
 #### Using Custom Sequences
 
-For species not in the predefined list, provide a custom FASTA file:
+For species not in the predefined list, provide a custom FASTA file — any species
+name works as long as `fasta_file` is also set (ColBuilder raises a configuration
+error otherwise):
 
 ```yaml
 species: "custom_species"
@@ -337,7 +355,17 @@ crosslink: false
 # Other parameters as needed
 ```
 
-Crosslinks definition for custom_species must be added to the file in src/colbuilder/data/sequence/crosslinks.csv
+If you don't already have a FASTA for your structure, the bundled `pdb2fasta`
+console script generates one from an existing PDB:
+
+```bash
+pdb2fasta my_structure.pdb > custom_species.fasta
+```
+
+Crosslinking a custom species requires adding matching rows to
+`src/colbuilder/data/sequence/crosslinks.csv` yourself, since crosslink residue
+positions are looked up by exact species name — see
+[`docs/examples/example8`](examples/example8/) for the complete workflow.
 
 ## Customizing Collagen Structures
 
@@ -345,16 +373,24 @@ Crosslinks definition for custom_species must be added to the file in src/colbui
 
 ColBuilder supports various crosslink types found in collagen:
 
-- **HLKNL**: Hydroxylysino-5-ketonorleucine (divalent crosslink)
-- **LKNL**: Lysino-5-ketonorleucine (divalent)
-- **PYD**: Pyridinoline (trivalent)
-- **DPD**: Deoxypyridinoline (trivalent)
-- **PYL**: Pyrrole crosslink (trivalent)
-- **DPL**: (trivalent)
-- **deHHLNL**: Dehydro-hydroxylysino-norleucine (divalent)
-- **deHLNL**: Dehydro-lysino-norleucine (divalent)
+- **HLKNL**: Hydroxylysino-5-ketonorleucine (enzymatic divalent crosslink)
+- **LKNL**: Lysino-5-ketonorleucine (enzymatic divalent)
+- **deHHLNL**: Dehydro-hydroxylysino-norleucine (enzymatic divalent, immature precursor)
+- **deHLNL**: Dehydro-lysino-norleucine (enzymatic divalent, immature precursor)
+- **PYD**: Pyridinoline (enzymatic trivalent)
+- **DPD**: Deoxypyridinoline (enzymatic trivalent)
+- **PYL**: Pyrrole crosslink (enzymatic trivalent)
+- **DPL**: Deoxypyrrole crosslink (enzymatic trivalent)
+- **MOLD**: Methylglyoxal-lysine dimer (non-enzymatic divalent, LYS-LYS derived)
+- **Glucosepane**: Most abundant advanced glycation end-product (AGE) crosslink in human tissue (non-enzymatic, LYS-ARG derived)
+- **Pentosidine**: Well-characterized AGE crosslink (non-enzymatic, LYS-ARG derived)
 - **NOCROSS**: No crosslinking
-- **Glucosepane**: Advanced glycation end-product crosslink (specific species)
+
+Non-enzymatic crosslinks (MOLD, Glucosepane, Pentosidine) can be used as terminal
+crosslinks just like the enzymatic ones, or added on top of an existing structure
+via the mutated PDB workflow (see [Advanced Features](#advanced-features)) —
+most commonly the latter, since AGE crosslinks are typically combined with an
+existing enzymatic crosslink rather than used alone.
 
 Each crosslink type can be positioned in a few combination of selected Lysine residues, depending on the species being modeled. All available crosslinks and respective combinations for each species are listed at [src/colbuilder/data/sequence/crosslinks.csv](https://github.com/graeter-group/colbuilder/blob/main/src/colbuilder/data/sequence/crosslinks.csv)
 
@@ -378,6 +414,50 @@ solution_space: [1, 1, 1]   # Solution space for optimization [d_x, d_y, d_z]
 
 ## Advanced Features
 
+### Adding AGE Crosslinks (Mutated PDB Workflow)
+
+To add a non-enzymatic (AGE) crosslink like Glucosepane or Pentosidine on top of
+an existing structure, run sequence generation twice: once to build the base
+structure with its terminal (usually enzymatic) crosslinks, then again with
+`mutated_pdb` pointing at that output, declaring the new crosslink via
+`additional_1_type`/`additional_1_combination`:
+
+```yaml
+# Step 1: base structure with terminal crosslinks
+species: "rattus_norvegicus"
+sequence_generator: true
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "6.B - 9.C - 946.A"
+c_term_combination: "1046.C - 1046.A - 103.C"
+```
+
+```yaml
+# Step 2: add Glucosepane to step 1's output
+species: "rattus_norvegicus"
+sequence_generator: true
+mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+crosslink: true
+n_term_type: "PYD"           # must match what's already in mutated_pdb
+c_term_type: "PYD"
+n_term_combination: "6.B - 9.C - 946.A"
+c_term_combination: "1046.C - 1046.A - 103.C"
+additional_1_type: "Glucosepane"
+additional_1_combination: "1055.C - 822.A"
+```
+
+When you then run geometry/topology generation on step 2's output, **also**
+declare `additional_1_type` there — crosslink-type validation checks the
+crosslink residues actually present in the PDB against every declared type
+field (`n_term_type`/`c_term_type`/`additional_1_type`/`additional_2_type`),
+and this structure now has both PYD and Glucosepane in it. Leaving out
+`additional_1_type` at that stage is the most common mistake with this
+workflow — it raises `GEO_ERR_008` because the terminal types alone no longer
+describe the whole structure. See [`docs/examples/example5`](examples/example5/)
+for several complete, runnable variants of this workflow (including combining
+it with mixing and with ratio-based replacement).
+
 ### Mixing Crosslink Types
 
 To create a heterogeneous microfibril with different crosslink types:
@@ -394,13 +474,17 @@ This feature allows modeling of collagen structures with a mixture of crosslink 
 
 ### Replacing Crosslinks
 
-To model partially crosslinked collagen (replacing some crosslinks with standard lysines):
+To model partially crosslinked collagen (replacing some crosslinks with standard residues):
 
 ```yaml
 replace_bool: true
-ratio_replace: 30                   # Replace 30% of crosslinks with lysines
+ratio_replace: 30                   # Remove 30% of eligible crosslinks
 replace_file: "original_fibril.pdb" # PDB with original collagen microfibril structure
 ```
+
+For reproducible, targeted removal of specific crosslinks instead of a random ratio, use
+`manual_replacements` (see [Replacement Options](#replacement-options) above) in place of
+`ratio_replace`.
 
 ### Using Different Force Fields
 
@@ -415,6 +499,11 @@ force_field: "amber99"      # For all-atom simulations
 topology_generator: true
 force_field: "martini3"     # For coarse-grained simulations
 ```
+
+Martini3 crosslink parametrization currently only covers PYD and HLKNL; other
+crosslink types (DPD, PYL, DPL, MOLD, and the non-enzymatic AGE types) aren't
+yet parametrized for Martini3 and won't produce correct coarse-grained bonded
+terms — use `force_field: "amber99"` for those.
 
 ## Troubleshooting
 
@@ -462,9 +551,9 @@ conda install -c conda-forge libnetcdf==4.7.3
 **Error:** "Geometry generation failed" or "Invalid contact distance"
 
 **Solutions:**
-- Ensure contact_distance is positive and reasonable (typically 15-25)
+- Ensure `contact_distance` is positive and reasonable (typically 15-40 Å); it's required unless `crystalcontacts_file` is provided instead
 - Verify the input PDB file exists and is valid
-- Check fibril_length is within reasonable limits (typically 30-334)
+- Ensure `fibril_length` is set and positive; it's required for geometry generation (mixing mode is the one exception, defaulting to 40.0 nm if unset)
 
 #### 6. Topology Generation Errors
 
@@ -489,7 +578,7 @@ This will provide more information about what's happening during execution and s
 
 ### Performance Considerations
 
-- **Memory Usage**: Larger - especially in diameter - fibrils require significant memory. Start with smaller fibril_length values (contact_distance: 20-60 Ang) before attempting larger structures.
+- **Memory Usage**: Larger fibrils require significant memory, in both dimensions — `fibril_length` (length) and `contact_distance` (radial thickness). Start with smaller values of both (e.g. `contact_distance: 20`, a modest `fibril_length`) before attempting larger structures.
 - **Processing Time**: Sequence generation with crosslink optimization is one of the most time-consuming steps. Consider running this step separately and reusing the output for multiple geometry variations.
 
 ### Workflow Recommendations
