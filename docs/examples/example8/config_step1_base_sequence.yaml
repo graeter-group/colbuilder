@@ -1,0 +1,6 @@
+# Step 1/2: plain (no crosslinks) sequence generation, just to produce a
+# structure to convert with pdb2fasta in step 2. Any PDB with standard
+# CA-atom records works here -- this isn't rattus_norvegicus-specific.
+sequence_generator: true
+
+species: "rattus_norvegicus"

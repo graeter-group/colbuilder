@@ -27,6 +27,9 @@ data/
     ├── create_goVirt.py
     ├── modifications.mapping
     ├── selectors.py
+    ├── martini_v3.0.0.itp
+    ├── martini_v3.0.0_ions_v1.itp
+    ├── martini_v3.0.0_solvents_v1.itp
     ├── amber99/
     │   ├── aminoacids.rtp
     │   └── modifications.ff
@@ -37,11 +40,8 @@ data/
     │   └── watermodels.dat
     ├── contactmap/
     │   ├── chemical_map.c
-    │   ├── chemical_map.o
-    │   ├── contact_map
     │   ├── contact_map.c
     │   ├── contact_map.h
-    │   ├── contact_map.o
     │   ├── LICENSE
     │   ├── makefile
     │   ├── pdb_map.c
@@ -79,6 +79,7 @@ The `topology/` directory contains force field files and utilities essential for
 - `create_goVirt.py`: Script for generating Go-like potentials for Martini models
 - `modifications.mapping`: Mapping information for residue modifications in Martini models
 - `selectors.py`: Python utilities for atom and residue selection in Martini models
+- `martini_v3.0.0.itp`, `martini_v3.0.0_ions_v1.itp`, `martini_v3.0.0_solvents_v1.itp`: Standard Martini 3 bead/bonded-parameter definitions, `#include`d in every martini3 topology output
 
 #### `amber99/`
 
@@ -103,11 +104,15 @@ Standard AMBER99SB-STAR-ILDNP force field files used by GROMACS:
 
 #### `contactmap/`
 
-Tools for generating contact maps between residues:
+Source for the contact map tool used during Martini3 topology generation. Only
+source and a `makefile` are shipped here — the `contact_map` executable itself
+is **not** pre-built; ColBuilder compiles it on demand (via `make`) into a
+working-directory copy the first time a martini3 run needs it:
 
-- `contact_map`: Executable for creating contact maps
-- Source files (`.c`, `.h`) and compiled objects (`.o`) for the contact map utility
-- `makefile`: Build instructions for the contact map utility
+- `chemical_map.c`, `contact_map.c`, `contact_map.h`, `pdb_map.c`, `protein_map.c`: source files
+- `pdb_map.o`, `protein_map.o`: pre-built object files bundled to speed up the build
+- `makefile`: build instructions for the contact map utility
+- `LICENSE`: license for the contact map tool
 
 #### `martini300C-ff/`
 
@@ -124,8 +129,8 @@ Martini 3.0 coarse-grained force field files:
 Mapping files for converting atomistic to coarse-grained representations:
 
 - Mapping files for standard amino acids (e.g., `ala.amber99.map`, `gly.amber99.map`)
-- Mapping files for modified residues including crosslinks (e.g., `l4y.amber99.map`, `ly3.amber99.map`)
-- Mapping files for terminal caps (`ace.amber99.map`, `nme.amber99.map`)
+- Mapping files for crosslink residues (`l4y.amber99.map`, `l5y.amber99.map`, `ly2.amber99.map`, `ly3.amber99.map`, `lyx.amber99.map`) — these cover HLKNL and PYD only. MOLD and the non-enzymatic AGE crosslinks (Glucosepane, Pentosidine) have no Martini3 mapping yet, so they can't currently be coarse-grained; use `force_field: "amber99"` for those.
+- Mapping files for terminal caps (`ace.amber99.map`, `nme.amber99.map`, `cla.amber99.map`)
 - `modifications.amber99.mapping`: Definition of mapping for all modifications
 
 ### Sequence Files
@@ -153,6 +158,12 @@ Pre-defined collagen sequences for various species: homo_sapiens, pan_troglodyte
   - Residue combinations
   - Crosslink types (HLKNL, LKNL, PYD, DPD, etc.)
   - Atom positions for forming crosslinks
+
+  `crosslinks.csv` lists one species (`gasterosteus_aculeatus`) with no
+  corresponding file in `fasta_sequences/` — it exists specifically to
+  illustrate the "bring your own sequence" path: any species name works as
+  long as you supply `fasta_file` yourself (see
+  [`docs/examples/example8`](examples/example8/)).
 
 - `template.fasta`: Template sequence file for *Rattus norvegicus* (rat) collagen type I. Used as a reference in the homology modeling process.
 
@@ -182,9 +193,11 @@ During topology generation, ColBuilder uses:
 - Force field files from `topology/amber99sb-star-ildnp.ff/` for standard all-atom simulations
 - Modified parameters from `topology/amber99/` for handling crosslinked residues
 - For coarse-grained simulations:
-  - `martini300C-ff/` directory for Martini 3.0 force field parameters
+  - `martini300C-ff/` directory for Martini 3.0 collagen/crosslink-specific force field parameters
+  - `martini_v3.0.0*.itp` files for the standard Martini 3 bead and bonded parameters
   - `martini300C-mapping/` directory for mapping atomistic structures to coarse-grained models
   - `create_goVirt.py` for generating Go-like potentials in coarse-grained models
+  - `contactmap/` source, compiled on demand into the working directory, to compute the contact map `create_goVirt.py` needs
   - utilities from `selectors.py` for atom selection and manipulation
 
 ## Customizing Data Files
@@ -209,8 +222,17 @@ Advanced users may modify these files to extend ColBuilder's capabilities:
 
 ### Adding New Species
 
+To bundle a species permanently as one of ColBuilder's built-in options:
+
 1. Create a new FASTA file in `fasta_sequences/` directory following the naming convention (e.g., `newspecies.fasta`)
 2. Add appropriate entries to `crosslinks.csv` for the new species
+
+For a one-off run without modifying this directory at all, pass `fasta_file`
+directly in your config instead — no bundled FASTA is required as long as you
+supply your own (see [`docs/examples/example8`](examples/example8/)). Adding
+crosslinks for a fully custom species still requires adding matching rows to
+`crosslinks.csv`, since crosslink positions are looked up by exact species
+name either way.
 
 ### Customizing Force Field Parameters
 

@@ -1,0 +1,15 @@
+# Topology-only mode: generate an amber99 topology from the same mixed
+# fibril PDB as config_topology_only_martini3.yaml, to compare atomistic vs coarse-grained output.
+topology_generator: true
+
+species: "rattus_norvegicus"
+pdb_file: "collagen_fibril_rattus_norvegicus_MIX.pdb"
+
+# Left false: crosslink type validation isn't meaningful here since pdb_file
+# is a genuinely mixed (divalent + trivalent) fibril, not a single crosslink
+# type. Setting this true with a single n_term_type/c_term_type would
+# incorrectly fail validation against the mixed structure.
+crosslink: false
+
+# All-atom force field.
+force_field: "amber99"

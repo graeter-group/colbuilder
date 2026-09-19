@@ -1,67 +1,40 @@
 <div align="center">
-    <h1>Example 1</h1>
-    <p>
-        Enzymatic + non-enzymatic (Glucosepane) workflow: sequence generation,
-        additional crosslinking, geometry generation, and topology generation.
-    </p>
+    <h1>Example 5.1</h1>
+    <p>Enzymatic + non-enzymatic (AGE) workflow: sequence generation, additional crosslinking, geometry generation, and topology generation.</p>
 </div>
 
-This example runs ColBuilder in three sequential stages to (1) place enzymatic
-crosslinks in a collagen triple helix, (2) add a non-enzymatic crosslink
-(Glucosepane) on top of the enzymatic structure, and (3) build the microfibril
-geometry plus GROMACS topology.
+Builds a *rattus_norvegicus* triple helix with terminal PYD (enzymatic)
+crosslinks, adds a non-enzymatic Glucosepane crosslink on top via the
+mutated-PDB workflow, then builds the microfibril and its amber99 topology.
 
-## Run Order
+## Usage
 
 ```bash
-# 1) Enzymatic crosslinks on a fresh sequence
-colbuilder --config_file config_ex5_step1_enzymatic.yaml --debug
-
-# 2) Add non-enzymatic crosslink(s) on the pre-mutated PDB
-colbuilder --config_file config_ex5_step2_nonenzymatic.yaml --debug
-
-# 3) Build geometry and topology using the final PDB
-colbuilder --config_file config_ex5_step3.yaml --debug
+colbuilder --config_file config_step1_pyd_sequence.yaml --debug
+colbuilder --config_file config_step2_add_glucosepane.yaml --debug
+colbuilder --config_file config_step3_geometry_topology.yaml --debug
 ```
 
-## What Each Step Does
+## Files
 
-### 1) `config_ex5_step1_enzymatic.yaml`
-Standard sequence generation. It builds a triple helix from the species sequence
-and applies terminal enzymatic crosslinks (N- and C-terminal (i.e. PYD)).
+- `config_step1_pyd_sequence.yaml` — sequence generation, terminal PYD crosslinks.
+- `config_step2_add_glucosepane.yaml` — mutated-PDB workflow, adds Glucosepane on top of step 1.
+- `config_step3_geometry_topology.yaml` — geometry + amber99 topology generation from step 2's output.
 
-Key outputs:
-- `rattusnorvegicus_alignment.fasta`  
-  Multiple sequence alignment used by the modeller step.
-- `rattusnorvegicus_N_PYD_C_PYD.pdb`  
-  Triple-helix model with enzymatic crosslinks applied and optimized.
+## Output Files
 
-### 2) `config_ex5_step2_nonenzymatic.yaml`
-Mutated-PDB workflow. It takes the enzymatic PDB from step 1 and applies an
-additional non-enzymatic crosslink (i.e. Glucosepane) at the specified residues.
-Use the crosslink-specific shift for this second sequence step; it is listed in
-`src/colbuilder/data/sequence/crosslinks.csv` alongside each crosslink entry.
-
-Key outputs:
-- `rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb`  
-  The same triple helix, now carrying the additional non-enzymatic crosslink.
-
-### 3) `config_ex5_step3.yaml`
-Geometry generation builds the microfibril from the final PDB and then generates
-the force-field topology files for simulation.
-
-Key outputs:
-- `collagen_fibril_rattus_norvegicus.pdb`  
-  Final microfibril geometry 
-- `rattus_norvegicus_topology_files/`  
-  GROMACS topology folder containing:
-  - `collagen_fibril_rattus_norvegicus.top` (topology entry point)
-  - `collagen_fibril_rattus_norvegicus.gro` (coordinate file)
-  - `col_*.itp` (per-chain/topology includes)
-  - `posre_*.itp` (position restraints per chain)
-  - `amber99sb-star-ildnp.ff/` (force-field directory)
+- `rattusnorvegicus_alignment.fasta` — MSA from step 1.
+- `rattusnorvegicus_N_PYD_C_PYD.pdb` — step 1's output; step 2's `mutated_pdb` input.
+- `rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb` — step 2's output; step 3's `pdb_file` input.
+- `collagen_fibril_rattus_norvegicus.pdb` — final microfibril structure.
+- `rattus_norvegicus_topology_files/` — amber99 topology: `.top`, `.gro`, per-group
+  `col_*.itp`/`posre_*.itp`, and the force-field directory.
 
 ## Notes
-- The non-enzymatic step expects the enzymatic PDB from step 1 to exist in this
-  directory.
-- The geometry step uses the PDB from step 2 as its input.
+
+- Step 3 repeats `crosslink`/`n_term_type`/`c_term_type`/`additional_1_type` even though no
+  sequence generation happens there: these declare what's actually in `pdb_file` (PYD +
+  Glucosepane), so crosslink-type validation passes instead of flagging a mismatch.
+- `col_*.itp` group pairings (which models are crosslink-bonded) can shift model IDs
+  slightly between otherwise-identical runs — the crystal-building step's numbering for
+  later-assigned models isn't fully deterministic; the pairing structure itself is stable.

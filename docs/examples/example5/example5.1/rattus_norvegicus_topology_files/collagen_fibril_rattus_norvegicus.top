@@ -2,11 +2,11 @@
 #include "./amber99sb-star-ildnp.ff/forcefield.itp"
 #include "col_0_62.itp"
 #include "col_1_65.itp"
-#include "col_2_89.itp"
+#include "col_2_85.itp"
 #include "col_4.itp"
 #include "col_7_59.itp"
 #include "col_8.itp"
-#include "col_9_90.itp"
+#include "col_9_86.itp"
 #include "col_11_18.itp"
 #include "col_12_75.itp"
 #include "col_13.itp"
@@ -30,11 +30,11 @@
 #include "col_53.itp"
 #include "col_56_63.itp"
 #include "col_64.itp"
-#include "col_69_156.itp"
+#include "col_69_106.itp"
 #include "col_71.itp"
 #include "col_76.itp"
 #include "col_77.itp"
-#include "col_155.itp"
+#include "col_105.itp"
 #include "./amber99sb-star-ildnp.ff/ions.itp"
 #include "./amber99sb-star-ildnp.ff/tip3p.itp"
 
@@ -47,11 +47,11 @@ Collagen Microfibril in Water
 ;name  number
 col_0_62   1
 col_1_65   1
-col_2_89   1
+col_2_85   1
 col_4   1
 col_7_59   1
 col_8   1
-col_9_90   1
+col_9_86   1
 col_11_18   1
 col_12_75   1
 col_13   1
@@ -75,8 +75,8 @@ col_52   1
 col_53   1
 col_56_63   1
 col_64   1
-col_69_156   1
+col_69_106   1
 col_71   1
 col_76   1
 col_77   1
-col_155   1
+col_105   1

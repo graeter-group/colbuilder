@@ -1,0 +1,25 @@
+# Step 2/3: mutated-PDB workflow. Adds a non-enzymatic (AGE) crosslink on top
+# of step 1's PYD structure.
+sequence_generator: true
+
+species: "rattus_norvegicus"
+mutated_pdb: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+
+# n_term_type/c_term_type must still be declared here (matching what's already
+# in mutated_pdb): together with additional_1_type below they tell colbuilder
+# which crosslink categories to expect, so it can validate the mutated_pdb's
+# crosslinks (PYD, trivalent) plus the new one (Glucosepane, divalent) instead
+# of flagging a mismatch.
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1046.C - 1046.A - 103.C"
+
+# The new crosslink to add, and where.
+additional_1_type: "Glucosepane"
+additional_1_combination: "523.A - 286.C"
+
+# Which periodic unit-cell copies to search when optimizing the new
+# crosslink's position (must be exactly 2, from D0-D5; default is D0/D5).
+crosslink_copies: ["D2", "D1"]

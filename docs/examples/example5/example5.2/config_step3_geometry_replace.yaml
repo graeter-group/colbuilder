@@ -1,0 +1,25 @@
+# Step 3/3: build the microfibril, then replace a fraction of its crosslinks.
+geometry_generator: true
+
+species: "rattus_norvegicus"
+pdb_file: "rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
+
+# Declares the crosslink types actually present in pdb_file above (PYD +
+# Glucosepane), so colbuilder's crosslink-type validation passes instead of
+# flagging a mismatch.
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+additional_1_type: "Glucosepane"
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 25
+# Length of the assembled microfibril (nm).
+fibril_length: 67
+
+# Replace 30% of eligible crosslinks via Chimera swapaa, chosen at random.
+# scope "all" considers both enzymatic (PYD) and non-enzymatic (Glucosepane)
+# markers, instead of the default "enzymatic"-only.
+replace_bool: true
+ratio_replace: 30
+ratio_replace_scope: "all"

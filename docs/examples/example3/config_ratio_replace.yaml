@@ -1,0 +1,18 @@
+species: "homo_sapiens"
+
+# Declares the crosslink type present in replace_file below, so colbuilder can
+# validate it matches what's actually in the structure (HLKNL = divalent).
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 947.A"
+c_term_combination: "1047.C - 104.C"
+
+# Direct replacement mode: no geometry_generator, operate on an existing fibril.
+replace_bool: true
+# Remove 30% of eligible (enzymatic) crosslinks, chosen at random.
+ratio_replace: 30
+# NOTE: colbuilder writes its output to this same filename (species-derived),
+# so this file gets overwritten in place by the replaced structure when run
+# for real. Back it up first if you want to keep the original.
+replace_file: "collagen_fibril_homo_sapiens.pdb"

@@ -1,0 +1,10 @@
+# Step 1/7: standard sequence generation with terminal HLKNL (divalent
+# enzymatic) crosslinks. Produces one of three inputs for the eventual mix.
+sequence_generator: true
+
+species: "rattus_norvegicus"
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 944.B"
+c_term_combination: "1046.C - 103.C"

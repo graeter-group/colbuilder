@@ -1,0 +1,20 @@
+# Step 1/2: plain geometry generation, used only to discover real crosslink
+# target residues (see Readme). debug:true keeps per-model {id}.caps.pdb
+# files under .tmp/geometry_gen/ instead of deleting them after the run.
+geometry_generator: true
+debug: true
+
+species: "rattus_norvegicus"
+pdb_file: "rattusnorvegicus_N_PYD_C_PYD.pdb"
+
+# PYD: trivalent (3-residue) enzymatic crosslink.
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+n_term_combination: "9.C - 5.B - 944.B"
+c_term_combination: "1046.C - 1046.A - 103.C"
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 25
+# Length of the assembled microfibril (nm).
+fibril_length: 67.0

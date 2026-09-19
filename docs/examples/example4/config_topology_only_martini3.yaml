@@ -1,0 +1,15 @@
+# Topology-only mode: generate a Martini3 topology from an existing,
+# already-built (mixed-crosslink) fibril PDB.
+topology_generator: true
+
+species: "rattus_norvegicus"
+pdb_file: "collagen_fibril_rattus_norvegicus_MIX.pdb"
+
+# Left false: crosslink type validation isn't meaningful here since pdb_file
+# is a genuinely mixed (divalent + trivalent) fibril, not a single crosslink
+# type. Setting this true with a single n_term_type/c_term_type would
+# incorrectly fail validation against the mixed structure.
+crosslink: false
+
+# Coarse-grained force field.
+force_field: "martini3"

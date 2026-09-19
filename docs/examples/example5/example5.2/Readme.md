@@ -1,69 +1,46 @@
 <div align="center">
-    <h1>Example 2</h1>
-    <p>
-        Enzymatic + non-enzymatic (Glucosepane) workflow with crosslink replacement
-        using Chimera swapaa before topology generation.
-    </p>
+    <h1>Example 5.2</h1>
+    <p>Enzymatic + non-enzymatic workflow, then reducing crosslink density via ratio-based replacement.</p>
 </div>
 
-This example mirrors Example 5.1, but adds a replacement stage that converts a
-user-defined fraction of crosslink markers into standard amino acids using the
-`swapaa` Chimera script. This is useful when you want to reduce crosslink
-density while keeping the rest of the model intact.
+Builds the same PYD + Glucosepane *rattus_norvegicus* structure as Example
+5.1, but replaces 30% of its crosslink markers with standard residues during
+geometry generation, using Chimera `swapaa`.
 
-## Run Order
+## Usage
 
 ```bash
-# 1) Enzymatic crosslinks on a fresh sequence
-colbuilder --config_file config_ex5_step1_enzymatic.yaml --debug
-
-# 2) Add non-enzymatic crosslink(s) on the pre-mutated PDB
-colbuilder --config_file config_ex5_step2_nonenzymatic.yaml --debug
-
-# 3) Build geometry, replace selected crosslinks, and generate topology
-colbuilder --config_file config_ex5_step3.yaml --debug
+colbuilder --config_file config_step1_pyd_sequence.yaml --debug
+colbuilder --config_file config_step2_add_glucosepane.yaml --debug
+colbuilder --config_file config_step3_geometry_replace.yaml --debug
 ```
 
-## What Each Step Does
+## Files
 
-### 1) `config_ex5_step1_enzymatic.yaml`
-Standard sequence generation. It builds a triple helix from the species sequence
-and applies terminal enzymatic crosslinks (N- and C-terminal (i.e PYD)).
+- `config_step1_pyd_sequence.yaml` — sequence generation, terminal PYD crosslinks.
+- `config_step2_add_glucosepane.yaml` — mutated-PDB workflow, adds Glucosepane on top of step 1.
+- `config_step3_geometry_replace.yaml` — geometry generation, then `replace_bool: true` with
+  `ratio_replace: 30` and `ratio_replace_scope: "all"` to replace 30% of crosslinks
+  (drawn from both PYD and Glucosepane markers) with standard residues.
 
-Key outputs:
-- `rattusnorvegicus_alignment.fasta`  
-  Multiple sequence alignment used by the modeller step.
-- `rattusnorvegicus_N_PYD_C_PYD.pdb`  
-  Triple-helix model with enzymatic crosslinks applied and optimized.
+No topology generation runs in this example (`topology_generator` isn't set).
 
-### 2) `config_ex5_step2_nonenzymatic.yaml`
-Mutated-PDB workflow. It takes the enzymatic PDB from step 1 and applies an
-additional non-enzymatic crosslink (Glucosepane) at the specified residues.
-Use the crosslink-specific shift for this second sequence step; it is listed in
-`src/colbuilder/data/sequence/crosslinks.csv` alongside each crosslink entry.
+## Output Files
 
-Key outputs:
-- `rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb`  
-  The same triple helix, now carrying the additional non-enzymatic crosslink.
-
-### 3) `config_ex5_step3.yaml`
-Builds the microfibril geometry, then replaces a fraction of crosslinks using
-Chimera `swapaa`.
-
-Key replacement settings in the YAML:
-- `replace_bool: true` enables the replacement stage.
-- `ratio_replace: 30` replaces 30% of eligible markers.
-- `ratio_replace_scope: "all"` selects from enzymatic + non-enzymatic markers.
-
-Key outputs:
-- `collagen_fibril_rattus_norvegicus.pdb`  
-  Final microfibril geometry after replacement.
-- `manual_replacements.txt`  
-  The actual replacement instructions applied by Chimera.
+- `rattusnorvegicus_alignment.fasta` — MSA from step 1.
+- `rattusnorvegicus_N_PYD_C_PYD.pdb` — step 1's output; step 2's `mutated_pdb` input.
+- `rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb` — step 2's output; step 3's `pdb_file` input.
+- `collagen_fibril_rattus_norvegicus.pdb` — final microfibril, after replacement.
+- `manual_replacements.txt` — unpaired crosslink markers colbuilder detected automatically
+  before replacement (each would leave a dangling half-crosslink if left alone).
+- `manual_replacements_applied.txt` — the full list of residues actually converted to
+  standard amino acids by the ratio-based replacement, one `<caps_file> <resname> <resid>
+  <chain>` entry per residue.
 
 ## Notes
-- The non-enzymatic step expects the enzymatic PDB from step 1 to exist in this
-  directory.
-- The geometry step uses the PDB from step 2 as its input.
-- Replacement uses Chimera `swapaa` to mutate the selected crosslink markers to
-  standard residues while preserving the rest of the structure.
+
+- Because `ratio_replace` is set explicitly, colbuilder's auto-fix-unpaired step defers to
+  it instead of silently forcing its own replacement list. `manual_replacements.txt` is
+  informational (what it found), not what actually got replaced.
+- Step 3 repeats `crosslink`/`n_term_type`/`c_term_type`/`additional_1_type` so that
+  crosslink-type validation matches what's actually in `pdb_file`.

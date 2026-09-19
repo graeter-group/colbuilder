@@ -1,0 +1,16 @@
+# Step 5/5: mixing-only mode. Combines the two AGE-bearing structures from
+# steps 2 and 4 into one microfibril at an 80:20 ratio, then builds topology.
+species: "rattus_norvegicus"
+mix_bool: true
+topology_generator: true
+force_field: "amber99"
+
+ratio_mix: "A:80 B:20"       # A = HLKNL+Glucosepane, B = PYD+Pentosidine
+files_mix:
+  - "rattusnorvegicus_N_HLKNL_C_HLKNL+ADD1_Glucosepane.pdb"   # A
+  - "rattusnorvegicus_N_PYD_C_PYD+ADD1_Pentosidine.pdb"       # B
+
+# Cα-Cα distance (Å) defining a crystal contact between chains.
+contact_distance: 25
+# Length of the assembled microfibril (nm).
+fibril_length: 67

@@ -1,0 +1,22 @@
+# Step 2/5: mutated-PDB workflow. Adds Glucosepane (non-enzymatic) on top of
+# step 1's HLKNL structure.
+sequence_generator: true
+
+species: "rattus_norvegicus"
+mutated_pdb: "rattusnorvegicus_N_HLKNL_C_HLKNL.pdb"
+
+# Must match what's already in mutated_pdb, so colbuilder's crosslink-type
+# validation recognizes HLKNL (already present) alongside Glucosepane (new).
+crosslink: true
+n_term_type: "HLKNL"
+c_term_type: "HLKNL"
+n_term_combination: "9.C - 944.B"
+c_term_combination: "1046.C - 103.C"
+
+# The new crosslink to add, and where.
+additional_1_type: "Glucosepane"
+additional_1_combination: "523.A - 286.C"
+
+# Which periodic unit-cell copies to search when optimizing the new
+# crosslink's position (must be exactly 2, from D0-D5; default is D0/D5).
+crosslink_copies: ["D2", "D1"]

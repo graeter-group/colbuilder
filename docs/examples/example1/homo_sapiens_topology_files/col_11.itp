@@ -75554,6 +75554,7 @@ col_11  3
  7807  7811  7809  7810     4 
  7809  7813  7811  7812     4 
 
+
 ; Include Position restraint file
 #ifdef POSRES
 #include "posre_11.itp"

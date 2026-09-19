@@ -1,0 +1,8 @@
+# Step 2/2: sequence generation for a species colbuilder doesn't know about.
+# fasta_file is required whenever species isn't one of colbuilder's built-in
+# 19 (config validation fails otherwise with "Must provide fasta_file when
+# using custom species").
+sequence_generator: true
+
+species: "my_custom_species"
+fasta_file: "custom_species.fasta"
