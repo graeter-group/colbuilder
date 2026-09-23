@@ -398,14 +398,20 @@ class Martini:
         try:
             chain_length = {key: "" for key in ["A", "B", "C"]}
 
-            for line_it in range(len(pdb) - 1):
-                if pdb[line_it][21:22] == "A" and pdb[line_it + 1][21:22] == "B":
-                    chain_length["A"] = pdb[line_it][22:26]
-                if pdb[line_it][21:22] == "B" and pdb[line_it + 1][21:22] == "C":
-                    chain_length["B"] = pdb[line_it][22:26]
-
-            if len(pdb) > 1 and pdb[-1][21:22] == "C":
-                chain_length["C"] = pdb[-1][22:26]
+            # Find each chain's last residue directly, by keeping the resid of
+            # the most recently seen ATOM/HETATM line per chain (atoms are in
+            # increasing resid order within a chain, so the last one seen is
+            # the chain's last residue). This must not rely on line adjacency
+            # (comparing pdb[i] to pdb[i+1]) -- real per-model PDBs carry a TER
+            # record after every chain, which breaks any adjacency-based
+            # transition detection and previously left chain_length empty for
+            # every chain, silently disabling the ALA -> CLA rename below.
+            for line in pdb:
+                if not line.startswith(("ATOM  ", "HETATM")):
+                    continue
+                ch = line[21:22]
+                if ch in chain_length:
+                    chain_length[ch] = line[22:26]
 
             return chain_length
         except Exception as e:
