@@ -226,7 +226,8 @@ class CrosslinkMixer:
                     continue
                 pdb_name, _, resid, chain = parts[:4]
                 orig_res = parts[1].upper()
-                target_res = "ARG" if orig_res in {"AGS", "APD"} else "LYS"
+                _UNPAIRED_TARGET_RESIDUE = {"AGS": "ARG", "APD": "ARG", "DTY": "TYR", "DTF": "PHE"}  # extend per new crosslink; anything else defaults to LYS
+                target_res = _UNPAIRED_TARGET_RESIDUE.get(orig_res, "LYS")
                 lines.append(f"{pdb_name} {target_res} {resid} {chain}")
 
             if not lines:

@@ -182,6 +182,7 @@ PAIRING_RULES = [
     (["L5X"], ["L4X"]),  # LKNL
     (["LY5"], ["LY4"]),  # deH-HLNL
     (["LX5"], ["LX4"]),  # deH-LNL
+    (["DTY"], ["DTF"])  # DiTyrosineFromPhe
 ]
 
 REPLACEMENT_MAP: Dict[str, str] = {
@@ -210,7 +211,7 @@ REPLACEMENT_MAP: Dict[str, str] = {
     "LX4": "LYS",
     "LYX": "LYS",
     "LY3": "LYS",
-    "LY2": "LYS",
+    "LY2": "LYS", "DTY": "TYR", "DTF": "PHE",
 }
 DEFAULT_REPLACEMENT = "LYS"
 # For atom-specific Crosslink.position pairing only (true bond distance,
@@ -220,8 +221,8 @@ DEFAULT_REPLACEMENT = "LYS"
 # since centroid-to-centroid distances for real bonded pairs run ~5-9 A.
 PAIR_DISTANCE_CUTOFF = 5.0
 
-PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4"}
-NON_ENZYMATIC_PAIRED: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD"}
+PAIRED_RESIDUES: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "L5Y", "L4Y", "L5X", "L4X", "LY5", "LX5", "LY4", "LX4", "DTY", "DTF"}
+NON_ENZYMATIC_PAIRED: Set[str] = {"AGS", "APD", "LGX", "LPS", "LZS", "LZD", "DTY", "DTF"}
 ENZYMATIC_SINGLETONS: Set[str] = {
     "LYX",
     "LY3",

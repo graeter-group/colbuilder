@@ -195,6 +195,21 @@ class Amber:
         divalent_aldehyde = {'L4Y', 'L4X', 'LY4', 'LX4', 'LGX', 'LPS', 'LZD'}
         divalent_amine = {'L5Y', 'L5X', 'LY5', 'LX5', 'AGS', 'APD', 'LZS'}
 
+        # Asymmetric divalent crosslinks that aren't aldehyde/amine
+        # condensation chemistry -- two complementary categories, one code
+        # added to each side per new pair. DTY/DTF: a di-tyrosine-style
+        # direct CE1-CE1 bond where DTF is a Phe position mutated into a
+        # Tyr-like residue as part of the same patch that forms the bond
+        # (DTY/DTF's REPLACEMENT_MAP/RESIDUE_TO_MUTATION target their real
+        # original parents, TYR and PHE respectively -- see
+        # geometry_replacer.py/unpaired_crosslinks.py).
+        divalent_asymmetric_a = {'DTY'}
+        divalent_asymmetric_b = {'DTF'}
+        if cl1.resname in divalent_asymmetric_a and cl2.resname in divalent_asymmetric_b:
+            return True
+        if cl1.resname in divalent_asymmetric_b and cl2.resname in divalent_asymmetric_a:
+            return True
+
         # Trivalent crosslinks (T-type). Each aldehyde (ring) residue bonds two
         # specific arms — one via ring carbon C13, one via C12 — fixed per type
         # (data/sequence/crosslinks.csv). Blocks cross-arm and cross-type bonds.
@@ -369,6 +384,10 @@ class Amber:
             elif resname in ("LZD") and atom_name == "CE":
                 return True
             elif resname in ("LZS") and atom_name == "NZ1":
+                return True
+            elif resname == "DTF" and atom_name == "CE1":
+                return True
+            elif resname == "DTY" and atom_name == "CE1":
                 return True
 
         return False

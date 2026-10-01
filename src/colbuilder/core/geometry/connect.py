@@ -71,7 +71,7 @@ class Connect:
                 "LXY",
                 "L3X",
                 "L2X",
-                "LYY",
+                "LYY", "DTY", "DTF",
             ]
         )
 

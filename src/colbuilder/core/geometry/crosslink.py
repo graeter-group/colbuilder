@@ -158,5 +158,22 @@ def read_crosslink(pdb_file: Union[str, Path]) -> List[Crosslink]:
                         atom=line[12:16].strip(),
                     )
                 )
+            elif (line[17:20] == "DTY" and line[13:16] == "CE1") or (
+                line[17:20] == "DTF" and line[13:16] == "CE1"
+            ):
+                crosslinks.append(
+                    Crosslink(
+                        resid=line[22:26].strip(),
+                        resname=line[17:20],
+                        chain=line[21],
+                        position=[
+                            float(line[30:38]),
+                            float(line[38:46]),
+                            float(line[46:54]),
+                        ],
+                        type="D",
+                        atom=line[12:16].strip(),
+                    )
+                )
 
     return crosslinks

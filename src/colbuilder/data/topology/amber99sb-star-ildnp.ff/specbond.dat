@@ -1,4 +1,4 @@
-13
+14
 LY2     CB      1       LYX     C12     1       0.152     LY2     LYX
 LY3     CG      1       LYX     C13     1       0.152     LY3     LYX
 LY4     CE      1       LY5      NZ     1       0.152     LY4     LY5
@@ -12,3 +12,4 @@ L5S     CE      1       HIH     CE1     1       0.152     L5S     HIH
 LZS     NZ1     1       LZD      CE     1       0.146     LZS     LZD
 AGS     NZ      1       LGX      CE     1       0.147     AGS     LGX
 LPS     CE      1       APD      NZ     1       0.146     LPS     APD
+DTY     CE1     1       DTF      CE1     1       0.149     DTY     DTF

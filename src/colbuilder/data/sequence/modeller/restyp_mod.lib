@@ -142,3 +142,5 @@ ATOM   | LGX                 | ~ |   | LGX  | Glucosepane, lgx
 ATOM   | AGS                 | * |   | AGS  | Glucosepane, ags
 ATOM   | LPS                 | q |   | LPS  | Pentosidine, lps
 ATOM   | APD                 | ! |   | APD  | Pentosidine, apd
+ATOM   | DTY                 | J |   | DTY  | Di-tyrosine (true Tyr side), CE1-CE1 bond
+ATOM   | DTF                 | U |   | DTF  | Di-tyrosine from Phe (mutated to Tyr, then CE1-CE1 bonded; replace target is PHE)

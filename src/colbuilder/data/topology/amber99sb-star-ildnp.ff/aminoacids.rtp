@@ -5067,3 +5067,111 @@
  [ impropers ]
     CA    +N     C     O
     N     CA     C    +N    105.4       0.75       1
+
+[ DTY ]
+ [ atoms ]
+     N N          -0.41570     1
+     H H           0.27190     2
+    CA CT         -0.00140     3
+    HA H1          0.08760     4
+    CB CT         -0.01520     5
+   HB1 HC          0.02950     6
+   HB2 HC          0.02950     7
+    CG CA         -0.00110     8
+   CD1 CA         -0.19060     9
+   HD1 HA          0.16990    10
+   CE1 CA         -0.06850    11
+    CZ C           0.32260    12
+    OH OH         -0.55790    13
+    HH HO          0.39920    14
+   CE2 CA         -0.23410    15
+   HE2 HA          0.16560    16
+   CD2 CA         -0.19060    17
+   HD2 HA          0.16990    18
+     C C           0.59730    19
+     O O          -0.56790    20
+ [ bonds ]
+     N      H
+     N     CA
+    CA     HA
+    CA     CB
+    CA      C
+    CB    HB1
+    CB    HB2
+    CB     CG
+    CG    CD1
+    CG    CD2
+   CD1    HD1
+   CD1    CE1
+   CE1     CZ
+    CZ     OH
+    CZ    CE2
+    OH     HH
+   CE2    HE2
+   CE2    CD2
+   CD2    HD2
+     C      O
+    -C      N
+ [ impropers ]
+    -C    CA     N     H
+    CA    +N     C     O
+    CG   CE2   CD2   HD2
+    CZ   CD2   CE2   HE2
+    CG   CE1   CD1   HD1
+   CD1   CD2    CG    CB
+   CE1   CE2    CZ    OH
+     N    CA     C    +N  105.4  0.75     1
+
+[ DTF ]
+ [ atoms ]
+     N N          -0.41570     1
+     H H           0.27190     2
+    CA CT         -0.00140     3
+    HA H1          0.08760     4
+    CB CT         -0.01520     5
+   HB1 HC          0.02950     6
+   HB2 HC          0.02950     7
+    CG CA         -0.00110     8
+   CD1 CA         -0.19060     9
+   HD1 HA          0.16990    10
+   CE1 CA         -0.06850    11
+    CZ C           0.32260    12
+    OH OH         -0.55790    13
+    HH HO          0.39920    14
+   CE2 CA         -0.23410    15
+   HE2 HA          0.16560    16
+   CD2 CA         -0.19060    17
+   HD2 HA          0.16990    18
+     C C           0.59730    19
+     O O          -0.56790    20
+ [ bonds ]
+     N      H
+     N     CA
+    CA     HA
+    CA     CB
+    CA      C
+    CB    HB1
+    CB    HB2
+    CB     CG
+    CG    CD1
+    CG    CD2
+   CD1    HD1
+   CD1    CE1
+   CE1     CZ
+    CZ     OH
+    CZ    CE2
+    OH     HH
+   CE2    HE2
+   CE2    CD2
+   CD2    HD2
+     C      O
+    -C      N
+ [ impropers ]
+    -C    CA     N     H
+    CA    +N     C     O
+    CG   CE2   CD2   HD2
+    CZ   CD2   CE2   HE2
+    CG   CE1   CD1   HD1
+   CD1   CD2    CG    CB
+   CE1   CE2    CZ    OH
+     N    CA     C    +N  105.4  0.75     1

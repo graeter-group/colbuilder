@@ -61,7 +61,7 @@ CROSSLINK_PARTNERS: Dict[str, Set[str]] = {
     "LYX": {"LY2", "LY3"}, "LY2": {"LYX"}, "LY3": {"LYX"},
     "LXX": {"LX2", "LX3"}, "LX2": {"LXX"}, "LX3": {"LXX"},
     "LXY": {"L2Y", "L3Y"}, "L2Y": {"LXY"}, "L3Y": {"LXY"},
-    "LYY": {"L2X", "L3X"}, "L2X": {"LYY"}, "L3X": {"LYY"},
+    "LYY": {"L2X", "L3X"}, "L2X": {"LYY"}, "L3X": {"LYY"}, "DTY": {"DTF"}, "DTF": {"DTY"},
 }
 
 # Trivalent central residue -> which arm residue its C13 vs C12 atom bonds.
@@ -84,7 +84,7 @@ RESIDUE_TO_MUTATION = {
     "LZS": "LYS",
     "LZD": "LYS",
     "LGX": "LYS",
-    "LPS": "LYS",
+    "LPS": "LYS", "DTY": "TYR", "DTF": "PHE",
 }
 DEFAULT_MUTATION = "LYS"  # all lysine/hydroxylysine-derived markers
 

@@ -32,6 +32,8 @@ class CrosslinkDetector:
         'LGX', 'LPS',
         'AGS', 'APD',
         'LZS', 'LZD',
+        'DTY',
+        'DTF',
     }
     
     # Trivalent crosslink residues (T-type)
@@ -49,6 +51,7 @@ class CrosslinkDetector:
     DIVALENT_TYPES = {
         'HLKNL', 'LKNL', 'deHLNL', 'deHHLNL',
         'Pentosidine', 'Glucosepane', 'MOLD',
+        'DiTyrosineFromPhe',
     }
     TRIVALENT_TYPES = {
         'PYD', 'DPD', 'PYL', 'DPL',
