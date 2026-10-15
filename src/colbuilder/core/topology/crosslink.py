@@ -91,21 +91,11 @@ class Crosslink:
 
         # Glucosepane terms that cross the LGX/AGS marker boundary.  All other
         # glucosepane interactions are defined inside the marker templates
-        # (aminoacids.ff, model G21-fib R2M, 2026-09-15).
-        # G21 (superseded): S1--R1 0.295/63395.824; angles B1--S1--R1
-        # 141.879/127.334, S1--R1--R2 89.976/48.526 (AGS:SC6), S1--R1--R4
-        # 132.752/89.996.
-        # self.dgcp_s1_r1: str = '0.295'
-        # self.kgcp_s1_r1: str = '63395.824'
-        # self.agcp_s1_r1_r2: Tuple[str, str] = ('89.976', '48.526')
-        # G21-fib R2M: S1--R1 refitted on the all-atom fibril (within-copy k
-        # 23437 reduced to 20000 so that the oscillation period stays >= 10 dt
-        # with R1 at 36 amu); B1--S1--R1 and S1--R1--R4 kept from G21; the
-        # pucker-independent angle S1--R1--R3 (AGS:SC7) replaces S1--R1--R2.
-        self.dgcp_s1_r1: str = '0.255'
-        self.kgcp_s1_r1: str = '20000.0'
+        # (aminoacids.ff, model G21: R2 and R5 are virtual sites).
+        self.dgcp_s1_r1: str = '0.295'
+        self.kgcp_s1_r1: str = '63395.824'
         self.agcp_b1_s1_r1: Tuple[str, str] = ('141.879', '127.334')
-        self.agcp_s1_r1_r3: Tuple[str, str] = ('116.6', '42.0')
+        self.agcp_s1_r1_r2: Tuple[str, str] = ('89.976', '48.526')
         self.agcp_s1_r1_r4: Tuple[str, str] = ('132.752', '89.996')
 
         # MOLD terms crossing the LZS/LZD marker boundary.  The renamed
@@ -510,19 +500,17 @@ class Crosslink:
                     LOG.info(f" Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
                 # Glucosepane: S1 (LGX:SC1) -- R1 (AGS:SC5), plus the
-                # three angles that cross the marker boundary (G21-fib R2M:
-                # B1--S1--R1, S1--R1--R3, S1--R1--R4; G21 used S1--R1--R2 with
-                # AGS:SC6 instead of S1--R1--R3 with AGS:SC7).
+                # three angles that cross the marker boundary (B1--S1--R1,
+                # S1--R1--R2 with R2 = AGS:SC6, S1--R1--R4).
                 elif (clx[1] == 'LGX' and clx[2] == 'SC1' and
                       cly[1] == 'AGS' and cly[2] == 'SC5'):
                     lgx_bb = self._same_residue_bead(clx, 'BB')
-                    # ags_r2 = self._same_residue_bead(cly, 'SC6')  # G21 (superseded)
-                    ags_r3 = self._same_residue_bead(cly, 'SC7')
+                    ags_r2 = self._same_residue_bead(cly, 'SC6')
                     ags_r4 = self._same_residue_bead(cly, 'SC4')
-                    if not all((lgx_bb, ags_r3, ags_r4)):
+                    if not all((lgx_bb, ags_r2, ags_r4)):
                         LOG.error(
-                            "Cannot complete glucosepane G21-fib R2M terms: expected "
-                            "LGX:BB and AGS:SC4/SC7 in the paired marker residues."
+                            "Cannot complete glucosepane G21 terms: expected "
+                            "LGX:BB and AGS:SC4/SC6 in the paired marker residues."
                         )
                         continue
 
@@ -533,11 +521,8 @@ class Crosslink:
                     self.crosslink_bonded['angles'].extend([
                         [lgx_bb, clx[0], cly[0], '1',
                          self.agcp_b1_s1_r1[0], f"{self.agcp_b1_s1_r1[1]}\n"],
-                        # G21 (superseded): S1--R1--R2 with ags_r2 (AGS:SC6)
-                        # [clx[0], cly[0], ags_r2, '1',
-                        #  self.agcp_s1_r1_r2[0], f"{self.agcp_s1_r1_r2[1]}\n"],
-                        [clx[0], cly[0], ags_r3, '1',
-                         self.agcp_s1_r1_r3[0], f"{self.agcp_s1_r1_r3[1]}\n"],
+                        [clx[0], cly[0], ags_r2, '1',
+                         self.agcp_s1_r1_r2[0], f"{self.agcp_s1_r1_r2[1]}\n"],
                         [clx[0], cly[0], ags_r4, '1',
                          self.agcp_s1_r1_r4[0], f"{self.agcp_s1_r1_r4[1]}\n"],
                     ])
@@ -664,8 +649,7 @@ class Crosslink:
             )
             expected_angles = {
                 (*self.agcp_b1_s1_r1,),
-                # (*self.agcp_s1_r1_r2,),  # G21 (superseded)
-                (*self.agcp_s1_r1_r3,),
+                (*self.agcp_s1_r1_r2,),
                 (*self.agcp_s1_r1_r4,),
             }
             glucosepane_angle_count = sum(

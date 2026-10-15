@@ -402,10 +402,11 @@ ColBuilder supports various crosslink types found in collagen:
 - **Pentosidine**: Well-characterized AGE crosslink (non-enzymatic, LYS-ARG derived)
 - **NOCROSS**: No crosslinking
 
-In this local version, the Martini 3 glucosepane model is **G21-fib R2M**
-(2026-09-15), with marker residues `LGX` and `AGS`: one massive ring bead
-R2 (`AGS:SC6`) and a single virtual site R5 (`AGS:SC3`). Superseded G21
-parameters remain as comments in the force-field file and `core/topology/crosslink.py`.
+In this local version, the Martini 3 glucosepane model is **G21**, with marker
+residues `LGX` and `AGS` and two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`).
+Its parameters are those of `gcp_martini3_free_molecule.itp` in AGE-crosslinks-Martini3
+(`Martini3_new/glucosepane/timestep_20fs_with_virtual_sites`); in the fibril, B1 and B2
+are the SP2 backbone beads of `LGX` and `AGS`.
 
 Non-enzymatic crosslinks (MOLD, Glucosepane, Pentosidine) can be used as terminal
 crosslinks just like the enzymatic ones, or added on top of an existing structure

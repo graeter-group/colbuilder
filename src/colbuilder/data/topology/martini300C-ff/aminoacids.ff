@@ -193,7 +193,7 @@ LYX                1
  SC2   SC3  SC5       2   100   200
 
 
-;;;; GLUCOSEPANE G21-fib R2M - LYSINE-DERIVED MARKER LGX
+;;;; GLUCOSEPANE G21 - LYSINE-DERIVED MARKER LGX
 ;
 ; B1 is represented by the peptide BB bead.  R1 is the inter-marker bead
 ; shared by LGX:CE and AGS:NZ; it is instantiated once as AGS:SC5, so the
@@ -210,32 +210,19 @@ LGX                1
   2   SC2      1    LGX   SC1     2     0.0
 
 [ bonds ]
-#meta {"group": "Glucosepane G21-fib R2M"}
-; G21 (superseded 2026-09-15): B1--S1, provisional transfer from the capped standalone model
-; BB   SC1    1    0.334    32117.450
-; G21-fib R2M: B1--S1 refitted on the all-atom fibril (dominant mode; within-copy k 33865 capped at 25000)
- BB   SC1    1    0.314    25000.0
+#meta {"group": "Glucosepane G21"}
+; B1--S1
+ BB   SC1    1    0.334    32117.450
 
 
-;;;; GLUCOSEPANE G21-fib R2M - ARGININE-DERIVED MARKER AGS
+;;;; GLUCOSEPANE G21 - ARGININE-DERIVED MARKER AGS
 ;
 ; ColBuilder aliases: BB=B2, SC1=S2, SC2=R6, SC3=R5(VS), SC4=R4,
-; SC5=R1(shared/hosted here), SC6=R2, SC7=R3.
+; SC5=R1(shared/hosted here), SC6=R2(VS), SC7=R3.
 ;
-; G21-fib R2M (2026-09-15) supersedes G21.  Bonded parameters were derived from
-; the ten glucosepane cross-links of an all-atom collagen fibril at equilibrium
-; (50-100 ns), mapped to bead centres of geometry and fitted with fast_forward
-; (ff_map/ff_inter, pooled and per copy).  Equilibrium values are the dominant
-; mode of the pooled fibril distribution; force constants are kT over the
-; within-copy variance, capped for a 20 fs time step (bonds <= 25000, angles
-; <= 150; bond oscillation period >= 10 dt).  Terms within two standard
-; deviations of the G21 values keep the published parameters.  R2 (SC6) is a
-; massive bead (54 amu; 18 amu removed from each former constructor SC7, SC5,
-; SC4); R5 (SC3) is the only virtual site, with refitted coefficients.  No
-; dihedral acts on the pucker of the seven-membered ring; the relative
-; orientation of the two rings is set by the improper R1-R3-R4-R6 and the angle
-; R1-R4-R6, both independent of the pucker.  The superseded G21 lines are kept
-; below as comments.
+; Same parameters as gcp_martini3_free_molecule.itp (AGE-crosslinks-Martini3,
+; Martini3_new/glucosepane/timestep_20fs_with_virtual_sites); in the fibril B1 and B2
+; are the SP2 backbone beads.
 
 [ moleculetype ]
 ; molname       nrexcl
@@ -245,76 +232,49 @@ AGS                1
 ; id  type   resnr  resid  atom  cgnr  charge  [mass]
   1   SP2       1    AGS    BB     1     0.0
   2   SC2       1    AGS   SC1     2     0.0
-; G21 (superseded) masses: SC2 66.0, SC3 0.0, SC4 66.0, SC5 54.0, SC6 0.0 (virtual site), SC7 84.0
   3  SN4a       1    AGS   SC2     3     0.0    66.0
   4  TN5a       1    AGS   SC3     4     0.0     0.0
-  5   TC4       1    AGS   SC4     5     0.0    48.0
-  6  TN3a       1    AGS   SC5     6     0.0    36.0
-  7   SP1       1    AGS   SC6     7     0.0    54.0
-  8   SP1       1    AGS   SC7     8     0.0    66.0
+  5   TC4       1    AGS   SC4     5     0.0    66.0
+  6  TN3a       1    AGS   SC5     6     0.0    54.0
+  7   SP1       1    AGS   SC6     7     0.0     0.0
+  8   SP1       1    AGS   SC7     8     0.0    84.0
 
 [ bonds ]
-#meta {"group": "Glucosepane G21-fib R2M"}
-; G21 (superseded): R3--R1, R3--R4, R1--R4, R4--R5(VS), R4--R6, R6--S2, S2--B2
-; SC7  SC5    1    0.449    37630.586
-; SC7  SC4    1    0.288    40198.794
-; SC5  SC4    1    0.260    74860.116
-; SC4  SC3    1    0.207    89200.467
-; SC4  SC2    1    0.285    80862.992
-; SC2  SC1    1    0.277    18706.505
-; SC1   BB    1    0.340    27157.212
-; G21-fib R2M: ring core R3--R1 (diagonal), R3--R4, R1--R4 from the fibril (consistent tetrahedron)
- SC7  SC5    1    0.474     5790.0
- SC7  SC4    1    0.333    25000.0
- SC5  SC4    1    0.269    20000.0
-; massive R2: R2--R1, R2--R3, R2--R4
- SC6  SC5    1    0.337    12345.0
- SC7  SC6    1    0.285    23826.0
- SC6  SC4    1    0.353    25000.0
-; R4--R6 kept (G21 b0; k capped at 25000 for the lighter R4), R6--S2 and S2--B2 refitted
- SC4  SC2    1    0.285    25000.0
- SC2  SC1    1    0.342    22187.0
- SC1   BB    1    0.311    19100.0
-; the G21 bond R4--R5 is omitted: R5 is a virtual site fully determined by its constructors
+#meta {"group": "Glucosepane G21"}
+; R3--R1, R3--R4, R1--R4
+ SC7  SC5    1    0.449    37630.586
+ SC7  SC4    1    0.288    40198.794
+ SC5  SC4    1    0.260    74860.116
+; R4--R5(VS), R4--R6, R6--S2, S2--B2
+ SC4  SC3    1    0.207    89200.467
+ SC4  SC2    1    0.285    80862.992
+ SC2  SC1    1    0.277    18706.505
+ SC1   BB    1    0.340    27157.212
 
 [ angles ]
-#meta {"group": "Glucosepane G21-fib R2M"}
-; G21 (superseded): R3--R4--R5, R5--R4--R6, R4--R6--S2, R5--R6--S2, R6--S2--B2
-; SC7  SC4  SC3    1     88.343     48.566
-; SC3  SC4  SC2    1     40.836    113.489
-; SC4  SC2  SC1    1    144.855    146.439
-; SC3  SC2  SC1    1    146.274    150.000
-; SC2  SC1   BB    1    136.332    101.782
-; G21-fib R2M: R1--R2--R3 (ring, new), R1--R4--R6 (in-plane orientation of the two rings, new)
- SC5  SC6  SC7    1     99.5      150.0
- SC5  SC4  SC2    1    108.9      107.0
-; R3--R4--R5, R5--R4--R6 consistent with the refitted virtual site R5
- SC7  SC4  SC3    1     68.8      150.0
- SC3  SC4  SC2    1     45.8      150.0
-; R4--R6--S2 kept (G21), R5--R6--S2 refitted (dominant mode), R6--S2--B2 kept (G21)
+#meta {"group": "Glucosepane G21"}
+; R3--R4--R5, R5--R4--R6
+ SC7  SC4  SC3    1     88.343     48.566
+ SC3  SC4  SC2    1     40.836    113.489
+; R4--R6--S2, R5--R6--S2, R6--S2--B2
  SC4  SC2  SC1    1    144.855    146.439
- SC3  SC2  SC1    1     88.7       80.0
+ SC3  SC2  SC1    1    146.274    150.000
  SC2  SC1   BB    1    136.332    101.782
 
 [ dihedrals ]
-#meta {"group": "Glucosepane G21-fib R2M"}
-; G21 (superseded): improper R3--R2--R4--R5 and the two VS-internal impropers
-; SC7  SC6  SC4  SC3    2      4.927     93.272
-; SC7  SC4  SC2  SC3    2    -17.991    174.824
-; SC5  SC6  SC4  SC7    2   -130.061    368.960
-; G21-fib R2M: harmonic improper R1--R3--R4--R6, out-of-plane orientation of the two rings,
-; independent of the ring pucker (replaces R3--R2--R4--R5, which depends on the pucker sign)
- SC5  SC7  SC4  SC2    2   -115.1      82.0
-; Option (b), ring pucker locked in the majority fibril state (7 of 10 copies): uncomment
-; SC5  SC6  SC7  SC4    2    -29.2     140.0
+#meta {"group": "Glucosepane G21"}
+; Improper R3--R2--R4--R5: independent relative-orientation restraint.
+ SC7  SC6  SC4  SC3    2      4.927     93.272
+; The following two source impropers are VS-internal.  GROMACS identifies
+; them as constant interactions during preprocessing, as in standalone G21.
+ SC7  SC4  SC2  SC3    2    -17.991    174.824
+ SC5  SC6  SC4  SC7    2   -130.061    368.960
 
 [ virtual_sites3 ]
-; G21 (superseded): R2 = R3 + a(R1-R3) + b(R4-R3) + c[(R1-R3)x(R4-R3)]; R2 is massive in G21-fib R2M
-; SC6  SC7  SC5  SC4    4    0.549709702   -0.382160600   -2.592763950
-; G21 (superseded) coefficients of R5
-; SC3  SC4  SC2  SC7    4    0.888026168    0.555273913   -0.641254922
-; R5 = R4 + a(R6-R4) + b(R3-R4) + c[(R6-R4)x(R3-R4)]; coefficients refitted on the fibril (RMSE 49 pm)
- SC3  SC4  SC2  SC7    4    0.606    0.345   -1.104
+; R2 = R3 + a(R1-R3) + b(R4-R3) + c[(R1-R3)x(R4-R3)]
+ SC6  SC7  SC5  SC4    4    0.549709702   -0.382160600   -2.592763950
+; R5 = R4 + a(R6-R4) + b(R3-R4) + c[(R6-R4)x(R3-R4)]
+ SC3  SC4  SC2  SC7    4    0.888026168    0.555273913   -0.641254922
 
 [ exclusions ]
 ; Complete non-bonded exclusion clique over the six ring beads only.
