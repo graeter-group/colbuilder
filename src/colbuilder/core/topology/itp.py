@@ -768,7 +768,8 @@ class Itp:
 
         Creates a file containing exclusion definitions for Go-model interactions,
         specifying which atom pairs should be excluded from non-bonded interactions.
-        Each exclusion entry is written in space-separated format.
+        Each entry is written as "i j ; resnr_i resnr_j": only the two atom indices
+        are data, the residue numbers are kept as a comment.
 
         Args:
             cnt_model: Model counter used for output file naming
@@ -782,10 +783,12 @@ class Itp:
         try:
             with open(output_path, "w") as f:
                 f.write(";[ exclusions ]\n")
-                for exclusion in self.final_go_exclusions:
-                    # Write space-separated items, ensuring no trailing space
-                    exclusion_str = " ".join(str(item) for item in exclusion)
-                    f.write(f"{exclusion_str}\n")
+                for i, j, _, resnr_i, resnr_j in self.final_go_exclusions:
+                    # The file is included inside the [ exclusions ] section of
+                    # col_N.itp, where grompp reads every integer on a line as an
+                    # atom excluded from the first one: the residue numbers must
+                    # stay behind ';' (read_excl drops it from the source files).
+                    f.write(f"{i} {j} ; {resnr_i} {resnr_j}\n")
 
         except PermissionError:
             LOG.error(
