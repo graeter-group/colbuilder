@@ -1,0 +1,24 @@
+# Martini 3 topology of a collagen microfibril containing glucosepane, choosing the glucosepane parameter set.
+# Same as step 3 of docs/examples/example5/example5.1 (build the fibril and its topology from the PDB that already
+# contains PYD and glucosepane crosslinks), with force_field martini3. Run from docs/examples:
+#   colbuilder --config_file glucosepane_martini_timestep.yaml
+#
+# glucosepane_martini_timestep selects the Martini 3 parameters of glucosepane (marker residues LGX/AGS):
+#   20 (default) - model with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3), for simulations with a 20 fs time step
+#   10           - model without virtual sites (all ten beads carry mass), for simulations with a 10 fs time step
+# The option only selects the parameters: set dt in your .mdp. The 10 fs set is not stable at 20 fs, and the
+# time step suitable for the whole fibril (collagen, Go model, other crosslinks, pulling) may be smaller.
+# The first lines of the generated .top name the set that was used.
+
+geometry_generator: true
+topology_generator: true
+species: "rattus_norvegicus"
+pdb_file: "example5/example5.1/rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
+crosslink: true
+n_term_type: "PYD"
+c_term_type: "PYD"
+additional_1_type: "Glucosepane"
+contact_distance: 25
+fibril_length: 67
+force_field: "martini3"
+glucosepane_martini_timestep: 10

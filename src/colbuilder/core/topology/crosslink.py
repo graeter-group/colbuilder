@@ -30,7 +30,19 @@ class Crosslink:
     - MOLD crosslinks between the LZS and LZD marker residues
     """
 
-    def __init__(self, cnt_model: Optional[int] = None) -> None:
+    # Glucosepane terms that cross the LGX/AGS marker boundary, per Martini 3 parameter set
+    # (glucosepane_martini_timestep).  All other glucosepane interactions are defined inside the
+    # marker templates (data/topology/martini300C-glucosepane/glucosepane_<N>fs.ff).
+    GLUCOSEPANE_CROSS_TERMS = {
+        # 20 fs: model with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3)
+        20: dict(s1_r1=('0.295', '63395.824'), b1_s1_r1=('141.879', '127.334'),
+                 s1_r1_r2=('89.976', '48.526'), s1_r1_r4=('132.752', '89.996')),
+        # 10 fs: model without virtual sites (all ten beads carry mass)
+        10: dict(s1_r1=('0.297', '57650.518'), b1_s1_r1=('138.898', '112.282'),
+                 s1_r1_r2=('106.601', '52.839'), s1_r1_r4=('152.855', '150')),
+    }
+
+    def __init__(self, cnt_model: Optional[int] = None, glucosepane_timestep: int = 20) -> None:
         """
         Initialize the Crosslink object with model parameters.
 
@@ -39,6 +51,9 @@ class Crosslink:
         cnt_model : Optional[int]
             Model counter used for file naming. If provided, the merged PDB
             file will be named '{cnt_model}.merge.pdb'
+        glucosepane_timestep : int
+            Glucosepane Martini 3 parameter set: 20 (two virtual sites, default) or
+            10 (no virtual sites); must match the installed glucosepane.ff.
         """
         self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
@@ -89,14 +104,16 @@ class Crosslink:
         self.al3yx_2: str = '140'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 S3
         self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
 
-        # Glucosepane terms that cross the LGX/AGS marker boundary.  All other
-        # glucosepane interactions are defined inside the marker templates
-        # (aminoacids.ff, model G21: R2 and R5 are virtual sites).
-        self.dgcp_s1_r1: str = '0.295'
-        self.kgcp_s1_r1: str = '63395.824'
-        self.agcp_b1_s1_r1: Tuple[str, str] = ('141.879', '127.334')
-        self.agcp_s1_r1_r2: Tuple[str, str] = ('89.976', '48.526')
-        self.agcp_s1_r1_r4: Tuple[str, str] = ('132.752', '89.996')
+        # Glucosepane terms that cross the LGX/AGS marker boundary (selected parameter set).
+        if int(glucosepane_timestep) not in self.GLUCOSEPANE_CROSS_TERMS:
+            raise ValueError(f"glucosepane_timestep must be 10 or 20, got {glucosepane_timestep}")
+        self.glucosepane_timestep: int = int(glucosepane_timestep)
+        gcp = self.GLUCOSEPANE_CROSS_TERMS[self.glucosepane_timestep]
+        self.dgcp_s1_r1: str = gcp['s1_r1'][0]
+        self.kgcp_s1_r1: str = gcp['s1_r1'][1]
+        self.agcp_b1_s1_r1: Tuple[str, str] = gcp['b1_s1_r1']
+        self.agcp_s1_r1_r2: Tuple[str, str] = gcp['s1_r1_r2']
+        self.agcp_s1_r1_r4: Tuple[str, str] = gcp['s1_r1_r4']
 
         # MOLD terms crossing the LZS/LZD marker boundary.  The renamed
         # standalone aliases are R2=LZS:SC3 and S2=LZD:SC1.
@@ -509,7 +526,7 @@ class Crosslink:
                     ags_r4 = self._same_residue_bead(cly, 'SC4')
                     if not all((lgx_bb, ags_r2, ags_r4)):
                         LOG.error(
-                            "Cannot complete glucosepane G21 terms: expected "
+                            "Cannot complete glucosepane cross-marker terms: expected "
                             "LGX:BB and AGS:SC4/SC6 in the paired marker residues."
                         )
                         continue

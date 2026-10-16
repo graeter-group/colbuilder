@@ -1,0 +1,86 @@
+; Glucosepane (LGX/AGS) Martini 3 model without virtual sites, for a 10 fs time step.
+; Selected with glucosepane_martini_timestep: 10. Parameters copied from gcp_martini3_free_molecule.itp of the
+; model fitted with fast_forward on 25-100 ns of three all-atom simulations of glucosepane in water
+; (CHARMM36/CGenFF); bonds not capped; R2 and R5 carry their default mass. Bead types as in the 20 fs model.
+; ColBuilder copies the selected file into the installed martini300C force field as glucosepane.ff; the
+; S1--R1 bond and the three angles across the LGX/AGS boundary are in core/topology/crosslink.py.
+
+;;;; GLUCOSEPANE 10 fs (no virtual sites) - LYSINE-DERIVED MARKER LGX
+;
+; B1 is represented by the peptide BB bead.  R1 is the inter-marker bead
+; shared by LGX:CE and AGS:NZ; it is instantiated once as AGS:SC5, so the
+; S1--R1 bond and the three angles crossing the marker boundary are added
+; after connected collagen molecules have been merged.
+
+[ moleculetype ]
+; molname       nrexcl
+LGX                1
+
+[ atoms ]
+; id  type  resnr  resid  atom  cgnr  charge  [mass]
+  1   SP2      1    LGX    BB     1     0.0
+  2    SC2      1    LGX   SC1     2     0.0
+
+[ bonds ]
+#meta {"group": "Glucosepane 10 fs"}
+   BB   SC1    1       0.318     4627.11   ; B1-S1
+
+
+;;;; GLUCOSEPANE 10 fs (no virtual sites) - ARGININE-DERIVED MARKER AGS
+;
+; ColBuilder aliases: BB=B2, SC1=S2, SC2=R6, SC3=R5, SC4=R4,
+; SC5=R1(shared/hosted here), SC6=R2, SC7=R3. All beads carry mass.
+
+[ moleculetype ]
+; molname       nrexcl
+AGS                1
+
+[ atoms ]
+; id  type   resnr  resid  atom  cgnr  charge  [mass]
+  1   SP2       1    AGS    BB     1     0.0
+  2   SC2       1    AGS   SC1     2     0.0
+  3  SN4a       1    AGS   SC2     3     0.0    54.0
+  4  TN5a       1    AGS   SC3     4     0.0    36.0
+  5   TC4       1    AGS   SC4     5     0.0    36.0
+  6  TN3a       1    AGS   SC5     6     0.0    36.0
+  7   SP1       1    AGS   SC6     7     0.0    54.0
+  8   SP1       1    AGS   SC7     8     0.0    54.0
+
+[ bonds ]
+#meta {"group": "Glucosepane 10 fs"}
+  SC7   SC6    1       0.295   51254.912   ; R3-R2
+  SC7   SC5    1       0.392   16413.517   ; R3-R1
+  SC7   SC4    1       0.272   30539.482   ; R3-R4
+  SC6   SC5    1       0.293   22501.437   ; R2-R1
+  SC6   SC4    1       0.329   47266.236   ; R2-R4
+  SC5   SC4    1       0.262   62742.407   ; R1-R4
+  SC4   SC3    1       0.209  138061.663   ; R4-R5
+  SC4   SC2    1       0.275   95116.733   ; R4-R6
+  SC3   SC2    1       0.212  176826.574   ; R5-R6
+  SC2   SC1    1        0.31   11051.691   ; R6-S2
+  SC1    BB    1       0.321    6352.262   ; S2-B2
+
+[ angles ]
+#meta {"group": "Glucosepane 10 fs"}
+  SC7   SC4   SC3    1      85.605      48.812   ; R3-R4-R5
+  SC7   SC4   SC2    1     133.645       92.67   ; R3-R4-R6
+  SC3   SC4   SC2    1      48.541      86.399   ; R5-R4-R6
+  SC4   SC2   SC1    1     128.618      79.489   ; R4-R6-S2
+  SC3   SC2   SC1    1      98.449      49.596   ; R5-R6-S2
+  SC2   SC1    BB    1      131.14      85.558   ; R6-S2-B2
+
+[ dihedrals ]
+#meta {"group": "Glucosepane 10 fs"}
+; harmonic improper dihedrals
+  SC7   SC6   SC4   SC3    2      52.884     223.293   ; R3-R2-R4-R5
+  SC7   SC4   SC2   SC3    2      -7.162     178.214   ; R3-R4-R6-R5
+  SC5   SC6   SC4   SC7    2    -119.691     342.344   ; R1-R2-R4-R3
+
+[ exclusions ]
+; Complete non-bonded exclusion clique over the six ring beads only.
+ SC7  SC6  SC5  SC4  SC3  SC2
+ SC6  SC5  SC4  SC3  SC2
+ SC5  SC4  SC3  SC2
+ SC4  SC3  SC2
+ SC3  SC2
+

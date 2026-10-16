@@ -257,6 +257,7 @@ These parameters control the generation of topology files for molecular dynamics
 | `force_field` | string, null | null | Force field for topology generation |
 | `topology_debug` | boolean | false | Save intermediate topology files for debugging |
 | `go_epsilon` | float | 9.414 | Go-model epsilon value for Martini3 coarse-grained parametrization |
+| `glucosepane_martini_timestep` | integer | 20 | Martini3 glucosepane (`LGX`/`AGS`) parameter set: `20` = two virtual sites (20 fs time step), `10` = no virtual sites (10 fs time step). Ignored for amber99 |
 
 **Available Force Field Options**:
 - **amber99**: Standard Amber99 force field for atomistic simulations
@@ -266,7 +267,7 @@ These parameters control the generation of topology files for molecular dynamics
 - The `force_field` parameter selects which force field to use for generating topology files; it is required whenever `topology_generator: true`.
 - The amber99 force field is recommended for most atomistic simulations of collagen.
 - Custom force field parameters for collagen and crosslinks are included in ColBuilder.
-- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`, G21-fib R2M) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
+- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`; parameter set chosen with `glucosepane_martini_timestep`: 20 fs with two virtual sites, default, or 10 fs without virtual sites) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
 - Set `topology_debug: true` to keep intermediate files for troubleshooting topology generation issues.
 - **Topology-only mode**: When both `sequence_generator` and `geometry_generator` are false, topology generation can process existing fibril PDB files directly.
 

@@ -433,4 +433,14 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
             "Ensure force field directory exists and has proper permissions",
         ],
     ),
+    "TOP_MART_007": ErrorInfo(
+        code="TOP_MART_007",
+        message="Glucosepane topology does not match the requested parameter set",
+        suggestions=[
+            "Do not run two Martini 3 topology generations with different glucosepane_martini_timestep "
+            "values at the same time in the same environment",
+            "Check that martinize2 comes from the environment where ColBuilder installs its force field",
+            "Re-run the topology generation",
+        ],
+    ),
 }

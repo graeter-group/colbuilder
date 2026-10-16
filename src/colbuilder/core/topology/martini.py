@@ -14,6 +14,7 @@ The module requires the Martinize2 tool and custom contact map utilities.
 """
 
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -498,6 +499,7 @@ class Martini:
         topology_file: str = "system.top",
         size: Optional[int] = None,
         processed_ids: Optional[List[int]] = None,
+        glucosepane_timestep: Optional[int] = None,
     ) -> None:
         """
         Write final topology file for the system.
@@ -512,6 +514,10 @@ class Martini:
             col_{id} indices that actually produced an .itp. When given, only these
             are #included, preventing GROMACS errors from missing files when some
             models failed or were skipped.
+        glucosepane_timestep : Optional[int]
+            Glucosepane Martini 3 parameter set used (20 or 10 fs). If given and an included
+            col_{id}.itp contains glucosepane (AGS), a comment with the set and the time step it
+            is meant for is written at the top of the file.
         """
         if processed_ids is not None:
             ids_for_includes = sorted({int(m) for m in processed_ids})
@@ -524,6 +530,16 @@ class Martini:
         try:
             with open(topology_file, "w") as f:
                 f.write("; This is the topology for the collagen microfibril\n")
+                if glucosepane_timestep is not None and any(
+                    Path(f"col_{int(m)}.itp").exists()
+                    and re.search(r"^\s*\d+\s+\S+\s+\d+\s+AGS\s", Path(f"col_{int(m)}.itp").read_text(), re.MULTILINE)
+                    for m in ids_for_includes
+                ):
+                    kind = "two virtual sites" if int(glucosepane_timestep) == 20 else "no virtual sites"
+                    f.write(
+                        f"; Glucosepane (LGX/AGS): Martini 3 parameter set for a {int(glucosepane_timestep)} fs "
+                        f"time step ({kind}), glucosepane_martini_timestep: {int(glucosepane_timestep)}\n"
+                    )
                 f.write("#define GO_VIRT\n")
                 f.write('#include "martini_v3.0.0.itp"\n')
                 f.write('#include "go-sites.itp"\n\n')
@@ -650,6 +666,36 @@ def _build_connected_groups(system: System) -> List[List[Any]]:
         processed.update(group)
 
     return groups
+
+
+def check_glucosepane_parameter_set(itp_ids: List[int], glucosepane_timestep: int) -> None:
+    """Raise if the AGS beads of the written col_{id}.itp do not belong to the requested glucosepane set."""
+    want_virtual = int(glucosepane_timestep) == 20
+    for m in itp_ids or []:
+        path = Path(f"col_{int(m)}.itp")
+        if not path.exists():
+            continue
+        section = None
+        for line in path.read_text().splitlines():
+            s = line.split(";")[0].strip()
+            if s.startswith("["):
+                section = s.strip("[] ")
+                continue
+            p = s.split()
+            if section != "atoms" or len(p) < 5 or p[3] != "AGS" or p[4] not in ("SC3", "SC6"):
+                continue
+            mass = float(p[7]) if len(p) > 7 else None
+            is_virtual = mass == 0.0
+            if is_virtual != want_virtual:
+                raise TopologyGenerationError(
+                    message=(
+                        f"{path}: AGS {p[4]} has mass {mass}, which does not belong to the requested "
+                        f"glucosepane_martini_timestep {int(glucosepane_timestep)} set; the installed martini300C "
+                        "force field may have been changed by another run in the same environment"
+                    ),
+                    error_code="TOP_MART_007",
+                    context={"itp": str(path), "glucosepane_martini_timestep": int(glucosepane_timestep)},
+                )
 
 
 def check_output_files(topology_dir: Path, expected_models: int):
@@ -948,7 +994,11 @@ async def build_martini3(
                 if merged_pdb:
                     model_status[model_id] = "merged"
                     try:
-                        itp_ = Itp(system=system, model_id=int(model_id))
+                        itp_ = Itp(
+                            system=system,
+                            model_id=int(model_id),
+                            glucosepane_timestep=config.glucosepane_martini_timestep,
+                        )
                         itp_.read_model(model_id=int(model_id))
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
@@ -1026,12 +1076,19 @@ async def build_martini3(
                 context={"output": config.species},
             )
 
+        # The glucosepane blocks come from the martini300C force field installed in vermouth; check that
+        # the written topologies carry the requested set (R2 = AGS:SC6 and R5 = AGS:SC3 are massless
+        # virtual sites in the 20 fs set and massive beads in the 10 fs set), e.g. against an install
+        # changed by another run in the same environment.
+        check_glucosepane_parameter_set(written_itp_ids, config.glucosepane_martini_timestep)
+
         try:
             final_topology_file = f"collagen_fibril_{config.species}.top"
             martini.write_system_topology(
                 topology_file=final_topology_file,
                 size=cnt_model,
                 processed_ids=written_itp_ids,
+                glucosepane_timestep=config.glucosepane_martini_timestep,
             )
 
             topology_file_path = Path(final_topology_file)

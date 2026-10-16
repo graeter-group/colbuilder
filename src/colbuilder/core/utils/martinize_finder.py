@@ -100,7 +100,12 @@ def get_active_conda_env() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def find_and_install_custom_force_field(source_dir: Union[str, Path]) -> bool:
+GLUCOSEPANE_VARIANT_DIR = "martini300C-glucosepane"
+
+
+def find_and_install_custom_force_field(
+    source_dir: Union[str, Path], glucosepane_timestep: int = 20
+) -> bool:
     """
     Find vermouth's directories and install custom force fields and mappings.
 
@@ -108,6 +113,11 @@ def find_and_install_custom_force_field(source_dir: Union[str, Path]) -> bool:
     ----------
     source_dir : Union[str, Path]
         Path to directory containing force field files and directories to copy
+    glucosepane_timestep : int
+        Glucosepane (LGX/AGS) Martini 3 parameter set to install: 20 (two virtual
+        sites, default) or 10 (no virtual sites). The selected file
+        martini300C-glucosepane/glucosepane_<N>fs.ff is copied into the installed
+        martini300C force field as glucosepane.ff.
 
     Returns
     -------
@@ -154,12 +164,22 @@ def find_and_install_custom_force_field(source_dir: Union[str, Path]) -> bool:
         # Copy martini300C force field directory
         martini_source = source_dir / "martini300C-ff"
         martini_dest = force_fields_dir / "martini300C"
+        # Check the selected glucosepane parameter file before touching the installed force field
+        gcp_source = source_dir / GLUCOSEPANE_VARIANT_DIR / f"glucosepane_{int(glucosepane_timestep)}fs.ff"
+        if not gcp_source.is_file():
+            LOG.error(f"Glucosepane Martini 3 parameter file not found: {gcp_source}")
+            return False
         if martini_source.exists() and martini_source.is_dir():
             if martini_dest.exists():
                 shutil.rmtree(martini_dest)
             shutil.copytree(martini_source, martini_dest)
             LOG.debug(
                 f"Copied martini300C force field from {martini_source} to {martini_dest}"
+            )
+            shutil.copy2(gcp_source, martini_dest / "glucosepane.ff")
+            LOG.info(
+                f"Glucosepane (LGX/AGS) Martini 3 parameters: {int(glucosepane_timestep)} fs set "
+                f"({'two virtual sites' if int(glucosepane_timestep) == 20 else 'no virtual sites'})"
             )
         else:
             LOG.warning(

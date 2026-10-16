@@ -262,7 +262,15 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 LOG.subsection(f'Building topology based on the {force_field} force field')
                 
                 from colbuilder.core.utils.martinize_finder import find_and_install_custom_force_field
-                find_and_install_custom_force_field(config.FORCE_FIELD_DIR)
+                if not find_and_install_custom_force_field(
+                    config.FORCE_FIELD_DIR,
+                    glucosepane_timestep=config.glucosepane_martini_timestep,
+                ):
+                    raise TopologyGenerationError(
+                        message="Could not install the custom Martini 3 force field (see the log above)",
+                        error_code="TOP_ERR_001",
+                        context={"force_field_dir": str(config.FORCE_FIELD_DIR)},
+                    )
                 
                 await build_martini3(system=system, config=config, file_manager=file_manager)
             else:

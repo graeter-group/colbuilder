@@ -1,6 +1,6 @@
 ; Glucosepane lysine-derived marker (LGX), embedded in a peptide chain.
 ;
-; G21 correspondence:
+; Bead correspondence (glucosepane model):
 ;   BB  = B1 (peptide backbone mapping, not the capped free-molecule headgroup)
 ;   SC1 = S1
 ;
