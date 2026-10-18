@@ -41,6 +41,193 @@ from colbuilder.core.utils.files import FileManager
 
 LOG = setup_logger(__name__)
 
+# martinize2 -bonds-fudge used for every model (see _martinize_cmd in build_martini3).
+MARTINIZE2_BONDS_FUDGE = 1.4
+# vermouth (MakeBonds) guesses an inter-residue bond only below 0.5 * (r_vdW(C) + r_vdW(N)) * fudge,
+# with the Bondi radii C 1.70 A and N 1.55 A, i.e. 2.275 A at fudge 1.4. Used for logging only.
+VERMOUTH_CN_GUESS_LIMIT = 0.5 * (1.70 + 1.55) * MARTINIZE2_BONDS_FUDGE
+# Consecutive residues of a chain whose peptide C-N is longer than this are not connected
+# explicitly (a real gap, not a strained bond); the chain checks below then stop the build.
+MAX_PEPTIDE_CN_ANGSTROM = 4.0
+# Crosslink residues whose backbone must stay connected to its chain neighbours.
+CROSSLINK_RESNAMES = frozenset({"LY2", "LY3", "L4Y", "L5Y", "LYX", "AGS", "LGX", "LZS", "LZD"})
+
+
+def _pdb_residue_runs(lines: List[str]) -> List[Tuple[str, List[Tuple[str, str, str]]]]:
+    """Return the chains of PDB lines in file order as (chain, [(resname, resid, icode), ...]).
+
+    A new chain starts at every TER record and wherever the chain identifier changes.
+    """
+    runs: List[Tuple[str, List[Tuple[str, str, str]]]] = []
+    cur_chain: Optional[str] = None
+    cur: List[Tuple[str, str, str]] = []
+    last_key = None
+    for line in lines:
+        if line.startswith("TER"):
+            if cur:
+                runs.append((cur_chain, cur))
+            cur, cur_chain, last_key = [], None, None
+            continue
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        chain = line[21:22]
+        key = (line[17:20].strip(), line[22:26].strip(), line[26:27].strip())
+        if chain != cur_chain:
+            if cur:
+                runs.append((cur_chain, cur))
+            cur, cur_chain, last_key = [], chain, None
+        if key != last_key:
+            cur.append(key)
+            last_key = key
+    if cur:
+        runs.append((cur_chain, cur))
+    return runs
+
+
+def _cg_backbone_beads(cg_pdb: Union[str, Path]) -> List[Optional[Tuple[int, str, str, int]]]:
+    """BB beads of a CG PDB in atom order as (atom_index, resname, chain, resid); None marks a TER record.
+
+    atom_index is the 1-based running index of the ATOM/HETATM record, which equals the
+    atom number of the corresponding (merged) itp.
+    """
+    beads: List[Optional[Tuple[int, str, str, int]]] = []
+    idx = 0
+    with open(cg_pdb) as fh:
+        for line in fh:
+            if line.startswith(("ATOM  ", "HETATM")):
+                idx += 1
+                if line[12:16].strip() == "BB":
+                    beads.append((idx, line[17:20].strip(), line[21:22], int(line[22:26])))
+            elif line.startswith("TER") and beads and beads[-1] is not None:
+                beads.append(None)
+    return beads
+
+
+def _bead_chain_runs(beads: List[Optional[Tuple[int, str, str, int]]]) -> List[List[Tuple[int, str, str, int]]]:
+    """Split BB beads into chains: a chain ends at a TER record or where the chain identifier changes."""
+    runs: List[List[Tuple[int, str, str, int]]] = []
+    cur: List[Tuple[int, str, str, int]] = []
+    for bead in beads:
+        if bead is None or (cur and bead[2] != cur[-1][2]):
+            if cur:
+                runs.append(cur)
+            cur = []
+        if bead is not None:
+            cur.append(bead)
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def check_cg_residue_order(aa_pdb: List[str], cg_pdb: Union[str, Path], label: str) -> None:
+    """Raise if martinize2 did not keep the residues of the input PDB, chain by chain and in order.
+
+    create_goVirt.py maps the contacts of the all-atom map (residues numbered in input order) onto
+    the CG backbone beads by position, and backbone_repair only joins consecutive residues, so any
+    reordering or splitting of a chain by martinize2 silently corrupts the Go model and the backbone.
+    """
+    aa_runs = [(chain, [res[0] for res in residues]) for chain, residues in _pdb_residue_runs(aa_pdb)]
+    cg_runs = [(run[0][2], [bead[1] for bead in run]) for run in _bead_chain_runs(_cg_backbone_beads(cg_pdb))]
+    if aa_runs == cg_runs:
+        return
+    problems = []
+    if [c for c, _ in aa_runs] != [c for c, _ in cg_runs]:
+        problems.append(
+            f"chains in input {[f'{c}:{len(r)}' for c, r in aa_runs]} but in martinize2 output "
+            f"{[f'{c}:{len(r)}' for c, r in cg_runs]} (chain:residues)"
+        )
+    for (ca, ra), (cc, rc) in zip(aa_runs, cg_runs):
+        if (ca, ra) != (cc, rc):
+            first = next((i for i, (x, y) in enumerate(zip(ra, rc)) if x != y), min(len(ra), len(rc)))
+            problems.append(
+                f"chain {ca}: {len(ra)} residues in input, chain {cc}: {len(rc)} BB beads in output, "
+                f"first difference at position {first + 1} (input {ra[first:first + 3]}, output {rc[first:first + 3]})"
+            )
+            break
+    raise TopologyGenerationError(
+        message=(
+            f"{label}: martinize2 changed the residue order or chain composition of the input "
+            f"({'; '.join(problems)}). The Go contacts and backbone of this model would be wrong."
+        ),
+        error_code="TOP_MART_008",
+        context={"model": label, "cg_pdb": str(cg_pdb)},
+    )
+
+
+def check_go_contacts_per_chain(go_table: Union[str, Path], cg_pdb: Union[str, Path], moltype: str) -> Dict[str, int]:
+    """Count the Go contacts touching each chain of one martinize2 model; raise if a chain has none.
+
+    The Go virtual site ``{moltype}_{k}`` belongs to the k-th BB bead of the CG structure.
+    """
+    runs = _bead_chain_runs(_cg_backbone_beads(cg_pdb))
+    chain_of_k: Dict[int, int] = {}
+    k = 0
+    for ci, run in enumerate(runs):
+        for _ in run:
+            k += 1
+            chain_of_k[k] = ci
+    counts = [0] * len(runs)
+    prefix = f"{moltype}_"
+    with open(go_table) as fh:
+        for line in fh:
+            tokens = line.split()
+            if len(tokens) < 2 or not tokens[0].startswith(prefix) or not tokens[1].startswith(prefix):
+                continue
+            for name in tokens[:2]:
+                suffix = name[len(prefix):]
+                ci = chain_of_k.get(int(suffix)) if suffix.isdigit() else None
+                if ci is not None:
+                    counts[ci] += 1
+    labels = [f"{run[0][2]}{ci + 1}" for ci, run in enumerate(runs)]
+    empty = [label for label, n in zip(labels, counts) if n == 0]
+    if empty:
+        raise TopologyGenerationError(
+            message=(
+                f"{moltype}: no Go contacts for chain(s) {empty} (contacts per chain: "
+                f"{dict(zip(labels, counts))}). The contact map and the CG backbone do not match."
+            ),
+            error_code="TOP_MART_008",
+            context={"moltype": moltype, "go_table": str(go_table)},
+        )
+    return dict(zip(labels, counts))
+
+
+def check_backbone_continuity(itp_path: Union[str, Path], merge_pdb: Union[str, Path]) -> None:
+    """Raise if a chain of a written col_N.itp is not one continuous BB-BB bonded backbone.
+
+    Every pair of consecutive BB beads of a chain (TER records and chain identifiers of the merged
+    CG PDB delimit the chains) must be joined by a bond or a constraint.
+    """
+    connected = set()
+    section = None
+    with open(itp_path) as fh:
+        for line in fh:
+            s = line.split(";")[0].strip()
+            if not s or s.startswith("#"):
+                continue
+            if s.startswith("["):
+                section = s.strip("[] ")
+                continue
+            if section in ("bonds", "constraints"):
+                tokens = s.split()
+                if len(tokens) >= 2 and tokens[0].isdigit() and tokens[1].isdigit():
+                    connected.add(frozenset((int(tokens[0]), int(tokens[1]))))
+    missing = []
+    for run in _bead_chain_runs(_cg_backbone_beads(merge_pdb)):
+        for a, b in zip(run, run[1:]):
+            if frozenset((a[0], b[0])) not in connected:
+                tag = " (crosslink residue)" if a[1] in CROSSLINK_RESNAMES or b[1] in CROSSLINK_RESNAMES else ""
+                missing.append(f"chain {a[2]} {a[1]}{a[3]}-{b[1]}{b[3]} (BB {a[0]}-{b[0]}){tag}")
+    if missing:
+        raise TopologyGenerationError(
+            message=(
+                f"{Path(itp_path).name}: {len(missing)} chain(s) not continuous, missing backbone bond(s): "
+                f"{'; '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}"
+            ),
+            error_code="TOP_MART_008",
+            context={"itp": str(itp_path), "merge_pdb": str(merge_pdb)},
+        )
+
 
 class Martini:
     """
@@ -287,6 +474,81 @@ class Martini:
         except Exception as e:
             LOG.error(f"Error in set_pdb: {str(e)}")
             return [], []
+
+    def backbone_conect(self, pdb: Optional[List[str]] = None) -> Tuple[List[str], List[str]]:
+        """
+        CONECT records for the peptide bonds of the input, so that martinize2 does not guess them.
+
+        martinize2 (vermouth MakeBonds) bonds residues by distance only. At crosslink sites the
+        all-atom peptide C-N can be stretched beyond its limit (2.3 A at -bonds-fudge 1.4; the
+        N-terminal PYD LY3-SER bond of chain C measures 3.1 A): the chain is then cut in two
+        fragments, and vermouth orders the fragments by their lowest residue, so a fragment
+        attached by a steric contact to an earlier chain comes first and the N-terminal piece
+        is written after the end of its chain. Listing every peptide bond as CONECT keeps each
+        chain one fragment in input order; bonds that vermouth finds anyway are unchanged.
+
+        Only residues adjacent in the file, in the same chain (no TER in between) and with
+        consecutive residue numbers are connected, and only up to MAX_PEPTIDE_CN_ANGSTROM.
+
+        Parameters
+        ----------
+        pdb : Optional[List[str]]
+            PDB lines of the model with their original residue numbers (set_pdb only renumbers
+            residues, so the atom serials are those of the martinize2 input).
+
+        Returns
+        -------
+        Tuple[List[str], List[str]]
+            CONECT lines and a description of every bond longer than vermouth's guess limit.
+        """
+        if not pdb:
+            return [], []
+        residues: List[Dict[str, Any]] = []
+        cur = None
+        for line in pdb:
+            if line.startswith("TER"):
+                cur = None
+                residues.append(None)
+                continue
+            if not line.startswith(("ATOM  ", "HETATM")):
+                continue
+            key = (line[21:22], line[22:27])
+            if cur is None or cur["key"] != key:
+                cur = {"key": key, "resname": line[17:20].strip(), "atoms": {}}
+                residues.append(cur)
+            try:
+                cur["atoms"][line[12:16].strip()] = (
+                    int(line[6:11]),
+                    (float(line[30:38]), float(line[38:46]), float(line[46:54])),
+                )
+            except ValueError:
+                cur["atoms"][line[12:16].strip()] = None
+
+        conect, strained = [], []
+        for prev, nxt in zip(residues, residues[1:]):
+            if prev is None or nxt is None or prev["key"][0] != nxt["key"][0]:
+                continue
+            try:
+                consecutive = int(nxt["key"][1][:4]) == int(prev["key"][1][:4]) + 1
+            except ValueError:
+                consecutive = False
+            if not consecutive or prev["key"][1][4:].strip() or nxt["key"][1][4:].strip():
+                continue
+            c_atom, n_atom = prev["atoms"].get("C"), nxt["atoms"].get("N")
+            if not c_atom or not n_atom:
+                continue
+            dist = sum((a - b) ** 2 for a, b in zip(c_atom[1], n_atom[1])) ** 0.5
+            label = (
+                f"chain {prev['key'][0]} {prev['resname']} {prev['key'][1].strip()}-"
+                f"{nxt['resname']} {nxt['key'][1].strip()} (C-N {dist:.2f} A)"
+            )
+            if dist > MAX_PEPTIDE_CN_ANGSTROM:
+                LOG.warning(f"Peptide C-N of {label} is longer than {MAX_PEPTIDE_CN_ANGSTROM} A; not connected")
+                continue
+            conect.append(f"CONECT{c_atom[0]:5d}{n_atom[0]:5d}\n")
+            if dist > VERMOUTH_CN_GUESS_LIMIT:
+                strained.append(label)
+        return conect, strained
 
     def cap_pdb(self, pdb: Optional[List[str]] = None) -> Tuple[List[str], str, str]:
         """
@@ -900,14 +1162,20 @@ async def build_martini3(
                         pdb = martini.translate_pdb(pdb=pdb)
                         pdb_capped, cter, nter = martini.cap_pdb(pdb=pdb)
                         order, map_pdb = martini.set_pdb(pdb=pdb_capped)
+                        conect, strained = martini.backbone_conect(pdb=pdb_capped)
+                        if strained:
+                            LOG.info(
+                                f"Model {model_id} -> connection {connect_id}: peptide bond(s) longer than "
+                                f"martinize2's distance guess passed explicitly: {'; '.join(strained)}"
+                            )
 
-                        martini.write_pdb(pdb=order, file="tmp.pdb")
+                        martini.write_pdb(pdb=order + conect, file="tmp.pdb")
                         martini.write_pdb(pdb=map_pdb, file="map.pdb")
 
                         def _martinize_cmd(nter_flag: str, cter_flag: str) -> str:
                             args = (
                                 f"-f tmp.pdb -sep -merge A,B,C "
-                                f"-collagen -from amber99 -o topol.top -bonds-fudge 1.4 -p backbone "
+                                f"-collagen -from amber99 -o topol.top -bonds-fudge {MARTINIZE2_BONDS_FUDGE} -p backbone "
                                 f"-ff {martini.ff}00C -x {int(model_id)}.{int(connect_id)}.CG.pdb "
                                 f"-nter {nter_flag} -cter {cter_flag} "
                                 f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
@@ -957,6 +1225,7 @@ async def build_martini3(
                             LOG.error(f"CG file not created: {cg_file}")
                         else:
                             LOG.debug(f"CG file created successfully: {cg_file}")
+                            check_cg_residue_order(order, cg_file, f"col_{int(model_id)}.{int(connect_id)}")
 
                         contact_cmd = f"./contact_map ../map.pdb > ../map.out"
                         contact_process = await asyncio.create_subprocess_shell(
@@ -985,7 +1254,14 @@ async def build_martini3(
                             LOG.error(f"GO virtual sites creation failed for model {model_id} -> connection {connect_id}")
                             failed_go.append((model_id, connect_id))
                             continue
+                        check_go_contacts_per_chain(
+                            f"col_{int(model_id)}.{int(connect_id)}_go-table.itp",
+                            cg_file,
+                            f"col_{int(model_id)}.{int(connect_id)}",
+                        )
 
+                    except TopologyGenerationError:
+                        raise
                     except Exception as e:
                         LOG.error(f"Error processing model {model_id} -> connection {connect_id}: {str(e)}")
                         continue
@@ -1018,6 +1294,10 @@ async def build_martini3(
                             LOG.warning(
                                 f"Backbone-bond repair failed for col_{int(cnt_model)}.itp: {e}"
                             )
+                        check_backbone_continuity(
+                            itp_path=f"col_{int(cnt_model)}.itp",
+                            merge_pdb=f"{int(cnt_model)}.merge.pdb",
+                        )
 
                         processed_models.append(model_id)
                         written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists
@@ -1026,6 +1306,8 @@ async def build_martini3(
                         for connect_id in connect_ids:
                             processed_in_topology.add(connect_id)
 
+                    except TopologyGenerationError:
+                        raise
                     except Exception as e:
                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
                         failed_itp.append(model_id)
@@ -1035,6 +1317,8 @@ async def build_martini3(
 
                 cnt_model += 1
 
+            except TopologyGenerationError:
+                raise
             except Exception as e:
                 LOG.error(f"Error processing model {model_id}: {str(e)}")
                 model_status[model_id] = f"error: {str(e)}"

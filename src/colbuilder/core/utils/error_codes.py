@@ -443,4 +443,14 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
             "Re-run the topology generation",
         ],
     ),
+    "TOP_MART_008": ErrorInfo(
+        code="TOP_MART_008",
+        message="Martini chain integrity check failed",
+        suggestions=[
+            "A chain was split or reordered by martinize2, has no Go contacts, or misses a backbone bond",
+            "Keep the intermediate files (topology_debug: true) and inspect the per-model tmp.pdb, "
+            "<model>.<connection>.CG.pdb and col_<model>.<connection>.itp named in the message",
+            "Check the all-atom geometry of the residues named in the message (stretched peptide bonds, clashes)",
+        ],
+    ),
 }
