@@ -571,6 +571,21 @@ The Glucosepane and MOLD topologies are checked when they are built (complete
 inter-marker terms, and for glucosepane the requested parameter set); this does
 not establish equilibrated MD stability or parameter transferability to every system.
 
+Since 18/10/2026, martinize2 builds the connectivity of each model from the amber99 residue
+templates (`-bonds-from name`) plus explicit CONECT records for every peptide bond, including
+the ACE and NME caps. It no longer guesses bonds from distances, which created fake bonds at
+close contacts and silently removed force-field angles. Compared with earlier topologies,
+atoms, coordinates and the Go model are unchanged; the force-field `-BB BB SC1` angle is now
+present on every HYP and PRO (previously missing on about 44% of HYP and 10% of PRO) and on
+the N-terminal PYD `LY2`, and `SC1 BB +BB` on the helical `LYX` (C103). Atom names that differ
+from the amber99 templates (ILE `CD1`, ACE/NME `1HH3`-`3HH3`) are renamed in the martinize2
+input only. ColBuilder stops with an error (`TOP_MART_009`) if an input atom does not match its
+template (unknown or duplicate atom name, residue split in the file), if two adjacent residues of
+a chain cannot be joined by a peptide CONECT (numbering gap or insertion code, missing C/N atom,
+C-N > 4 A), or if a martinize2 topology lacks one of these angles; with
+`TOP_MART_008` if a backbone bond still had to be repaired after martinize2; and with
+`TOP_MART_002` if any model failed, instead of writing an incomplete fibril topology.
+
 The upstream `main` update changes the Martini PYD equilibrium angles:
 `al2yx_1/2/3` are now 60/100/100 degrees and `al3yx_2` is 140 degrees.
 These PYD changes are separate from the local Glucosepane (20 fs and 10 fs sets)

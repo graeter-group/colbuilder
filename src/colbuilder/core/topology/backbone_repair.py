@@ -1,16 +1,20 @@
 """
-Repair backbone bonds that martinize2 omits at strained crosslink geometry.
+Repair backbone bonds missing from the martinize2 output (safety net).
 
-Why this is needed
-------------------
-martinize2 infers backbone connectivity from *distance*: it writes a
-BB(i)-BB(i+1) bond only when the all-atom peptide C-N distance is
-below its detection threshold (~1.9 A with ``-bonds-fudge 1.4``). 
-At a trivalent crosslink the three triple helices are pulled close together 
-and the backbone is locally stretched, so the peptide bond feeding the crosslink 
-residue's neighbour can measure > 1.9 A (we observe 2.2-2.4 A). 
-martinize2 then silently drops that BB-BB bond and the coarse-grained chain fragments 
-into disconnected pieces.
+Why this is kept
+----------------
+martinize2 used to infer the peptide bonds by *distance*, and dropped the
+BB(i)-BB(i+1) bond wherever crosslink strain stretched the all-atom C-N
+beyond its threshold (2.2-3.1 A observed), fragmenting the coarse-grained
+chain. ColBuilder now runs martinize2 with ``-bonds-from name`` and passes
+every peptide bond as an explicit CONECT record
+(``Martini.backbone_conect`` in ``martini.py``), so there is no distance
+threshold any more and this repair must add nothing: backbone_conect already
+stops the build when a consecutive pair cannot be connected (no C or N atom,
+or C-N > 4 A). A repaired joint would restore the bond and the backbone
+angles/dihedrals across the joint, not the backbone-side chain angles that
+martinize2 would have written, so build_martini3 stops with TOP_MART_008
+when this repair adds anything.
 
 Fix
 ---

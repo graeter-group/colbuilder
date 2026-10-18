@@ -348,6 +348,27 @@ The complete file is [`docs/examples/glucosepane_martini_timestep.yaml`](docs/ex
 - ColBuilder checks that the written topologies carry the requested set and stops
   with an error (`TOP_MART_007`) if they do not.
 
+### Martini 3 connectivity
+
+martinize2 builds the connectivity of each model from the amber99 residue templates
+(`-bonds-from name`) plus explicit CONECT records for every peptide bond, including the
+ACE and NME caps; it no longer guesses bonds from distances, which created fake bonds at
+close contacts and silently removed force-field angles (since 18/10/2026).
+
+- Compared with earlier topologies, atoms, coordinates and the Go model are unchanged.
+- The force-field `-BB BB SC1` angle is now present on every HYP and PRO (previously
+  missing on about 44% of HYP and 10% of PRO) and on the N-terminal PYD `LY2`, and
+  `SC1 BB +BB` on the helical `LYX` (C103).
+- Atom names that differ from the amber99 templates (ILE `CD1`, ACE/NME `1HH3`-`3HH3`)
+  are renamed in the martinize2 input only.
+- ColBuilder stops with an error (`TOP_MART_009`) if an input atom does not match its
+  template (unknown or duplicate atom name, residue split in the file), if two adjacent
+  residues of a chain cannot be joined by a peptide CONECT (numbering gap or insertion
+  code, missing C/N atom, C-N > 4 A), or if a martinize2 topology lacks one of
+  these angles; with `TOP_MART_008` if a backbone bond still had to be repaired after
+  martinize2; and with `TOP_MART_002` if any model failed instead of writing an incomplete
+  fibril topology.
+
 For the **complete reference** of every configuration option (mixing,
 replacement, AGE/mutated-PDB workflow, custom species, all defaults and
 validation rules), see the [Configuration Reference](docs/configuration.md).
