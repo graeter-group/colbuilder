@@ -179,7 +179,7 @@ def find_and_install_custom_force_field(
             shutil.copy2(gcp_source, martini_dest / "glucosepane.ff")
             LOG.info(
                 f"Glucosepane (LGX/AGS) Martini 3 parameters: {int(glucosepane_timestep)} fs set "
-                f"({'two virtual sites' if int(glucosepane_timestep) == 20 else 'no virtual sites'})"
+                f"({'model A_b2, two virtual sites' if int(glucosepane_timestep) == 20 else 'no virtual sites'})"
             )
         else:
             LOG.warning(

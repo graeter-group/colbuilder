@@ -535,7 +535,7 @@ class Martini:
                     and re.search(r"^\s*\d+\s+\S+\s+\d+\s+AGS\s", Path(f"col_{int(m)}.itp").read_text(), re.MULTILINE)
                     for m in ids_for_includes
                 ):
-                    kind = "two virtual sites" if int(glucosepane_timestep) == 20 else "no virtual sites"
+                    kind = "model A_b2, two virtual sites" if int(glucosepane_timestep) == 20 else "no virtual sites"
                     f.write(
                         f"; Glucosepane (LGX/AGS): Martini 3 parameter set for a {int(glucosepane_timestep)} fs "
                         f"time step ({kind}), glucosepane_martini_timestep: {int(glucosepane_timestep)}\n"

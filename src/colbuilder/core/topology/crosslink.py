@@ -33,10 +33,15 @@ class Crosslink:
     # Glucosepane terms that cross the LGX/AGS marker boundary, per Martini 3 parameter set
     # (glucosepane_martini_timestep).  All other glucosepane interactions are defined inside the
     # marker templates (data/topology/martini300C-glucosepane/glucosepane_<N>fs.ff).
+    # s1_r1_r4 = None: the set has no S1--R1--R4 angle.
     GLUCOSEPANE_CROSS_TERMS = {
-        # 20 fs: model with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3)
-        20: dict(s1_r1=('0.295', '63395.824'), b1_s1_r1=('141.879', '127.334'),
-                 s1_r1_r2=('89.976', '48.526'), s1_r1_r4=('132.752', '89.996')),
+        # 20 fs: model A_b2 with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3), fitted on the
+        # all-atom collagen fibril (GCP_A_2VS_fib_b2.itp, 17/10/2026); no S1--R1--R4 angle.
+        20: dict(s1_r1=('0.2609', '7335.8'), b1_s1_r1=('129.113', '201.92'),
+                 s1_r1_r2=('122.006', '44.43'), s1_r1_r4=None),
+        # G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+        # 20: dict(s1_r1=('0.295', '63395.824'), b1_s1_r1=('141.879', '127.334'),
+        #          s1_r1_r2=('89.976', '48.526'), s1_r1_r4=('132.752', '89.996')),
         # 10 fs: model without virtual sites (all ten beads carry mass)
         10: dict(s1_r1=('0.297', '57650.518'), b1_s1_r1=('138.898', '112.282'),
                  s1_r1_r2=('106.601', '52.839'), s1_r1_r4=('152.855', '150')),
@@ -113,7 +118,7 @@ class Crosslink:
         self.kgcp_s1_r1: str = gcp['s1_r1'][1]
         self.agcp_b1_s1_r1: Tuple[str, str] = gcp['b1_s1_r1']
         self.agcp_s1_r1_r2: Tuple[str, str] = gcp['s1_r1_r2']
-        self.agcp_s1_r1_r4: Tuple[str, str] = gcp['s1_r1_r4']
+        self.agcp_s1_r1_r4: Optional[Tuple[str, str]] = gcp['s1_r1_r4']
 
         # MOLD terms crossing the LZS/LZD marker boundary.  The renamed
         # standalone aliases are R2=LZS:SC3 and S2=LZD:SC1.
@@ -517,14 +522,17 @@ class Crosslink:
                     LOG.info(f" Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
                 # Glucosepane: S1 (LGX:SC1) -- R1 (AGS:SC5), plus the
-                # three angles that cross the marker boundary (B1--S1--R1,
-                # S1--R1--R2 with R2 = AGS:SC6, S1--R1--R4).
+                # angles that cross the marker boundary (B1--S1--R1,
+                # S1--R1--R2 with R2 = AGS:SC6 and, in the 10 fs set only,
+                # S1--R1--R4).
                 elif (clx[1] == 'LGX' and clx[2] == 'SC1' and
                       cly[1] == 'AGS' and cly[2] == 'SC5'):
                     lgx_bb = self._same_residue_bead(clx, 'BB')
                     ags_r2 = self._same_residue_bead(cly, 'SC6')
                     ags_r4 = self._same_residue_bead(cly, 'SC4')
-                    if not all((lgx_bb, ags_r2, ags_r4)):
+                    if not all((lgx_bb, ags_r2)) or (
+                        self.agcp_s1_r1_r4 is not None and not ags_r4
+                    ):
                         LOG.error(
                             "Cannot complete glucosepane cross-marker terms: expected "
                             "LGX:BB and AGS:SC4/SC6 in the paired marker residues."
@@ -540,9 +548,12 @@ class Crosslink:
                          self.agcp_b1_s1_r1[0], f"{self.agcp_b1_s1_r1[1]}\n"],
                         [clx[0], cly[0], ags_r2, '1',
                          self.agcp_s1_r1_r2[0], f"{self.agcp_s1_r1_r2[1]}\n"],
-                        [clx[0], cly[0], ags_r4, '1',
-                         self.agcp_s1_r1_r4[0], f"{self.agcp_s1_r1_r4[1]}\n"],
                     ])
+                    if self.agcp_s1_r1_r4 is not None:
+                        self.crosslink_bonded['angles'].append(
+                            [clx[0], cly[0], ags_r4, '1',
+                             self.agcp_s1_r1_r4[0], f"{self.agcp_s1_r1_r4[1]}\n"]
+                        )
                     connections_found += 1
                     LOG.info(
                         f" Added LGX-AGS glucosepane topology between {clx[0]} "
@@ -665,9 +676,9 @@ class Crosslink:
                 if bond[3:5] == [self.dgcp_s1_r1, f"{self.kgcp_s1_r1}\n"]
             )
             expected_angles = {
-                (*self.agcp_b1_s1_r1,),
-                (*self.agcp_s1_r1_r2,),
-                (*self.agcp_s1_r1_r4,),
+                (*angle,) for angle in (
+                    self.agcp_b1_s1_r1, self.agcp_s1_r1_r2, self.agcp_s1_r1_r4
+                ) if angle is not None
             }
             glucosepane_angle_count = sum(
                 1 for angle in self.crosslink_bonded['angles']
@@ -675,12 +686,13 @@ class Crosslink:
             )
             if (
                 glucosepane_bond_count != glucosepane_pair_count
-                or glucosepane_angle_count != 3 * glucosepane_pair_count
+                or glucosepane_angle_count
+                != len(expected_angles) * glucosepane_pair_count
             ):
                 raise IncompleteCrosslinkError(
                     "Incomplete glucosepane bonded topology: expected "
                     f"{glucosepane_pair_count} inter-marker bond(s) and "
-                    f"{3 * glucosepane_pair_count} angle(s), generated "
+                    f"{len(expected_angles) * glucosepane_pair_count} angle(s), generated "
                     f"{glucosepane_bond_count} bond(s) and "
                     f"{glucosepane_angle_count} angle(s)."
                 )

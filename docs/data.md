@@ -135,7 +135,7 @@ Martini 3.0 coarse-grained force field files:
 
 Martini 3 parameters of the glucosepane marker residues `LGX`/`AGS`, one file per time step:
 
-- `glucosepane_20fs.ff`: model with two virtual sites (default, `glucosepane_martini_timestep: 20`)
+- `glucosepane_20fs.ff`: model A_b2 with two virtual sites, fitted on the all-atom collagen fibril (default, `glucosepane_martini_timestep: 20`; the previous G21 model is kept as comments)
 - `glucosepane_10fs.ff`: model without virtual sites (`glucosepane_martini_timestep: 10`)
 
 The selected file is installed as `glucosepane.ff` in the martini300C force field; it is kept

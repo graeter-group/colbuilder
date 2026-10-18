@@ -1,14 +1,18 @@
-; Glucosepane (LGX/AGS) Martini 3 model with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3), for a 20 fs
-; time step. Selected with glucosepane_martini_timestep: 20 (default). Same parameters as
-; gcp_martini3_free_molecule.itp in AGE-crosslinks-Martini3 (Martini3_new/glucosepane/timestep_20fs_with_virtual_sites).
+; Glucosepane (LGX/AGS) Martini 3 model A_b2 with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3), for a 20 fs
+; time step. Selected with glucosepane_martini_timestep: 20 (default). Same parameters as GCP_A_2VS_fib_b2.itp
+; (CG_2VS_fibril_refit_20261017, 17/10/2026): fitted on the all-atom collagen fibril (pyd+10gcp_o equilibrium,
+; 50-100 ns, 10 glucosepane copies); harmonic bonds, angles and improper.
 ; ColBuilder copies the selected file into the installed martini300C force field as glucosepane.ff; the
-; S1--R1 bond and the three angles across the LGX/AGS boundary are in core/topology/crosslink.py.
+; S1--R1 bond and the two angles across the LGX/AGS boundary (B1--S1--R1, S1--R1--R2) are in
+; core/topology/crosslink.py.
+; The previous 20 fs model (G21, = gcp_martini3_free_molecule.itp in AGE-crosslinks-Martini3,
+; Martini3_new/glucosepane/timestep_20fs_with_virtual_sites) is kept below as ';' comments.
 
-;;;; GLUCOSEPANE G21 - LYSINE-DERIVED MARKER LGX
+;;;; GLUCOSEPANE A_b2 - LYSINE-DERIVED MARKER LGX
 ;
 ; B1 is represented by the peptide BB bead.  R1 is the inter-marker bead
 ; shared by LGX:CE and AGS:NZ; it is instantiated once as AGS:SC5, so the
-; S1--R1 bond and the three angles crossing the marker boundary are added
+; S1--R1 bond and the two angles crossing the marker boundary are added
 ; after connected collagen molecules have been merged.
 
 [ moleculetype ]
@@ -21,19 +25,22 @@ LGX                1
   2   SC2      1    LGX   SC1     2     0.0
 
 [ bonds ]
-#meta {"group": "Glucosepane G21"}
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+; #meta {"group": "Glucosepane G21"}
+; ; B1--S1
+;  BB   SC1    1    0.334    32117.450
+#meta {"group": "Glucosepane A_b2"}
 ; B1--S1
- BB   SC1    1    0.334    32117.450
+ BB   SC1    1    0.3138    4858.3
 
 
-;;;; GLUCOSEPANE G21 - ARGININE-DERIVED MARKER AGS
+;;;; GLUCOSEPANE A_b2 - ARGININE-DERIVED MARKER AGS
 ;
 ; ColBuilder aliases: BB=B2, SC1=S2, SC2=R6, SC3=R5(VS), SC4=R4,
 ; SC5=R1(shared/hosted here), SC6=R2(VS), SC7=R3.
 ;
-; Same parameters as gcp_martini3_free_molecule.itp (AGE-crosslinks-Martini3,
-; Martini3_new/glucosepane/timestep_20fs_with_virtual_sites); in the fibril B1 and B2
-; are the SP2 backbone beads.
+; Same parameters as GCP_A_2VS_fib_b2.itp; in the fibril B1 and B2 are the
+; SP2 backbone beads.
 
 [ moleculetype ]
 ; molname       nrexcl
@@ -41,58 +48,95 @@ AGS                1
 
 [ atoms ]
 ; id  type   resnr  resid  atom  cgnr  charge  [mass]
-  1   SP2       1    AGS    BB     1     0.0
-  2   SC2       1    AGS   SC1     2     0.0
-  3  SN4a       1    AGS   SC2     3     0.0    66.0
-  4  TN5a       1    AGS   SC3     4     0.0     0.0
-  5   TC4       1    AGS   SC4     5     0.0    66.0
-  6  TN3a       1    AGS   SC5     6     0.0    54.0
-  7   SP1       1    AGS   SC6     7     0.0     0.0
-  8   SP1       1    AGS   SC7     8     0.0    84.0
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+;  1   SP2       1    AGS    BB     1     0.0
+;  2   SC2       1    AGS   SC1     2     0.0
+;  3  SN4a       1    AGS   SC2     3     0.0    66.0
+;  4  TN5a       1    AGS   SC3     4     0.0     0.0
+;  5   TC4       1    AGS   SC4     5     0.0    66.0
+;  6  TN3a       1    AGS   SC5     6     0.0    54.0
+;  7   SP1       1    AGS   SC6     7     0.0     0.0
+;  8   SP1       1    AGS   SC7     8     0.0    84.0
+  1   SP2       1    AGS    BB     1     0.0          ; B2
+  2   SC2       1    AGS   SC1     2     0.0          ; S2
+  3  SN4a       1    AGS   SC2     3     0.0    66.0  ; R6
+  4  TN5a       1    AGS   SC3     4     0.0     0.0  ; R5 (virtual site)
+  5   TC4       1    AGS   SC4     5     0.0    66.0  ; R4
+  6  TN3a       1    AGS   SC5     6     0.0    66.0  ; R1
+  7   SP1       1    AGS   SC6     7     0.0     0.0  ; R2 (virtual site)
+  8   SP1       1    AGS   SC7     8     0.0    72.0  ; R3
 
 [ bonds ]
-#meta {"group": "Glucosepane G21"}
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+; #meta {"group": "Glucosepane G21"}
+; ; R3--R1, R3--R4, R1--R4
+;  SC7  SC5    1    0.449    37630.586
+;  SC7  SC4    1    0.288    40198.794
+;  SC5  SC4    1    0.260    74860.116
+; ; R4--R5(VS), R4--R6, R6--S2, S2--B2
+;  SC4  SC3    1    0.207    89200.467
+;  SC4  SC2    1    0.285    80862.992
+;  SC2  SC1    1    0.277    18706.505
+;  SC1   BB    1    0.340    27157.212
+#meta {"group": "Glucosepane A_b2"}
 ; R3--R1, R3--R4, R1--R4
- SC7  SC5    1    0.449    37630.586
- SC7  SC4    1    0.288    40198.794
- SC5  SC4    1    0.260    74860.116
-; R4--R5(VS), R4--R6, R6--S2, S2--B2
- SC4  SC3    1    0.207    89200.467
- SC4  SC2    1    0.285    80862.992
- SC2  SC1    1    0.277    18706.505
- SC1   BB    1    0.340    27157.212
+ SC7  SC5    1    0.4718   20991.8
+ SC7  SC4    1    0.3350   50407.9
+ SC5  SC4    1    0.2686   27725.5
+; R4--R6, R6--S2, S2--B2
+ SC4  SC2    1    0.2777   66160.2
+ SC2  SC1    1    0.3417   56660.3
+ SC1   BB    1    0.3204   25591.4
 
 [ angles ]
-#meta {"group": "Glucosepane G21"}
-; R3--R4--R5, R5--R4--R6
- SC7  SC4  SC3    1     88.343     48.566
- SC3  SC4  SC2    1     40.836    113.489
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+; #meta {"group": "Glucosepane G21"}
+; ; R3--R4--R5, R5--R4--R6
+;  SC7  SC4  SC3    1     88.343     48.566
+;  SC3  SC4  SC2    1     40.836    113.489
+; ; R4--R6--S2, R5--R6--S2, R6--S2--B2
+;  SC4  SC2  SC1    1    144.855    146.439
+;  SC3  SC2  SC1    1    146.274    150.000
+;  SC2  SC1   BB    1    136.332    101.782
+#meta {"group": "Glucosepane A_b2"}
+; R3--R4--R6, R1--R4--R6
+ SC7  SC4  SC2    1     94.188    256.67
+ SC5  SC4  SC2    1    111.936    141.84
 ; R4--R6--S2, R5--R6--S2, R6--S2--B2
- SC4  SC2  SC1    1    144.855    146.439
- SC3  SC2  SC1    1    146.274    150.000
- SC2  SC1   BB    1    136.332    101.782
+ SC4  SC2  SC1    1    135.443    276.46
+ SC3  SC2  SC1    1     90.135    247.80
+ SC2  SC1   BB    1    148.985    329.18
 
 [ dihedrals ]
-#meta {"group": "Glucosepane G21"}
-; Improper R3--R2--R4--R5: independent relative-orientation restraint.
- SC7  SC6  SC4  SC3    2      4.927     93.272
-; The following two source impropers are VS-internal.  GROMACS identifies
-; them as constant interactions during preprocessing, as in standalone G21.
- SC7  SC4  SC2  SC3    2    -17.991    174.824
- SC5  SC6  SC4  SC7    2   -130.061    368.960
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+; #meta {"group": "Glucosepane G21"}
+; ; Improper R3--R2--R4--R5: independent relative-orientation restraint.
+;  SC7  SC6  SC4  SC3    2      4.927     93.272
+; ; The following two source impropers are VS-internal.  GROMACS identifies
+; ; them as constant interactions during preprocessing, as in standalone G21.
+;  SC7  SC4  SC2  SC3    2    -17.991    174.824
+;  SC5  SC6  SC4  SC7    2   -130.061    368.960
+#meta {"group": "Glucosepane A_b2"}
+; Harmonic improper R1--R3--R4--R6
+ SC5  SC7  SC4  SC2    2   -113.763    102.57
 
 [ virtual_sites3 ]
+; G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
+; ; R2 = R3 + a(R1-R3) + b(R4-R3) + c[(R1-R3)x(R4-R3)]
+;  SC6  SC7  SC5  SC4    4    0.549709702   -0.382160600   -2.592763950
+; ; R5 = R4 + a(R6-R4) + b(R3-R4) + c[(R6-R4)x(R3-R4)]
+;  SC3  SC4  SC2  SC7    4    0.888026168    0.555273913   -0.641254922
 ; R2 = R3 + a(R1-R3) + b(R4-R3) + c[(R1-R3)x(R4-R3)]
- SC6  SC7  SC5  SC4    4    0.549709702   -0.382160600   -2.592763950
-; R5 = R4 + a(R6-R4) + b(R3-R4) + c[(R6-R4)x(R3-R4)]
- SC3  SC4  SC2  SC7    4    0.888026168    0.555273913   -0.641254922
+ SC6  SC7  SC5  SC4    4    0.783624   -0.595103    1.823465
+; R5 = R1 + a(R4-R1) + b(R6-R1) + c[(R4-R1)x(R6-R1)]
+ SC3  SC5  SC4  SC2    4    1.123965    0.365040   -1.183238
 
 [ exclusions ]
-; Complete non-bonded exclusion clique over the six ring beads only.
+; Complete non-bonded exclusion clique over the six ring beads only
+; (R3 R2 R1 R4 R5 R6; the same in A_b2 and G21).
  SC7  SC6  SC5  SC4  SC3  SC2
  SC6  SC5  SC4  SC3  SC2
  SC5  SC4  SC3  SC2
  SC4  SC3  SC2
  SC3  SC2
-
 

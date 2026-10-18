@@ -308,7 +308,7 @@ meant for:
 
 | `glucosepane_martini_timestep` | Glucosepane model | Simulation time step |
 |---|---|---|
-| `20` (default) | two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`) | 20 fs |
+| `20` (default) | model A_b2: two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`), fitted on the all-atom collagen fibril | 20 fs |
 | `10` | no virtual sites; all ten beads carry mass | 10 fs |
 
 ```yaml
@@ -342,8 +342,9 @@ The complete file is [`docs/examples/glucosepane_martini_timestep.yaml`](docs/ex
 - The force field is installed into the vermouth package of the environment, so
   do not run two Martini 3 topology generations with different sets at the same
   time in the same environment.
-- Without the option, the 20 fs set is used and the topology files are identical to
-  those generated before this option existed, apart from the comment line in the `.top`.
+- Without the option, the 20 fs set is used. Since 17/10/2026 the 20 fs set is model
+  A_b2; the previous 20 fs model (G21) is kept, commented out, in `glucosepane_20fs.ff`
+  and `core/topology/crosslink.py`.
 - ColBuilder checks that the written topologies carry the requested set and stops
   with an error (`TOP_MART_007`) if they do not.
 

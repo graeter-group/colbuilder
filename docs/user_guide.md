@@ -408,12 +408,16 @@ are available, named after the time step they are meant for; the YAML option
 
 | `glucosepane_martini_timestep` | Model | Parameter file |
 |---|---|---|
-| `20` (default) | two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`) | `data/topology/martini300C-glucosepane/glucosepane_20fs.ff` |
+| `20` (default) | model A_b2: two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`) | `data/topology/martini300C-glucosepane/glucosepane_20fs.ff` |
 | `10` | no virtual sites; all ten beads carry mass | `data/topology/martini300C-glucosepane/glucosepane_10fs.ff` |
 
-The parameters are those of `gcp_martini3_free_molecule.itp` in AGE-crosslinks-Martini3
-(`Martini3_new/glucosepane/timestep_20fs_with_virtual_sites` and the 10 fs model); in the
-fibril, B1 and B2 are the SP2 backbone beads of `LGX` and `AGS`. The selected file is
+The 20 fs set is model A_b2 (`GCP_A_2VS_fib_b2.itp`, 17/10/2026), fitted on the all-atom
+collagen fibril (10 glucosepanes, equilibrium 50-100 ns); across the LGX/AGS boundary it has
+the S1--R1 bond and the B1--S1--R1 and S1--R1--R2 angles (no S1--R1--R4 angle). The previous
+20 fs model (G21) is kept, commented out, in `glucosepane_20fs.ff` and
+`core/topology/crosslink.py`. The 10 fs set is `gcp_martini3_free_molecule.itp` of the 10 fs
+model in AGE-crosslinks-Martini3. In the fibril, B1 and B2 are the SP2 backbone beads of
+`LGX` and `AGS`. The selected file is
 installed as `glucosepane.ff` in the martini300C force field, and the bonded terms across
 the LGX/AGS boundary in `core/topology/crosslink.py` follow the same choice. When the
 fibril contains glucosepane, the second line of the `.top` file is a comment naming the set
