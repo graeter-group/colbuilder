@@ -34,7 +34,8 @@ colbuilder --config_file config_full_pipeline_martini3.yaml
 
 ## Notes
 
-- Martini3 crosslink parametrization currently only covers PYD and HLKNL; other crosslink
-  types (DPD, PYL, DPL, and the non-enzymatic AGE types) aren't yet parametrized for
-  Martini3 and won't produce correct coarse-grained bonded terms — use `force_field:
-  "amber99"` for those.
+- In this local fork, Martini3 crosslink parameters cover PYD, HLKNL and the AGE
+  crosslinks Glucosepane (`LGX`/`AGS`) and MOLD (`LZS`/`LZD`). DPD, PYL, DPL and
+  Pentosidine are not parametrized for Martini3 and won't produce correct coarse-grained
+  bonded terms — use `force_field: "amber99"` for those. See the
+  [local model status and validation limits](../../user_guide.md#using-different-force-fields).
