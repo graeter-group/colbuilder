@@ -32,16 +32,12 @@ class Itp:
         "virtual_sitesn",
     )
 
-    def __init__(
-        self, system: Any = None, model_id: Optional[int] = None, glucosepane_timestep: int = 20
-    ) -> None:
+    def __init__(self, system: Any = None, model_id: Optional[int] = None) -> None:
         """Initialize a new topology processor instance.
 
         Args:
             system: The molecular system containing component and connectivity information
             model_id: Unique identifier for the molecular model being processed
-            glucosepane_timestep: Glucosepane Martini 3 parameter set (20 or 10 fs) for the
-                terms across the LGX/AGS boundary
 
         The initialization creates empty data structures for:
         - Component-wise storage (atoms, bonds, angles, etc.)
@@ -49,9 +45,6 @@ class Itp:
         - Crosslinking information and virtual site mappings
         """
         self.system = system
-        if int(glucosepane_timestep) not in (10, 20):
-            raise ValueError(f"glucosepane_timestep must be 10 or 20, got {glucosepane_timestep}")
-        self.glucosepane_timestep = int(glucosepane_timestep)
 
         # Component-wise storage arrays
         self.molecule: List[List[Any]] = self.allocate(model_id=model_id)
@@ -650,7 +643,7 @@ class Itp:
 
         # Always try to detect crosslinks - they can exist regardless of connection count
         try:
-            crosslinker = Crosslink(cnt_model=cnt_model, glucosepane_timestep=self.glucosepane_timestep)
+            crosslinker = Crosslink(cnt_model=cnt_model)
             self.crosslink_bonded = crosslinker.set_crosslink_bonded(cnt_model=cnt_model)
             
             if any(self.crosslink_bonded[k] for k in ['bonds', 'angles', 'dihedrals']):

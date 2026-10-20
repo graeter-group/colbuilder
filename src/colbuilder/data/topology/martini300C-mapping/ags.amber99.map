@@ -1,13 +1,13 @@
 ; Glucosepane arginine-derived marker (AGS), embedded in a peptide chain.
 ;
 ; Bead correspondence (glucosepane model):
-;   BB  = B2, SC1 = S2, SC2 = R6, SC3 = R5 (virtual site in the 20 fs set),
+;   BB  = B2, SC1 = S2, SC2 = R6, SC3 = R5 (virtual site),
 ;   SC4 = R4, SC5 = R1 (shared LGX/AGS bead, hosted once on AGS),
-;   SC6 = R2 (virtual site in the 20 fs set), SC7 = R3; all beads carry mass in the 10 fs set.
+;   SC6 = R2 (virtual site), SC7 = R3.
 ;
 ; The initial SC5 coordinate is supplied by AGS:NZ.  As in ColBuilder's PYD
 ; strategy, this marker-local placement is only the starting geometry; the
-; complete G21 bonded network controls the subsequent relaxation.
+; complete glucosepane bonded network controls the subsequent relaxation.
 
 [ molecule ]
 AGS

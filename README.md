@@ -234,10 +234,8 @@ These form spontaneously rather than through enzyme activity, and can be used as
 - **Pentosidine** - Divalent, LYS-ARG derived; well-characterized AGE crosslink
 
 **Note**: This local fork includes Martini3 models for PYD, HLKNL, Glucosepane
-(`LGX`/`AGS`, two parameter sets: see
-[Glucosepane Martini 3 parameters: 20 fs or 10 fs](#glucosepane-martini-3-parameters-20-fs-or-10-fs))
-and MOLD (`LZS`/`LZD`). Other types, including Pentosidine, require
-`force_field: "amber99"`. See the
+(`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`). Other types, including
+Pentosidine, require `force_field: "amber99"`. See the
 [local model status and validation limits](docs/user_guide.md#using-different-force-fields).
 
 ### Crosslink Combinations
@@ -298,55 +296,6 @@ fibril_length: 60.0       # nm, length of the microfibril
 
 force_field: "martini3"   # or "amber99"
 ```
-
-### Glucosepane Martini 3 parameters: 20 fs or 10 fs
-
-When `force_field: "martini3"` and the fibril contains glucosepane, the option
-`glucosepane_martini_timestep` chooses between two Martini 3 parameter sets for
-the glucosepane marker residues `LGX`/`AGS`, named after the time step they are
-meant for:
-
-| `glucosepane_martini_timestep` | Glucosepane model | Simulation time step |
-|---|---|---|
-| `20` (default) | model A_b2: two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`), fitted on the all-atom collagen fibril | 20 fs |
-| `10` | no virtual sites; all ten beads carry mass | 10 fs |
-
-```yaml
-# Fibril + Martini 3 topology from a PDB with PYD and glucosepane crosslinks (example5.1, step 3)
-geometry_generator: true
-topology_generator: true
-species: "rattus_norvegicus"
-pdb_file: "example5/example5.1/rattusnorvegicus_N_PYD_C_PYD+ADD1_Glucosepane.pdb"
-crosslink: true
-n_term_type: "PYD"
-c_term_type: "PYD"
-additional_1_type: "Glucosepane"
-contact_distance: 25
-fibril_length: 67
-force_field: "martini3"
-glucosepane_martini_timestep: 10   # 20 (default): model with virtual sites, for dt = 20 fs
-                                   # 10: model without virtual sites, for dt = 10 fs
-```
-
-The complete file is [`docs/examples/glucosepane_martini_timestep.yaml`](docs/examples/glucosepane_martini_timestep.yaml)
-(run it from `docs/examples/`: `colbuilder --config_file glucosepane_martini_timestep.yaml`).
-
-- The option only selects the parameters; the time step is set by `dt` in your
-  `.mdp`. The 10 fs set is not stable at 20 fs, and the time step suitable for
-  the whole fibril (collagen, Go model, other crosslinks, pulling) may be smaller.
-- The parameters are in `src/colbuilder/data/topology/martini300C-glucosepane/`
-  (`glucosepane_20fs.ff`, `glucosepane_10fs.ff`); the selected file is installed
-  as `glucosepane.ff` in the martini300C force field, and the bonded terms across
-  the `LGX`/`AGS` boundary follow the same choice.
-- The second line of the generated `.top` names the set that was used.
-- The force field is installed into the vermouth package of the environment, so
-  do not run two Martini 3 topology generations with different sets at the same
-  time in the same environment.
-- Without the option, the 20 fs set is used. Since 17/10/2026 the 20 fs set is model
-  A_b2; the previous 20 fs model (G21) is kept, commented out, in `glucosepane_20fs.ff`
-  and `core/topology/crosslink.py`.
-- ColBuilder checks that the written topologies carry the requested set and stops
-  with an error (`TOP_MART_007`) if they do not.
 
 ### Martini 3 connectivity
 

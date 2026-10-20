@@ -4,7 +4,7 @@
 ;   BB  = B1 (peptide backbone mapping, not the capped free-molecule headgroup)
 ;   SC1 = S1
 ;
-; The shared G21 bead R1 is instantiated once on AGS as SC5.  LGX CE and its
+; The shared glucosepane bead R1 is instantiated once on AGS as SC5.  LGX CE and its
 ; hydrogens belong chemically to that inter-marker bead, but Vermouth maps one
 ; residue at a time.  They are therefore retained here with zero coordinate
 ; weight, following the same marker-splitting strategy used for PYD.

@@ -30,24 +30,7 @@ class Crosslink:
     - MOLD crosslinks between the LZS and LZD marker residues
     """
 
-    # Glucosepane terms that cross the LGX/AGS marker boundary, per Martini 3 parameter set
-    # (glucosepane_martini_timestep).  All other glucosepane interactions are defined inside the
-    # marker templates (data/topology/martini300C-glucosepane/glucosepane_<N>fs.ff).
-    # s1_r1_r4 = None: the set has no S1--R1--R4 angle.
-    GLUCOSEPANE_CROSS_TERMS = {
-        # 20 fs: model A_b2 with two virtual sites (R2 = AGS:SC6, R5 = AGS:SC3), fitted on the
-        # all-atom collagen fibril (GCP_A_2VS_fib_b2.itp, 17/10/2026); no S1--R1--R4 angle.
-        20: dict(s1_r1=('0.2609', '7335.8'), b1_s1_r1=('129.113', '201.92'),
-                 s1_r1_r2=('122.006', '44.43'), s1_r1_r4=None),
-        # G21 20 fs model, commented out 17/10/2026 (replaced by A_b2)
-        # 20: dict(s1_r1=('0.295', '63395.824'), b1_s1_r1=('141.879', '127.334'),
-        #          s1_r1_r2=('89.976', '48.526'), s1_r1_r4=('132.752', '89.996')),
-        # 10 fs: model without virtual sites (all ten beads carry mass)
-        10: dict(s1_r1=('0.297', '57650.518'), b1_s1_r1=('138.898', '112.282'),
-                 s1_r1_r2=('106.601', '52.839'), s1_r1_r4=('152.855', '150')),
-    }
-
-    def __init__(self, cnt_model: Optional[int] = None, glucosepane_timestep: int = 20) -> None:
+    def __init__(self, cnt_model: Optional[int] = None) -> None:
         """
         Initialize the Crosslink object with model parameters.
 
@@ -56,9 +39,6 @@ class Crosslink:
         cnt_model : Optional[int]
             Model counter used for file naming. If provided, the merged PDB
             file will be named '{cnt_model}.merge.pdb'
-        glucosepane_timestep : int
-            Glucosepane Martini 3 parameter set: 20 (two virtual sites, default) or
-            10 (no virtual sites); must match the installed glucosepane.ff.
         """
         self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
@@ -109,16 +89,14 @@ class Crosslink:
         self.al3yx_2: str = '140'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 S3
         self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
 
-        # Glucosepane terms that cross the LGX/AGS marker boundary (selected parameter set).
-        if int(glucosepane_timestep) not in self.GLUCOSEPANE_CROSS_TERMS:
-            raise ValueError(f"glucosepane_timestep must be 10 or 20, got {glucosepane_timestep}")
-        self.glucosepane_timestep: int = int(glucosepane_timestep)
-        gcp = self.GLUCOSEPANE_CROSS_TERMS[self.glucosepane_timestep]
-        self.dgcp_s1_r1: str = gcp['s1_r1'][0]
-        self.kgcp_s1_r1: str = gcp['s1_r1'][1]
-        self.agcp_b1_s1_r1: Tuple[str, str] = gcp['b1_s1_r1']
-        self.agcp_s1_r1_r2: Tuple[str, str] = gcp['s1_r1_r2']
-        self.agcp_s1_r1_r4: Optional[Tuple[str, str]] = gcp['s1_r1_r4']
+        # Glucosepane terms that cross the LGX/AGS marker boundary.  All other
+        # glucosepane interactions are defined inside the marker templates
+        # (martini300C-ff/aminoacids.ff: two virtual sites, R2 = AGS:SC6 and
+        # R5 = AGS:SC3).
+        self.dgcp_s1_r1: str = '0.2609'
+        self.kgcp_s1_r1: str = '7335.8'
+        self.agcp_b1_s1_r1: Tuple[str, str] = ('129.113', '201.92')
+        self.agcp_s1_r1_r2: Tuple[str, str] = ('122.006', '44.43')
 
         # MOLD terms crossing the LZS/LZD marker boundary.  The renamed
         # standalone aliases are R2=LZS:SC3 and S2=LZD:SC1.
@@ -521,21 +499,17 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f" Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
-                # Glucosepane: S1 (LGX:SC1) -- R1 (AGS:SC5), plus the
-                # angles that cross the marker boundary (B1--S1--R1,
-                # S1--R1--R2 with R2 = AGS:SC6 and, in the 10 fs set only,
-                # S1--R1--R4).
+                # Glucosepane: S1 (LGX:SC1) -- R1 (AGS:SC5), plus the two
+                # angles that cross the marker boundary (B1--S1--R1 and
+                # S1--R1--R2 with R2 = AGS:SC6).
                 elif (clx[1] == 'LGX' and clx[2] == 'SC1' and
                       cly[1] == 'AGS' and cly[2] == 'SC5'):
                     lgx_bb = self._same_residue_bead(clx, 'BB')
                     ags_r2 = self._same_residue_bead(cly, 'SC6')
-                    ags_r4 = self._same_residue_bead(cly, 'SC4')
-                    if not all((lgx_bb, ags_r2)) or (
-                        self.agcp_s1_r1_r4 is not None and not ags_r4
-                    ):
+                    if not all((lgx_bb, ags_r2)):
                         LOG.error(
                             "Cannot complete glucosepane cross-marker terms: expected "
-                            "LGX:BB and AGS:SC4/SC6 in the paired marker residues."
+                            "LGX:BB and AGS:SC6 in the paired marker residues."
                         )
                         continue
 
@@ -549,11 +523,6 @@ class Crosslink:
                         [clx[0], cly[0], ags_r2, '1',
                          self.agcp_s1_r1_r2[0], f"{self.agcp_s1_r1_r2[1]}\n"],
                     ])
-                    if self.agcp_s1_r1_r4 is not None:
-                        self.crosslink_bonded['angles'].append(
-                            [clx[0], cly[0], ags_r4, '1',
-                             self.agcp_s1_r1_r4[0], f"{self.agcp_s1_r1_r4[1]}\n"]
-                        )
                     connections_found += 1
                     LOG.info(
                         f" Added LGX-AGS glucosepane topology between {clx[0]} "
@@ -676,9 +645,8 @@ class Crosslink:
                 if bond[3:5] == [self.dgcp_s1_r1, f"{self.kgcp_s1_r1}\n"]
             )
             expected_angles = {
-                (*angle,) for angle in (
-                    self.agcp_b1_s1_r1, self.agcp_s1_r1_r2, self.agcp_s1_r1_r4
-                ) if angle is not None
+                (*self.agcp_b1_s1_r1,),
+                (*self.agcp_s1_r1_r2,),
             }
             glucosepane_angle_count = sum(
                 1 for angle in self.crosslink_bonded['angles']

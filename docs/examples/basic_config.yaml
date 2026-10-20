@@ -47,4 +47,3 @@ replace_file: null      # File with crosslinks to be replaced
 
 # Topology Options
 force_field: "amber99"  # Options: "amber99", "martini3"
-# glucosepane_martini_timestep: 20  # martini3 only: glucosepane parameters for 20 fs (two virtual sites) or 10 fs (no virtual sites)

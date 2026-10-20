@@ -299,13 +299,6 @@ class ColbuilderConfig(BaseModel):
         default=9.414,
         description="GO epsilon value for Martini3-CG parametrization (default: 9.414)",
     )
-    glucosepane_martini_timestep: int = Field(
-        default=20,
-        description=(
-            "Martini 3 glucosepane (LGX/AGS) parameter set, named after the time step it is meant for: "
-            "20 = model with two virtual sites (default), 10 = model without virtual sites"
-        ),
-    )
 
     # Path Configuration
     PROJECT_ROOT: Path = Field(
@@ -505,16 +498,6 @@ class ColbuilderConfig(BaseModel):
             raise ValueError("fibril_length must be greater than 0")
         LOG.debug(f"Validating fibril_length: {v}")
         return float(v)
-
-    @field_validator("glucosepane_martini_timestep")
-    def validate_glucosepane_martini_timestep(cls, value: int) -> int:
-        """Only the 20 fs (two virtual sites) and 10 fs (no virtual sites) glucosepane models exist."""
-        if value not in (10, 20):
-            raise ConfigurationError(
-                f"glucosepane_martini_timestep must be 10 or 20 (fs), got {value}",
-                error_code="CFG_ERR_006",
-            )
-        return value
 
     @field_validator("force_field")
     def validate_force_field(cls, value: Optional[str]) -> Optional[str]:
@@ -776,15 +759,6 @@ class ColbuilderConfig(BaseModel):
             raise ConfigurationError(
                 "fibril_length (nm) is required for geometry generation",
                 error_code="CFG_ERR_006",
-            )
-        return self
-
-    @model_validator(mode="after")
-    def warn_glucosepane_timestep_scope(self) -> "ColbuilderConfig":
-        """glucosepane_martini_timestep only affects Martini 3 topologies."""
-        if "glucosepane_martini_timestep" in self.model_fields_set and self.force_field != "martini3":
-            LOG.warning(
-                "glucosepane_martini_timestep is set but force_field is not martini3: the option is ignored"
             )
         return self
 

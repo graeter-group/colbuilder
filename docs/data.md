@@ -54,9 +54,6 @@ data/
     │   ├── general.ff
     │   ├── modifications.ff
     │   └── small_molecule_martini3.ff
-    ├── martini300C-glucosepane/
-    │   ├── glucosepane_10fs.ff
-    │   └── glucosepane_20fs.ff
     └── martini300C-mapping/
         ├── ace.amber99.map
         ├── ags.amber99.map
@@ -125,21 +122,11 @@ working-directory copy the first time a martini3 run needs it:
 
 Martini 3.0 coarse-grained force field files:
 
-- `aminoacids.ff`: Coarse-grained parameters for amino acids
+- `aminoacids.ff`: Coarse-grained parameters for amino acids and the crosslink marker residues (HLKNL, PYD; in this local fork also glucosepane `LGX`/`AGS` and MOLD `LZS`/`LZD`)
 - `general.ff`: General force field parameters
 - `modifications.ff`: Parameters for modified residues including crosslinks
 - `small_molecule_martini3.ff`: Parameters for small molecules
 - `citations.bib`: Bibliography of references for the Martini force field
-
-#### `martini300C-glucosepane/`
-
-Martini 3 parameters of the glucosepane marker residues `LGX`/`AGS`, one file per time step:
-
-- `glucosepane_20fs.ff`: model A_b2 with two virtual sites, fitted on the all-atom collagen fibril (default, `glucosepane_martini_timestep: 20`; the previous G21 model is kept as comments)
-- `glucosepane_10fs.ff`: model without virtual sites (`glucosepane_martini_timestep: 10`)
-
-The selected file is installed as `glucosepane.ff` in the martini300C force field; it is kept
-outside `martini300C-ff/` because vermouth reads every `.ff` file of that directory.
 
 #### `martini300C-mapping/`
 
@@ -147,7 +134,7 @@ Mapping files for converting atomistic to coarse-grained representations:
 
 - Mapping files for standard amino acids (e.g., `ala.amber99.map`, `gly.amber99.map`)
 - Mapping files for HLKNL and PYD (`l4y.amber99.map`, `l5y.amber99.map`, `ly2.amber99.map`, `ly3.amber99.map`, `lyx.amber99.map`).
-- This local fork also includes Glucosepane mappings (`lgx.amber99.map`, `ags.amber99.map`) and MOLD mappings (`lzs.amber99.map`, `lzd.amber99.map`). The MOLD residue parameters are in `martini300C-ff/aminoacids.ff`; the glucosepane ones are in `martini300C-glucosepane/glucosepane_20fs.ff` (two virtual sites) and `glucosepane_10fs.ff` (no virtual sites), selected with `glucosepane_martini_timestep`; inter-marker bonded terms are completed in `core/topology/crosslink.py`. See the [local model status and validation limits](user_guide.md#using-different-force-fields). Pentosidine has no Martini3 mapping here; use `force_field: "amber99"` for that crosslink.
+- This local fork also includes Glucosepane mappings (`lgx.amber99.map`, `ags.amber99.map`) and MOLD mappings (`lzs.amber99.map`, `lzd.amber99.map`). Their residue parameters are in `martini300C-ff/aminoacids.ff`; inter-marker bonded terms are completed in `core/topology/crosslink.py`. See the [local model status and validation limits](user_guide.md#using-different-force-fields). Pentosidine has no Martini3 mapping here; use `force_field: "amber99"` for that crosslink.
 - Mapping files for terminal caps (`ace.amber99.map`, `nme.amber99.map`, `cla.amber99.map`)
 - `modifications.amber99.mapping`: Definition of mapping for all modifications
 
@@ -230,7 +217,7 @@ Advanced users may modify these files to extend ColBuilder's capabilities:
 4. Update `amber99/aminoacids.rtp` with parameters for the new crosslinks
 5. For coarse-grained simulations, also add:
    - Mapping definitions in `martini300C-mapping/` (create files like `newcrosslink.amber99.map`)
-   - Force field parameters in `martini300C-ff/modifications.ff`
+   - Marker residue blocks in `martini300C-ff/aminoacids.ff`, and the bonded terms between marker residues in `core/topology/crosslink.py`
 
 ### Using Different Reference Structures
 

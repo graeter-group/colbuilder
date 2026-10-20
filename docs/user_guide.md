@@ -402,29 +402,13 @@ ColBuilder supports various crosslink types found in collagen:
 - **Pentosidine**: Well-characterized AGE crosslink (non-enzymatic, LYS-ARG derived)
 - **NOCROSS**: No crosslinking
 
-In this local version, two Martini 3 glucosepane models (marker residues `LGX` and `AGS`)
-are available, named after the time step they are meant for; the YAML option
-`glucosepane_martini_timestep` selects one of them:
-
-| `glucosepane_martini_timestep` | Model | Parameter file |
-|---|---|---|
-| `20` (default) | model A_b2: two virtual sites, R2 (`AGS:SC6`) and R5 (`AGS:SC3`) | `data/topology/martini300C-glucosepane/glucosepane_20fs.ff` |
-| `10` | no virtual sites; all ten beads carry mass | `data/topology/martini300C-glucosepane/glucosepane_10fs.ff` |
-
-The 20 fs set is model A_b2 (`GCP_A_2VS_fib_b2.itp`, 17/10/2026), fitted on the all-atom
-collagen fibril (10 glucosepanes, equilibrium 50-100 ns); across the LGX/AGS boundary it has
-the S1--R1 bond and the B1--S1--R1 and S1--R1--R2 angles (no S1--R1--R4 angle). The previous
-20 fs model (G21) is kept, commented out, in `glucosepane_20fs.ff` and
-`core/topology/crosslink.py`. The 10 fs set is `gcp_martini3_free_molecule.itp` of the 10 fs
-model in AGE-crosslinks-Martini3. In the fibril, B1 and B2 are the SP2 backbone beads of
-`LGX` and `AGS`. The selected file is
-installed as `glucosepane.ff` in the martini300C force field, and the bonded terms across
-the LGX/AGS boundary in `core/topology/crosslink.py` follow the same choice. When the
-fibril contains glucosepane, the second line of the `.top` file is a comment naming the set
-used, and ColBuilder stops with an error (`TOP_MART_007`) if the written topologies do not
-carry the requested set (for example if another run changed the installed force field).
-The option does not set the MD time step: choose `dt` in your `.mdp` accordingly (the
-10 fs model is not stable at 20 fs).
+In this local version, the Martini 3 glucosepane model is split over the marker residues
+`LGX` and `AGS`. In the fibril, B1 and B2 are the SP2 backbone beads (`BB`) of `LGX` and
+`AGS`; S1 is `LGX:SC1`. The ring beads are on `AGS`: R1 is `AGS:SC5`, and two of them,
+R2 (`AGS:SC6`) and R5 (`AGS:SC3`), are virtual sites. The model was fitted on the all-atom
+collagen fibril. Its parameters are in `data/topology/martini300C-ff/aminoacids.ff`; the
+S1--R1 bond and the B1--S1--R1 and S1--R1--R2 angles, which cross the LGX/AGS boundary, are
+added in `core/topology/crosslink.py`.
 
 Non-enzymatic crosslinks (MOLD, Glucosepane, Pentosidine) can be used as terminal
 crosslinks just like the enzymatic ones, or added on top of an existing structure
@@ -560,16 +544,15 @@ force_field: "amber99"      # For all-atom simulations
 ```yaml
 topology_generator: true
 force_field: "martini3"     # For coarse-grained simulations
-glucosepane_martini_timestep: 20   # Glucosepane parameters: 20 (two virtual sites) or 10 (no virtual sites)
 ```
 
 This local fork includes Martini3 models for PYD, HLKNL, Glucosepane
-(`LGX`/`AGS`, 20 fs or 10 fs parameter set) and MOLD (`LZS`/`LZD`), with mappings, residue
+(`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`), with mappings, residue
 parameters and inter-marker bonded terms. Other crosslink types, including
 DPD, PYL, DPL and Pentosidine, still require `force_field: "amber99"`.
 The Glucosepane and MOLD topologies are checked when they are built (complete
-inter-marker terms, and for glucosepane the requested parameter set); this does
-not establish equilibrated MD stability or parameter transferability to every system.
+inter-marker terms); this does not establish equilibrated MD stability or
+parameter transferability to every system.
 
 Since 18/10/2026, martinize2 builds the connectivity of each model from the amber99 residue
 templates (`-bonds-from name`) plus explicit CONECT records for every peptide bond, including
@@ -588,8 +571,8 @@ C-N > 4 A), or if a martinize2 topology lacks one of these angles; with
 
 The upstream `main` update changes the Martini PYD equilibrium angles:
 `al2yx_1/2/3` are now 60/100/100 degrees and `al3yx_2` is 140 degrees.
-These PYD changes are separate from the local Glucosepane (20 fs and 10 fs sets)
-and MOLD parameters, which are not affected by them.
+These PYD changes are separate from the local Glucosepane and MOLD parameters,
+which are not affected by them.
 
 ## Troubleshooting
 

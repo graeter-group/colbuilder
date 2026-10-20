@@ -226,11 +226,10 @@ mixing mode (`mix_bool: true`) it defaults to 40.0 nm if not set.
 | topology_debug | boolean | Save intermediate topology files | true/false | false |
 | martinize2_command | string | Detected Martinize2 command path | Valid executable path | Auto-detected |
 | go_epsilon | float | GO epsilon for Martini3-CG parametrization | Positive number | 9.414 |
-| glucosepane_martini_timestep | integer | Martini3 glucosepane parameter set (20 = two virtual sites, 10 = no virtual sites) | 10, 20 | 20 |
 
 **Notes**:
 - **Topology-only mode**: When both `sequence_generator=false` and `geometry_generator=false` but `topology_generator=true`, ColBuilder generates topology from an existing fibril PDB
-- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`; parameter set chosen with `glucosepane_martini_timestep`: 20 fs with two virtual sites, default, or 10 fs without virtual sites) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
+- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
 - Set `topology_debug: true` to preserve intermediate files for troubleshooting
 
 ## Internal Data Structures
