@@ -8,11 +8,11 @@
 
 // ALL ALPHABET RELATED TO PROTEINS
 typedef enum {
-	ACE=1,ALA,ARG,ASN,ASP,CLA,CYS,GLN,GLU,GLY,HIS,HYP,ILE,L4Y,L5Y,LEU,LY2,LY3,LYS,LYX,MET,NME,PHE,PRO,SER,THR,TRP,TYR,VAL,
+	ACE=1,ALA,ARG,ASN,ASP,CLA,CYS,GLN,GLU,GLY,HIS,HYP,ILE,L4Y,L5Y,LEU,LY2,LY3,LYS,LYX,MET,NME,PHE,PRO,SER,THR,TRP,TYR,VAL,AGS,LGX,LZS,LZD,
 	CYM,CYX,HID,HIE,HIP,
-	C,CA,CB,CD,CD1,CD2,CE,CE1,CE2,CE3,CG,CG1,CG2,CH2,CZ,CZ2,CZ3,CH3,C10,C11,C12,C13,C14,
-	N,ND1,ND2,NE,NE1,NE2,NH1,NH2,NZ,
-	O,OD1,OD2,OE1,OE2,OG,OG1,OH,OE,OD,O11,OXT,
+	C,CA,CB,CD,CD1,CD2,CE,CE1,CE2,CE3,CG,CG1,CG2,CH2,CZ,CZ2,CZ3,CH3,C10,C11,C12,C13,C14,C15,C16,C17,C18,C19,C20,C28,C30,C31,
+	N,ND1,ND2,NE,NE1,NE2,NH1,NH2,NZ,NZ1,NZ2,
+	O,OD1,OD2,OE1,OE2,OG,OG1,OH,OE,OD,O11,O18,O19,OXT,
 	SD,SG,
 } protein_enum;
 
@@ -27,14 +27,16 @@ static protein_str plt[] = {
 	{"GLN",GLN},{"GLU",GLU},{"GLY",GLY},{"HIS",HIS},{"HYP",HYP},{"ILE",ILE},{"L4Y",L4Y},
         {"L5Y",L5Y},{"LEU",LEU},{"LY2",LY2},{"LY3",LY3},{"LYS",LYS},{"LYX",LYX},{"MET",MET},
         {"NME",NME},{"PHE",PHE},{"PRO",PRO},{"SER",SER},{"THR",THR},{"TRP",TRP},{"TYR",TYR},
-        {"VAL",VAL},{"CYM",CYM},{"CYX",CYX},{"HID",HID},{"HIE",HIE},{"HIP",HIP},
+        {"VAL",VAL},{"AGS",AGS},{"LGX",LGX},{"LZS",LZS},{"LZD",LZD},{"CYM",CYM},{"CYX",CYX},{"HID",HID},{"HIE",HIE},{"HIP",HIP},
 	{"C"  ,  C},{"CA" , CA},{"CB" , CB},{"CD" , CD},{"CD1",CD1},{"CD2",CD2},{"CE" , CE},
 	{"CE1",CE1},{"CE2",CE2},{"CE3",CE3},{"CG" , CG},{"CG1",CG1},{"CG2",CG2},{"CH2",CH2},
-	{"CZ" , CZ},{"CZ2",CZ2},{"CZ3",CZ3},{"CH3",CH3},{"C11",C11},{"C12",C12},{"C13",C13},{"C14",C14}, 
+	{"CZ" , CZ},{"CZ2",CZ2},{"CZ3",CZ3},{"CH3",CH3},{"C10",C10},{"C11",C11},{"C12",C12},{"C13",C13},{"C14",C14},
+	{"C15",C15},{"C16",C16},{"C17",C17},{"C18",C18},{"C19",C19},{"C20",C20},
+	{"C28",C28},{"C30",C30},{"C31",C31},
 	{"N"  ,  N},{"ND1",ND1},{"ND2",ND2},{"NE" , NE},{"NE1",NE1},{"NE2",NE2},{"NH1",NH1},
-	{"NH2",NH2},{"NZ" , NZ},
+	{"NH2",NH2},{"NZ" , NZ},{"NZ1",NZ1},{"NZ2",NZ2},
 	{"O"  ,  O},{"OD1",OD1},{"OD2",OD2},{"OE1",OE1},{"OE2",OE2},{"OG" , OG},{"OG1",OG1},
-	{"OH" , OH},{"OE",  OE},{"OD",  OD},{"O11",O11},{"OXT",OXT},
+	{"OH" , OH},{"OE",  OE},{"OD",  OD},{"O11",O11},{"O18",O18},{"O19",O19},{"OXT",OXT},
 	{"SD" , SD},{"SG" , SG}
 };
 
@@ -94,6 +96,33 @@ extern bool protein_map(atom_pdb_str *atom, atomaux_str *vdw) {
 				case CZ : vrad=1.61; atype=6; break;
 				case NH1: vrad=1.64; atype=3; break;
 				case NH2: vrad=1.64; atype=3; break;
+				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
+			} break;
+		case AGS:
+			vdw->nb=20;
+			switch(keyfromstring(atom->name)) {
+				case N  : vrad=1.64; atype=3; break;
+				case CA : vrad=1.88; atype=7; break;
+				case C  : vrad=1.61; atype=6; break;
+				case O  : vrad=1.42; atype=2; break;
+				case CB : vrad=1.88; atype=4; break;
+				case CG : vrad=1.88; atype=4; break;
+				case CD : vrad=1.88; atype=7; break;
+				case NE : vrad=1.64; atype=3; break;
+				case CZ : vrad=1.61; atype=6; break;
+				case NH1: vrad=1.64; atype=2; break;
+				case NH2: vrad=1.64; atype=2; break;
+				case NZ : vrad=1.64; atype=2; break;
+				/* Glucosepane is non-aromatic: classify its saturated ring
+				 * carbons by their directly bonded heteroatoms, not as type 5. */
+				case C15: vrad=1.88; atype=6; break;
+				case C16: vrad=1.61; atype=6; break;
+				case C17: vrad=1.88; atype=7; break;
+				case C18: vrad=1.88; atype=6; break;
+				case O18: vrad=1.46; atype=1; break;
+				case C19: vrad=1.88; atype=6; break;
+				case O19: vrad=1.46; atype=1; break;
+				case C20: vrad=1.88; atype=4; break;
 				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
 			} break;
 		case ASN:
@@ -323,6 +352,52 @@ extern bool protein_map(atom_pdb_str *atom, atomaux_str *vdw) {
 				case CD : vrad=1.88; atype=4; break;
 				case CE : vrad=1.88; atype=7; break;
 				case NZ : vrad=1.64; atype=3; break;
+				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
+			} break;
+		case LGX:
+			vdw->nb=8;
+			switch(keyfromstring(atom->name)) {
+				case N  : vrad=1.64; atype=3; break;
+				case CA : vrad=1.88; atype=7; break;
+				case C  : vrad=1.61; atype=6; break;
+				case O  : vrad=1.42; atype=2; break;
+				case CB : vrad=1.88; atype=4; break;
+				case CG : vrad=1.88; atype=4; break;
+				case CD : vrad=1.88; atype=4; break;
+				case CE : vrad=1.88; atype=7; break;
+				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
+			} break;
+		case LZS:
+			vdw->nb=14;
+			switch(keyfromstring(atom->name)) {
+				case N  : vrad=1.64; atype=3; break;
+				case CA : vrad=1.88; atype=7; break;
+				case C  : vrad=1.61; atype=6; break;
+				case O  : vrad=1.42; atype=2; break;
+				case CB : vrad=1.88; atype=4; break;
+				case CG : vrad=1.88; atype=4; break;
+				case CD : vrad=1.88; atype=4; break;
+				case CE : vrad=1.88; atype=7; break;
+				case NZ1: vrad=1.64; atype=3; break;
+				case NZ2: vrad=1.64; atype=3; break;
+				/* MOLD contains an aromatic imidazolium ring. */
+				case C28: vrad=1.76; atype=5; break;
+				case C30: vrad=1.76; atype=5; break;
+				case C31: vrad=1.76; atype=5; break;
+				case CH3: vrad=1.88; atype=4; break;
+				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
+			} break;
+		case LZD:
+			vdw->nb=8;
+			switch(keyfromstring(atom->name)) {
+				case N  : vrad=1.64; atype=3; break;
+				case CA : vrad=1.88; atype=7; break;
+				case C  : vrad=1.61; atype=6; break;
+				case O  : vrad=1.42; atype=2; break;
+				case CB : vrad=1.88; atype=4; break;
+				case CG : vrad=1.88; atype=4; break;
+				case CD : vrad=1.88; atype=4; break;
+				case CE : vrad=1.88; atype=7; break;
 				default : vrad=0.00; atype=0; printf("UNMAPPED ATOM %s %s\n",atom->resName,atom->name);
 			} break;
 		case MET:

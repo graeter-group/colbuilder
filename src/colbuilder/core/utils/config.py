@@ -58,7 +58,7 @@ print(config.sequence_generator)  # Output: True
 config.validate_paths()
 
 # Update configuration dynamically
-config.update({"debug": True, "fibril_length": 300})
+config = config.model_copy(update={"debug": True, "fibril_length": 300})
 print(config.debug)  # Output: True
 print(config.fibril_length)  # Output: 300
 
@@ -227,6 +227,20 @@ class ColbuilderConfig(BaseModel):
     mix_bool: bool = Field(
         default=False, description="Generate a mixed crosslinked microfibril"
     )
+    ring_penetration_policy: Literal["warn", "error"] = Field(
+        default="warn", description="Action for confirmed, unresolved bond/ring penetrations after mixing",
+    )
+    mix_ring_repair: bool = Field(
+        default=True, description="Repair shared-sites ring penetrations using native sidechain torsions; backbone and markers stay fixed",
+    )
+    mix_strategy: Literal["whole_models", "shared_sites"] = Field(
+        default="whole_models",
+        description="Mix whole models, or alternative crosslink sites while retaining additional sites",
+    )
+    mix_alignment_tolerance: float = Field(
+        default=0.25, gt=0, le=1.0,
+        description="Maximum N/CA/C alignment residual in A for transferred shared-sites crosslinks",
+    )
     ratio_mix: Optional[Union[str, Dict[str, int]]] = Field(
         default=None, description="Ratio mix for crosslinks"
     )
@@ -245,6 +259,13 @@ class ColbuilderConfig(BaseModel):
     ratio_replace_scope: Literal["enzymatic", "non_enzymatic", "all"] = Field(
         default="enzymatic",
         description="Scope of residues considered for ratio-based replacement",
+    )
+    ratio_replace_mode: Literal["random", "preserve_attachment"] = Field(
+        default="random",
+        description="Random removal, or joint scope quotas retaining a crosslink on every initially linked model",
+    )
+    ratio_replace_seed: Optional[int] = Field(
+        default=None, description="Local random seed for reproducible ratio-replacement selection",
     )
     ratio_replace: Optional[float] = Field(
         None,
@@ -714,6 +735,18 @@ class ColbuilderConfig(BaseModel):
                     "files_mix is required when mix_bool is True",
                     error_code="CFG_ERR_004",
                 )
+            if values.mix_strategy == "shared_sites":
+                if len(values.ratio_mix) != 2 or len(values.files_mix) != 2:
+                    raise ConfigurationError(
+                        "shared_sites mixing currently requires exactly two variants and two files_mix",
+                        error_code="CFG_ERR_004",
+                    )
+                if not all(re.fullmatch(r"[A-Za-z0-9_-]+", label)
+                           and label != "_mixed_sites" for label in values.ratio_mix):
+                    raise ConfigurationError(
+                        "shared_sites variant labels must be simple directory names, not _mixed_sites",
+                        error_code="CFG_ERR_004",
+                    )
             if values.fibril_length is None:
                 values.fibril_length = 40.0  # Default to 40 nm for mixing
             LOG.debug(f"Validated fibril_length for mixing: {values.fibril_length}")
@@ -744,6 +777,17 @@ class ColbuilderConfig(BaseModel):
     def validate_replace_config(self) -> "ColbuilderConfig":
         """Validate replacement configuration."""
         if self.replace_bool:
+            if self.ratio_replace_mode == "preserve_attachment":
+                if self.ratio_replace is None or self.manual_replacements:
+                    raise ConfigurationError(
+                        "preserve_attachment requires ratio_replace and cannot be combined with manual_replacements",
+                        error_code="CFG_ERR_006",
+                    )
+                if self.topology_generator and self.force_field != "amber99":
+                    raise ConfigurationError(
+                        "Final ITP attachment validation currently supports amber99 only",
+                        error_code="CFG_ERR_006",
+                    )
             has_manual_replacements = bool(self.manual_replacements)
             if self.geometry_generator:
                 if self.ratio_replace is None and not has_manual_replacements:

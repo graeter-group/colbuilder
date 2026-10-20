@@ -92,8 +92,14 @@ import numpy.typing as npt
 from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure
 import subprocess
+import json
 
 from colbuilder.core.utils.logger import setup_logger
+from colbuilder.core.sequence.steric_optimization import (
+    GlucosepaneGeometry,
+    StericOptimizationError,
+    optimize_glucosepane,
+)
 
 LOG = setup_logger(__name__)
 
@@ -1205,7 +1211,10 @@ def optimize_structure(
     save_pdb(structures["copy1"], "initial_copy1.pdb")
     save_pdb(structures["copy2"], "initial_copy2.pdb")
     crosslinks = select_best_matching_crosslinks(structures, crosslink_info)
+    if len(crosslinks) != len(crosslink_info):
+        raise StericOptimizationError("Not all requested crosslinks could be matched")
     master_tracker = TransformationTracker()
+    steric_jobs = []
 
     # Calculate initial total distance before optimization
     initial_total_distance = 0
@@ -1222,6 +1231,13 @@ def optimize_structure(
         log_crosslink_info(crosslink, i)
         tracker = TransformationTracker()
 
+        if crosslink["R3"]["type"] == "NONE" and {
+            crosslink["R1"]["type"], crosslink["R2"]["type"]
+        } == {"AGS", "LGX"}:
+            result = optimize_glucosepane(structures, crosslink)
+            steric_jobs.append((crosslink, result["flexible_neighbors"]))
+            continue
+
         # If this is the first crosslink and we have a previous best, pass it
         crosslink_previous_best = previous_best_distance if i == 0 else float("inf")
 
@@ -1233,7 +1249,7 @@ def optimize_structure(
         )
         master_tracker.update_from(crosslink_tracker)
 
-    optimized_initial = load_pdb(initial_pdb)
+    optimized_initial = structures["initial"].copy()
 
     # Apply transformations to initial structure
     for crosslink in crosslinks:
@@ -1254,6 +1270,24 @@ def optimize_structure(
                 source_structure_id=structure_id,  # Filter by source
             )
 
+    for crosslink, neighbors in steric_jobs:
+        geometry = GlucosepaneGeometry(structures, crosslink, flexible_neighbors=neighbors)
+        result = geometry.evaluate(np.zeros(geometry.dimension))
+        if not geometry.acceptable(result):
+            raise StericOptimizationError(f"Final glucosepane geometry rejected: {result}")
+    if steric_jobs:
+        from colbuilder.core.utils.ring_geometry import RingScreen
+        screen = RingScreen(geometry.original, geometry.ring_screen.bonds,
+                            geometry.ring_screen.rings, labels=geometry.labels)
+        hits = screen.check(geometry.original)
+        report = {"schema": 1, "scope": "two translated helices after all optimization jobs",
+                  "rings_checked": len(screen.rings), "contacts": hits,
+                  "penetrations": sum(hit["status"] == "penetration" for hit in hits),
+                  "incomplete_rings": geometry.incomplete_rings}
+        Path(optimized_pdb).with_suffix(".rings.json").write_text(json.dumps(report, indent=2) + "\n")
+        for hit in hits:
+            LOG.warning("Final optimization ring contact (%s): ring=%s bond=%s",
+                        hit["status"], hit["ring_atoms"], hit["bond_atoms"])
     save_pdb(optimized_initial, str(optimized_pdb))
     save_pdb(structures["copy1"], "optimized_copy1.pdb")
     save_pdb(structures["copy2"], "optimized_copy2.pdb")

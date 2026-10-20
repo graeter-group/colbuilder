@@ -113,6 +113,8 @@ class SequenceGenerator:
 
             yield
 
+        except SequenceGenerationError:
+            raise
         except Exception as e:
             LOG.error(f"Error setting up directories: {e}")
             raise SequenceGenerationError(
@@ -222,6 +224,8 @@ class SequenceGenerator:
                 
                 return None, final_pdb
                 
+            except SequenceGenerationError:
+                raise
             except Exception as e:
                 LOG.error(f"Error processing mutated PDB: {str(e)}", exc_info=True)
                 raise SequenceGenerationError(
@@ -1058,6 +1062,8 @@ class SequenceGenerator:
             
             return final_output_path
             
+        except SequenceGenerationError:
+            raise
         except Exception as e:
             raise SequenceGenerationError(
                 "Error finalizing mutated PDB output",

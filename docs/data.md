@@ -56,13 +56,17 @@ data/
     │   └── small_molecule_martini3.ff
     └── martini300C-mapping/
         ├── ace.amber99.map
+        ├── ags.amber99.map
         ├── ...
         ├── hyp.amber99.map
         ├── l4y.amber99.map
         ├── l5y.amber99.map
+        ├── lgx.amber99.map
         ├── ly2.amber99.map
         ├── ly3.amber99.map
         ├── lyx.amber99.map
+        ├── lzd.amber99.map
+        ├── lzs.amber99.map
         ├── nme.amber99.map
         └── modifications.amber99.mapping
 ```
@@ -118,7 +122,7 @@ working-directory copy the first time a martini3 run needs it:
 
 Martini 3.0 coarse-grained force field files:
 
-- `aminoacids.ff`: Coarse-grained parameters for amino acids
+- `aminoacids.ff`: Coarse-grained parameters for amino acids and the crosslink marker residues (HLKNL, PYD; in this local fork also glucosepane `LGX`/`AGS` and MOLD `LZS`/`LZD`)
 - `general.ff`: General force field parameters
 - `modifications.ff`: Parameters for modified residues including crosslinks
 - `small_molecule_martini3.ff`: Parameters for small molecules
@@ -129,7 +133,8 @@ Martini 3.0 coarse-grained force field files:
 Mapping files for converting atomistic to coarse-grained representations:
 
 - Mapping files for standard amino acids (e.g., `ala.amber99.map`, `gly.amber99.map`)
-- Mapping files for crosslink residues (`l4y.amber99.map`, `l5y.amber99.map`, `ly2.amber99.map`, `ly3.amber99.map`, `lyx.amber99.map`) — these cover HLKNL and PYD only. MOLD and the non-enzymatic AGE crosslinks (Glucosepane, Pentosidine) have no Martini3 mapping yet, so they can't currently be coarse-grained; use `force_field: "amber99"` for those.
+- Mapping files for HLKNL and PYD (`l4y.amber99.map`, `l5y.amber99.map`, `ly2.amber99.map`, `ly3.amber99.map`, `lyx.amber99.map`).
+- This local fork also includes Glucosepane mappings (`lgx.amber99.map`, `ags.amber99.map`) and MOLD mappings (`lzs.amber99.map`, `lzd.amber99.map`). Their residue parameters are in `martini300C-ff/aminoacids.ff`; inter-marker bonded terms are completed in `core/topology/crosslink.py`. See the [local model status and validation limits](user_guide.md#using-different-force-fields). Pentosidine has no Martini3 mapping here; use `force_field: "amber99"` for that crosslink.
 - Mapping files for terminal caps (`ace.amber99.map`, `nme.amber99.map`, `cla.amber99.map`)
 - `modifications.amber99.mapping`: Definition of mapping for all modifications
 
@@ -212,7 +217,7 @@ Advanced users may modify these files to extend ColBuilder's capabilities:
 4. Update `amber99/aminoacids.rtp` with parameters for the new crosslinks
 5. For coarse-grained simulations, also add:
    - Mapping definitions in `martini300C-mapping/` (create files like `newcrosslink.amber99.map`)
-   - Force field parameters in `martini300C-ff/modifications.ff`
+   - Marker residue blocks in `martini300C-ff/aminoacids.ff`, and the bonded terms between marker residues in `core/topology/crosslink.py`
 
 ### Using Different Reference Structures
 

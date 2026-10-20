@@ -245,7 +245,7 @@ These parameters control advanced features for creating mixed crosslinked microf
   - **Manual** (`manual_replacements`): exact residues named explicitly, for reproducible, targeted edits (e.g. removing one specific crosslink to test its mechanical contribution). Each entry targets a residue inside a per-model `{id}.caps.pdb` file, which is only written to disk under `debug: true`.
 - `ratio_replace` is the fraction **removed**, not the remaining density: e.g. `ratio_replace: 70` removes 70% of eligible crosslinks, leaving 30%.
 - The `ratio_replace_scope` parameter selects which crosslinks may be replaced by ratio-based replacement. **The default is `enzymatic`**, so ratio-based replacement targets enzymatic crosslinks (e.g. HLKNL/PYD-derived residues) unless you choose otherwise. Use `non_enzymatic` to target advanced glycation end-product (AGE) crosslinks (Glucosepane, Pentosidine) and MOLD, or `all` to consider both.
-- `auto_fix_unpaired` automatically finds crosslink markers that would otherwise be left without a geometric partner (which would produce an incomplete, non-physical crosslink) and converts them to standard residues. If you've already requested your own replacement (`ratio_replace`, `replace_file`, or `manual_replacements`), ColBuilder defers to your request instead of silently overriding it with its own auto-fix list — it logs a warning rather than changing your config.
+- `auto_fix_unpaired` finds crosslink markers left without a geometric partner and converts them to standard residues. In the default `random` replacement mode, a positive `ratio_replace`, `replace_file`, or `manual_replacements` takes precedence: ColBuilder logs a warning instead of replacing that request with an auto-fix list. In this local fork's `preserve_attachment` mode, orphan cleanup runs as a separate first step, followed by the requested ratio, including 0%; cleanup does not become a manual override. See [attachment-preserving replacement](attachment_preserving_replacement.md).
 - The `replace_file` parameter specifies the path to a PDB file of a previously generated collagen microfibril. Set to null to use the geometry generation output.
 
 ## Topology Generation Parameters
@@ -266,7 +266,7 @@ These parameters control the generation of topology files for molecular dynamics
 - The `force_field` parameter selects which force field to use for generating topology files; it is required whenever `topology_generator: true`.
 - The amber99 force field is recommended for most atomistic simulations of collagen.
 - Custom force field parameters for collagen and crosslinks are included in ColBuilder.
-- Martini3 crosslink parametrization currently only covers PYD and HLKNL; other crosslink types (DPD, PYL, DPL, MOLD, and the non-enzymatic AGE types) are not yet parametrized for Martini3 and will not produce correct coarse-grained bonded terms — use `force_field: "amber99"` for those.
+- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
 - Set `topology_debug: true` to keep intermediate files for troubleshooting topology generation issues.
 - **Topology-only mode**: When both `sequence_generator` and `geometry_generator` are false, topology generation can process existing fibril PDB files directly.
 
@@ -431,7 +431,7 @@ Understanding how parameters interact is important for successful use of ColBuil
    - If `replace_bool` is true, choose exactly one replacement mechanism: `ratio_replace` (0-100, with `ratio_replace_scope`) or `manual_replacements`.
    - If `replace_bool` is true and `geometry_generator` is false, you must provide a `replace_file`.
    - `ratio_replace_scope` must be one of `enzymatic` (default), `non_enzymatic`, or `all`.
-   - `auto_fix_unpaired` will not override a replacement mechanism you've already configured (`ratio_replace`, `replace_file`, or `manual_replacements`) — it only acts when none of those are set.
+   - In `random` mode, automatic orphan cleanup defers to a positive `ratio_replace`, `replace_file`, or `manual_replacements`. In `preserve_attachment` mode, cleanup runs separately before ratio selection and preserves the requested quota; explicit manual replacements are incompatible with that mode.
 
 5. **Geometry Generation Dependencies**:
    - If `crystalcontacts_optimize` is true, the geometry generation will take longer but may produce better-packed microfibrils.

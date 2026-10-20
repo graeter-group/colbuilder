@@ -316,7 +316,20 @@ class GeometryService:
                                 or temp_config.replace_file
                                 or temp_config.manual_replacements
                             )
-                            if user_requested_replacement:
+                            if getattr(temp_config, "ratio_replace_mode", "random") == "preserve_attachment":
+                                # Preserve the local cleanup phase without turning it into
+                                # a manual override of the user's exact ratio selection.
+                                temp_config._auto_unpaired_replacements = auto_manual_replacements
+                                temp_config.replace_bool = True
+                                temp_config.auto_fix_unpaired = True
+                                self.config.auto_fix_unpaired = True
+                                if temp_config.ratio_replace is None and temp_config.replace_file is None:
+                                    temp_config.ratio_replace = 0
+                                LOG.info(
+                                    "Auto-detected %d unpaired marker(s); cleaning them before attachment-preserving replacement.",
+                                    len(auto_manual_replacements),
+                                )
+                            elif user_requested_replacement:
                                 # Setting manual_replacements here would silently
                                 # discard the user's own ratio_replace/replace_file/
                                 # manual_replacements request: manual_replacements
@@ -649,4 +662,3 @@ class GeometryService:
                 error_code="GEO_ERR_001",
                 context={"config": self.config.model_dump()},
             )
-

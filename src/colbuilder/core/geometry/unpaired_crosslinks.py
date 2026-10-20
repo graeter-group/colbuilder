@@ -125,6 +125,7 @@ class UnpairedCrosslinkFinder:
         geom_dir: Optional[Path] = None,
         allowed_resnames: Optional[Set[str]] = None,
         cutoff: float = CROSSLINK_PAIR_CUTOFF,
+        selected_caps: Optional[Dict[int, Path]] = None,
     ):
         self.base_dir = Path(base_dir).resolve()
         self.geom_root = (
@@ -136,6 +137,7 @@ class UnpairedCrosslinkFinder:
             set(allowed_resnames) if allowed_resnames else set(CROSSLINK_PARTNERS.keys())
         )
         self.cutoff = float(cutoff)
+        self.selected_caps = selected_caps
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -163,6 +165,21 @@ class UnpairedCrosslinkFinder:
     # Marker collection (global-frame positions via read_crosslink)
     # ------------------------------------------------------------------ #
     def _collect_markers(self) -> List[Dict]:
+        if self.selected_caps is not None:
+            markers = []
+            for idx, path in sorted(self.selected_caps.items()):
+                caps = Path(path)
+                if not caps.is_file() or caps.name != f"{int(idx)}.caps.pdb":
+                    raise ValueError(f"Invalid active caps mapping: {idx}: {caps}")
+                for cl in read_crosslink(caps):
+                    if cl.resname in CROSSLINK_PARTNERS:
+                        markers.append({
+                            "fname": caps.name, "model": int(idx),
+                            "resname": cl.resname, "atom": getattr(cl, "atom", ""),
+                            "resid": str(cl.resid), "chain": cl.chain,
+                            "pos": np.asarray(cl.position, dtype=float),
+                        })
+            return markers
         pdb_dirs = self._find_all_pdb_dirs()
         if not pdb_dirs:
             LOG.warning("No caps PDB fragments found under %s", self.geom_root)

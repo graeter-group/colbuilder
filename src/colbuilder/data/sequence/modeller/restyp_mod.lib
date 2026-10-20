@@ -99,6 +99,9 @@ ATOM   | G GUA               | g |   | GUA  | Guanine (RNA)
 ATOM   | T THY               | s |   | THY  | Thymine (RNA)
 ATOM   | U URA               | u |   | URA  | Uracil (RNA)
 ATOM   | DA                  | e |   | DADE | Adenine (DNA)
+# Keep j/l available for ColBuilder crosslinks while satisfying Modeller 10.8's CIF library.
+ATOM   | DC                  | [ |   | DCYT | Cytosine (DNA)
+ATOM   | DG                  | ] |   | DGUA | Guanine (DNA)
 ATOM   | DT                  | t |   | DTHY | Thymine (DNA)
 ATOM   | DU                  | v |   | DURA | Uracil (DNA)
 HETATM | ADP                 | & |   | ADP  | adenosine diphosphate, jjp1/adm jr.

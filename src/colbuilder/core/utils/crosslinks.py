@@ -81,6 +81,7 @@ from .constants import (
 )
 from colbuilder.core.utils.exceptions import SequenceGenerationError, SystemError
 from colbuilder.core.sequence.optimize_crosslinks import optimize_structure
+from colbuilder.core.sequence.steric_optimization import StericOptimizationError
 from colbuilder.core.utils.logger import setup_logger
 
 LOG = setup_logger(__name__)
@@ -274,14 +275,26 @@ class CrosslinkOptimizer:
                 iteration_pdbs.append(iteration_pdb)
 
                 # Pass the current best distance to optimize_structure
-                total_distance, tracker, _ = optimize_structure(
-                    initial_pdb=str(best_input),
-                    copy1_pdb=str(generated_pdbs[0]),
-                    copy2_pdb=str(generated_pdbs[1]),
-                    crosslink_info=crosslink_info,
-                    optimized_pdb=str(iteration_pdb),
-                    previous_best_distance=best_distance,  # Pass the current best
-                )
+                try:
+                    total_distance, tracker, _ = optimize_structure(
+                        initial_pdb=str(best_input),
+                        copy1_pdb=str(generated_pdbs[0]),
+                        copy2_pdb=str(generated_pdbs[1]),
+                        crosslink_info=crosslink_info,
+                        optimized_pdb=str(iteration_pdb),
+                        previous_best_distance=best_distance,
+                    )
+                except StericOptimizationError as exc:
+                    self.state.increment_attempt()
+                    LOG.warning("Rejected crosslink geometry (attempt %d/%d): %s",
+                                self.state.attempt_number, MAX_OPTIMIZATION_ATTEMPTS, exc)
+                    if self.state.attempt_number >= MAX_OPTIMIZATION_ATTEMPTS:
+                        raise SequenceGenerationError(
+                            "No sterically acceptable crosslink geometry found",
+                            error_code="SEQ_ERR_003",
+                            context={"attempts": self.state.attempt_number, "geometry_error": str(exc)},
+                        ) from exc
+                    continue
 
                 self.state.update(total_distance)
                 self.state.increment_attempt()

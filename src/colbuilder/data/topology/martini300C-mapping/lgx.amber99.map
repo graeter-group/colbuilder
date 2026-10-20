@@ -1,0 +1,53 @@
+; Glucosepane lysine-derived marker (LGX), embedded in a peptide chain.
+;
+; Bead correspondence (glucosepane model):
+;   BB  = B1 (peptide backbone mapping, not the capped free-molecule headgroup)
+;   SC1 = S1
+;
+; The shared glucosepane bead R1 is instantiated once on AGS as SC5.  LGX CE and its
+; hydrogens belong chemically to that inter-marker bead, but Vermouth maps one
+; residue at a time.  They are therefore retained here with zero coordinate
+; weight, following the same marker-splitting strategy used for PYD.
+
+[ molecule ]
+LGX
+
+[from]
+amber99
+
+[to]
+martini300C
+
+[ martini ]
+BB SC1
+
+[ mapping ]
+amber27 amber36 amber99
+
+[ atoms ]
+    1     N     BB
+    2     H     BB
+    3    CA     BB
+    4    HA    !BB
+    5    CB    SC1
+    6   HB1    SC1
+    7   HB2    SC1
+    8    CG    SC1
+    9   HG1    SC1
+   10   HG2    SC1
+   11    CD    SC1
+   12   HD1    SC1
+   13   HD2    SC1
+   14    CE   !SC1
+   15   HE1   !SC1
+   16   HE2   !SC1
+   17     C     BB
+   18     O     BB
+
+[ chiral ]
+  CB     CA    N    C
+  HB1    CA    N    C
+  HB2    CA    N    C
+
+[ chiral ]
+  HA     CA    N    CB    C

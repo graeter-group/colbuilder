@@ -28,7 +28,7 @@ PROTEIN_RESIDUES = set(('ALA', 'ARG', 'ASP', 'ASN', 'CYS',
                         'HSE', 'HIE', 'HSD', 'HID', 'HSP',
                         'HIP', 'ASPP', 'GLUP', 'LSN', 'ASH',
                         'GLH', 'LYN','ACE','NME','CLA','HYP',
-                        'LY2','LY3','LYX','L4Y','L5Y'))
+                        'LY2','LY3','LYX','L4Y','L5Y','AGS','LGX','LZS','LZD'))
 
 
 def is_protein(molecule):

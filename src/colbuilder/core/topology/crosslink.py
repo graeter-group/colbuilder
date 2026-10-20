@@ -10,6 +10,10 @@ from colbuilder.core.utils.logger import setup_logger
 LOG = setup_logger(__name__)
 
 
+class IncompleteCrosslinkError(ValueError):
+    """Raised when marker residues cannot form a complete crosslink topology."""
+
+
 class Crosslink:
     """
     Setup crosslink topology for collagen models.
@@ -19,9 +23,11 @@ class Crosslink:
     crosslink sites and generates the necessary bonded parameters (bonds,
     angles, dihedrals) for crosslinks in Martini coarse-grained models.
 
-    The class supports two types of crosslinks:
+    The class supports four types of crosslinks:
     - Divalent HLKNL-crosslinks between L4Y and L5Y residues
     - Trivalent PYD-crosslinks between LYX, LY2, and LY3 residues
+    - Glucosepane crosslinks between the LGX and AGS marker residues
+    - MOLD crosslinks between the LZS and LZD marker residues
     """
 
     def __init__(self, cnt_model: Optional[int] = None) -> None:
@@ -37,6 +43,9 @@ class Crosslink:
         self.file: str = f"{int(cnt_model)}.merge.pdb" if cnt_model is not None else ""
         self.crosslink_coords: List[List[float]] = []
         self.crosslink_pdb: List[List[Any]] = []  # Mix of str and float
+        self.residue_beads: Dict[int, Dict[str, str]] = {}
+        self.crosslink_neighbors: List[Any] = []
+        self.crosslink_connect: List[List[List[Any]]] = []
         self.crosslink_pairs: List[Tuple[List[Any], List[Any]]] = []  # Store valid pairs
         self.crosslink_bonded: Dict[str, List[List[Any]]] = {
             'bonds': [],
@@ -52,7 +61,9 @@ class Crosslink:
         self.crosslink_thresholds = {
             'LYX_LY2': 6.0,  # Maximum distance for LYX SC4/SC5 - LY2 SC1 crosslinks
             'LYX_LY3': 6.0,  # Maximum distance for LYX SC5 - LY3 SC1 crosslinks
-            'L4Y_L5Y': 6.0   # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
+            'L4Y_L5Y': 6.0,  # Maximum distance for L4Y SC1 - L5Y SC2 crosslinks
+            'LGX_AGS': 6.0,  # Maximum distance for glucosepane S1 - R1
+            'LZS_LZD': 6.0   # Maximum distance for MOLD R2 - S2
         }
 
         # HLKNL-crosslink parameters
@@ -71,12 +82,29 @@ class Crosslink:
         self.dlyx5ly2: str = '0.370'  # LYX-LY2 bond equilibrium distance (nm) (added)
         
         # PYD-crosslink angle parameters (degrees)
-        self.al2yx_1: str = '100'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
-        self.al2yx_2: str = '60'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
-        self.al2yx_3: str = '130'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
+        self.al2yx_1: str = '60'    # LY2-LYX TP1q-TC6q-TC4 angle R2 R4 R3
+        self.al2yx_2: str = '100'     # LY2-LYX TQ2p-TP1q-TC4 angle R1 R2 R3
+        self.al2yx_3: str = '100'    # LY2-LYX TP1q-TC4-SP2 angle R2 B2 R3
         self.al3yx_1: str = '100'    # LY3-LYX TP1q-TC6q-TC4 angle R2 R4 R3/S3
-        self.al3yx_2: str = '110'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 R3/S3
+        self.al3yx_2: str = '140'    # LY3-LYX TQ2p-TC6q-TC4 angle R1 R4 S3
         self.al3yx_3: str = '130'    # LY3-LYX TC6q-TC4-SP2 angle R4 S3 B3
+
+        # Glucosepane terms that cross the LGX/AGS marker boundary.  All other
+        # glucosepane interactions are defined inside the marker templates
+        # (martini300C-ff/aminoacids.ff: two virtual sites, R2 = AGS:SC6 and
+        # R5 = AGS:SC3).
+        self.dgcp_s1_r1: str = '0.2609'
+        self.kgcp_s1_r1: str = '7335.8'
+        self.agcp_b1_s1_r1: Tuple[str, str] = ('129.113', '201.92')
+        self.agcp_s1_r1_r2: Tuple[str, str] = ('122.006', '44.43')
+
+        # MOLD terms crossing the LZS/LZD marker boundary.  The renamed
+        # standalone aliases are R2=LZS:SC3 and S2=LZD:SC1.
+        self.dmold_r2_s2: str = '0.310'
+        self.kmold_r2_s2: str = '18770.020'
+        self.amold_r1_r2_s2: Tuple[str, str] = ('117.168', '61.307')
+        self.amold_r3_r2_s2: Tuple[str, str] = ('90.680', '48.532')
+        self.amold_r2_s2_b2: Tuple[str, str] = ('137.413', '105.966')
 
         LOG.debug(f"Initialized Crosslink for model counter {cnt_model}")
 
@@ -99,26 +127,45 @@ class Crosslink:
 
         self.crosslink_coords = []
         self.crosslink_pdb = []
+        self.residue_beads = {}
         it_pdb = 0
+        residue_occurrence = -1
+        previous_residue = None
 
         try:
             with open(file, 'r') as f:
                 for line in f:
-                    if line[0:4] == 'ATOM':
-                        it_pdb += 1
+                    if not line.startswith('ATOM'):
+                        continue
 
-                    if ((line[17:20] == 'LYX' and line[12:15] in ['SC4', 'SC5']) or
-                        (line[17:20] in ['LY2', 'LY3'] and line[12:15] == 'SC1') or
-                        (line[17:20] == 'L4Y' and line[12:15] == 'SC1') or
-                        (line[17:20] == 'L5Y' and line[12:15] == 'SC2')):
+                    it_pdb += 1
+                    resname = line[17:20].strip()
+                    atom_name = line[12:16].strip()
+                    residue_key = (resname, line[21:26])
+                    if residue_key != previous_residue:
+                        residue_occurrence += 1
+                        previous_residue = residue_key
+                    self.residue_beads.setdefault(residue_occurrence, {})[
+                        atom_name
+                    ] = str(it_pdb)
+
+                    if ((resname == 'LYX' and atom_name in ['SC4', 'SC5']) or
+                        (resname in ['LY2', 'LY3'] and atom_name == 'SC1') or
+                        (resname == 'L4Y' and atom_name == 'SC1') or
+                        (resname == 'L5Y' and atom_name == 'SC2') or
+                        (resname == 'LGX' and atom_name == 'SC1') or
+                        (resname == 'AGS' and atom_name == 'SC5') or
+                        (resname == 'LZS' and atom_name == 'SC3') or
+                        (resname == 'LZD' and atom_name == 'SC1')):
 
                         coords = [float(line[30:38]), float(line[38:46]), float(line[46:54])]
 
                         self.crosslink_pdb.append([
                             str(it_pdb),           # atom index as string
-                            line[17:20],           # residue name
-                            line[12:15],           # atom name
+                            resname,               # residue name
+                            atom_name,              # atom name
                             line[21:26],           # chain info
+                            residue_occurrence,    # unambiguous residue occurrence
                             coords[0],             # x coordinate as float
                             coords[1],             # y coordinate as float
                             coords[2]              # z coordinate as float
@@ -133,6 +180,37 @@ class Crosslink:
             LOG.error(f"Error reading PDB file {file}: {str(e)}")
 
         return self.crosslink_coords
+
+    def _same_residue_bead(self, atom: List[Any], bead_name: str) -> Optional[str]:
+        """Return a bead index from the same marker occurrence as ``atom``."""
+        residue_occurrence = atom[4]
+        return self.residue_beads.get(residue_occurrence, {}).get(bead_name)
+
+    def get_crosslink_connect(self, cnt_model: Optional[int] = None) -> List[List[List[Any]]]:
+        """
+        Get nearest crosslinks to determine connections.
+
+        This method is kept for backwards compatibility but now uses the improved
+        pair-finding algorithm internally.
+        """
+        LOG.debug("Using improved crosslink pair detection algorithm")
+
+        pairs = self.find_crosslink_pairs(cnt_model=cnt_model)
+
+        self.crosslink_connect = []
+        if pairs:
+            all_atoms = []
+            for pair in pairs:
+                if pair[0] not in all_atoms:
+                    all_atoms.append(pair[0])
+                if pair[1] not in all_atoms:
+                    all_atoms.append(pair[1])
+
+            if all_atoms:
+                self.crosslink_connect.append(all_atoms)
+                LOG.debug(f"Converted {len(pairs)} pairs to connection group with {len(all_atoms)} atoms")
+
+        return self.crosslink_connect
 
     def _match_nearest_pairs(
         self,
@@ -179,7 +257,8 @@ class Crosslink:
         Find valid crosslink pairs based on distance and compatibility.
 
         Pairing is a one-to-one nearest-neighbour match per bead-category
-        (LYX-SC4/LY2, LYX-SC5/LY2, LYX-SC5/LY3, L4Y/L5Y): the closest compatible
+        (LYX-SC4/LY2, LYX-SC5/LY2, LYX-SC5/LY3, L4Y/L5Y, LGX/AGS,
+        LZS/LZD): the closest compatible
         pairs are bonded first and each atom is used at most once within a category.
         This avoids the spurious extra bonds that "bond every pair within the cutoff"
         produced, while still allowing the shared LYX SC5 bead to bond both LY2
@@ -199,6 +278,10 @@ class Crosslink:
         ly3_sc1_atoms = []
         l4y_sc1_atoms = []
         l5y_sc2_atoms = []
+        lgx_sc1_atoms = []
+        ags_sc5_atoms = []
+        lzs_sc3_atoms = []
+        lzd_sc1_atoms = []
 
         for atom in self.crosslink_pdb:
             if atom[1] == 'LYX' and atom[2] == 'SC4':
@@ -213,6 +296,14 @@ class Crosslink:
                 l4y_sc1_atoms.append(atom)
             elif atom[1] == 'L5Y' and atom[2] == 'SC2':
                 l5y_sc2_atoms.append(atom)
+            elif atom[1] == 'LGX' and atom[2] == 'SC1':
+                lgx_sc1_atoms.append(atom)
+            elif atom[1] == 'AGS' and atom[2] == 'SC5':
+                ags_sc5_atoms.append(atom)
+            elif atom[1] == 'LZS' and atom[2] == 'SC3':
+                lzs_sc3_atoms.append(atom)
+            elif atom[1] == 'LZD' and atom[2] == 'SC1':
+                lzd_sc1_atoms.append(atom)
 
         LOG.debug(f"Crosslink atoms:")
         LOG.debug(f"  LYX SC4: {len(lyx_sc4_atoms)}")
@@ -221,6 +312,10 @@ class Crosslink:
         LOG.debug(f"  LY3 SC1: {len(ly3_sc1_atoms)}")
         LOG.debug(f"  L4Y SC1: {len(l4y_sc1_atoms)}")
         LOG.debug(f"  L5Y SC2: {len(l5y_sc2_atoms)}")
+        LOG.debug(f"  LGX SC1: {len(lgx_sc1_atoms)}")
+        LOG.debug(f"  AGS SC5: {len(ags_sc5_atoms)}")
+        LOG.debug(f"  LZS SC3: {len(lzs_sc3_atoms)}")
+        LOG.debug(f"  LZD SC1: {len(lzd_sc1_atoms)}")
 
         # LYX SC4 - LY2 SC1 (one-to-one nearest neighbour)
         for lyx_atom, ly2_atom, dist in self._match_nearest_pairs(
@@ -249,6 +344,68 @@ class Crosslink:
         ):
             self.crosslink_pairs.append((l4y_atom, l5y_atom))
             LOG.info(f" Added L4Y-L5Y pair: atoms {l4y_atom[0]} - {l5y_atom[0]} (distance: {dist:.3f} Å)")
+
+        # Glucosepane LGX S1 - AGS R1 (the inter-marker R1 is hosted as AGS SC5).
+        for lgx_atom, ags_atom, dist in self._match_nearest_pairs(
+            lgx_sc1_atoms, ags_sc5_atoms, self.crosslink_thresholds['LGX_AGS']
+        ):
+            self.crosslink_pairs.append((lgx_atom, ags_atom))
+            LOG.info(
+                f" Added LGX-AGS glucosepane pair: atoms {lgx_atom[0]} - "
+                f"{ags_atom[0]} (distance: {dist:.3f} Å)"
+            )
+
+        # Glucosepane is represented by two marker residues but is a single
+        # chemical crosslink.  Never allow an orphan marker or a failed
+        # distance match to degrade silently into two ordinary side chains.
+        glucosepane_pairs = [
+            pair for pair in self.crosslink_pairs
+            if pair[0][1:3] == ['LGX', 'SC1']
+            and pair[1][1:3] == ['AGS', 'SC5']
+        ]
+        if lgx_sc1_atoms or ags_sc5_atoms:
+            if not (
+                len(lgx_sc1_atoms)
+                == len(ags_sc5_atoms)
+                == len(glucosepane_pairs)
+            ):
+                raise IncompleteCrosslinkError(
+                    "Incomplete glucosepane mapping: expected a one-to-one "
+                    "LGX:SC1--AGS:SC5 match for every marker, but found "
+                    f"LGX={len(lgx_sc1_atoms)}, AGS={len(ags_sc5_atoms)}, "
+                    f"matched={len(glucosepane_pairs)} within "
+                    f"{self.crosslink_thresholds['LGX_AGS']:.1f} Å."
+                )
+
+        # MOLD R2 is an inter-marker bead hosted on LZS:SC3; its bridge to
+        # the second lysine arm (LZD:SC1/S2) completes the CG crosslink.
+        for lzs_atom, lzd_atom, dist in self._match_nearest_pairs(
+            lzs_sc3_atoms, lzd_sc1_atoms, self.crosslink_thresholds['LZS_LZD']
+        ):
+            self.crosslink_pairs.append((lzs_atom, lzd_atom))
+            LOG.info(
+                f" Added LZS-LZD MOLD pair: atoms {lzs_atom[0]} - "
+                f"{lzd_atom[0]} (distance: {dist:.3f} Å)"
+            )
+
+        mold_pairs = [
+            pair for pair in self.crosslink_pairs
+            if pair[0][1:3] == ['LZS', 'SC3']
+            and pair[1][1:3] == ['LZD', 'SC1']
+        ]
+        if lzs_sc3_atoms or lzd_sc1_atoms:
+            if not (
+                len(lzs_sc3_atoms)
+                == len(lzd_sc1_atoms)
+                == len(mold_pairs)
+            ):
+                raise IncompleteCrosslinkError(
+                    "Incomplete MOLD mapping: expected a one-to-one "
+                    "LZS:SC3--LZD:SC1 match for every marker, but found "
+                    f"LZS={len(lzs_sc3_atoms)}, LZD={len(lzd_sc1_atoms)}, "
+                    f"matched={len(mold_pairs)} within "
+                    f"{self.crosslink_thresholds['LZS_LZD']:.1f} Å."
+                )
 
         return self.crosslink_pairs
 
@@ -342,6 +499,68 @@ class Crosslink:
                     connections_found += 1
                     LOG.info(f" Added L4Y-L5Y crosslink between {clx[0]} and {cly[0]} (distance: {dist:.3f} Å)")
 
+                # Glucosepane: S1 (LGX:SC1) -- R1 (AGS:SC5), plus the two
+                # angles that cross the marker boundary (B1--S1--R1 and
+                # S1--R1--R2 with R2 = AGS:SC6).
+                elif (clx[1] == 'LGX' and clx[2] == 'SC1' and
+                      cly[1] == 'AGS' and cly[2] == 'SC5'):
+                    lgx_bb = self._same_residue_bead(clx, 'BB')
+                    ags_r2 = self._same_residue_bead(cly, 'SC6')
+                    if not all((lgx_bb, ags_r2)):
+                        LOG.error(
+                            "Cannot complete glucosepane cross-marker terms: expected "
+                            "LGX:BB and AGS:SC6 in the paired marker residues."
+                        )
+                        continue
+
+                    self.crosslink_bonded['bonds'].append([
+                        clx[0], cly[0], '1', self.dgcp_s1_r1,
+                        f"{self.kgcp_s1_r1}\n"
+                    ])
+                    self.crosslink_bonded['angles'].extend([
+                        [lgx_bb, clx[0], cly[0], '1',
+                         self.agcp_b1_s1_r1[0], f"{self.agcp_b1_s1_r1[1]}\n"],
+                        [clx[0], cly[0], ags_r2, '1',
+                         self.agcp_s1_r1_r2[0], f"{self.agcp_s1_r1_r2[1]}\n"],
+                    ])
+                    connections_found += 1
+                    LOG.info(
+                        f" Added LGX-AGS glucosepane topology between {clx[0]} "
+                        f"and {cly[0]} (distance: {dist:.3f} Å)"
+                    )
+
+                # MOLD: R2/IM2 (LZS:SC3) -- S2/L1 (LZD:SC1), plus the
+                # three source angles crossing the marker boundary.
+                elif (clx[1] == 'LZS' and clx[2] == 'SC3' and
+                      cly[1] == 'LZD' and cly[2] == 'SC1'):
+                    lzs_r1 = self._same_residue_bead(clx, 'SC2')
+                    lzs_r3 = self._same_residue_bead(clx, 'SC4')
+                    lzd_bb = self._same_residue_bead(cly, 'BB')
+                    if not all((lzs_r1, lzs_r3, lzd_bb)):
+                        LOG.error(
+                            "Cannot complete MOLD terms: expected LZS:SC2/SC4 "
+                            "and LZD:BB in the paired marker residues."
+                        )
+                        continue
+
+                    self.crosslink_bonded['bonds'].append([
+                        clx[0], cly[0], '1', self.dmold_r2_s2,
+                        f"{self.kmold_r2_s2}\n"
+                    ])
+                    self.crosslink_bonded['angles'].extend([
+                        [lzs_r1, clx[0], cly[0], '1',
+                         self.amold_r1_r2_s2[0], f"{self.amold_r1_r2_s2[1]}\n"],
+                        [lzs_r3, clx[0], cly[0], '1',
+                         self.amold_r3_r2_s2[0], f"{self.amold_r3_r2_s2[1]}\n"],
+                        [clx[0], cly[0], lzd_bb, '1',
+                         self.amold_r2_s2_b2[0], f"{self.amold_r2_s2_b2[1]}\n"],
+                    ])
+                    connections_found += 1
+                    LOG.info(
+                        f" Added LZS-LZD MOLD topology between {clx[0]} and "
+                        f"{cly[0]} (distance: {dist:.3f} Å)"
+                    )
+
                 # NOTE: find_crosslink_pairs always emits pairs as (LYX/L4Y, arm),
                 # so the reverse-order branches below are currently unreachable; they
                 # are kept as a safeguard in case the pair ordering ever changes.
@@ -414,5 +633,67 @@ class Crosslink:
 
         except Exception as e:
             LOG.error(f"Error setting up crosslink bonded parameters: {str(e)}")
+
+        glucosepane_pair_count = sum(
+            1 for clx, cly in self.crosslink_pairs
+            if clx[1:3] == ['LGX', 'SC1']
+            and cly[1:3] == ['AGS', 'SC5']
+        )
+        if glucosepane_pair_count:
+            glucosepane_bond_count = sum(
+                1 for bond in self.crosslink_bonded['bonds']
+                if bond[3:5] == [self.dgcp_s1_r1, f"{self.kgcp_s1_r1}\n"]
+            )
+            expected_angles = {
+                (*self.agcp_b1_s1_r1,),
+                (*self.agcp_s1_r1_r2,),
+            }
+            glucosepane_angle_count = sum(
+                1 for angle in self.crosslink_bonded['angles']
+                if (angle[4], angle[5].rstrip("\n")) in expected_angles
+            )
+            if (
+                glucosepane_bond_count != glucosepane_pair_count
+                or glucosepane_angle_count
+                != len(expected_angles) * glucosepane_pair_count
+            ):
+                raise IncompleteCrosslinkError(
+                    "Incomplete glucosepane bonded topology: expected "
+                    f"{glucosepane_pair_count} inter-marker bond(s) and "
+                    f"{len(expected_angles) * glucosepane_pair_count} angle(s), generated "
+                    f"{glucosepane_bond_count} bond(s) and "
+                    f"{glucosepane_angle_count} angle(s)."
+                )
+
+        mold_pair_count = sum(
+            1 for clx, cly in self.crosslink_pairs
+            if clx[1:3] == ['LZS', 'SC3']
+            and cly[1:3] == ['LZD', 'SC1']
+        )
+        if mold_pair_count:
+            mold_bond_count = sum(
+                1 for bond in self.crosslink_bonded['bonds']
+                if bond[3:5] == [self.dmold_r2_s2, f"{self.kmold_r2_s2}\n"]
+            )
+            expected_angles = {
+                (*self.amold_r1_r2_s2,),
+                (*self.amold_r3_r2_s2,),
+                (*self.amold_r2_s2_b2,),
+            }
+            mold_angle_count = sum(
+                1 for angle in self.crosslink_bonded['angles']
+                if (angle[4], angle[5].rstrip("\n")) in expected_angles
+            )
+            if (
+                mold_bond_count != mold_pair_count
+                or mold_angle_count != 3 * mold_pair_count
+            ):
+                raise IncompleteCrosslinkError(
+                    "Incomplete MOLD bonded topology: expected "
+                    f"{mold_pair_count} inter-marker bond(s) and "
+                    f"{3 * mold_pair_count} angle(s), generated "
+                    f"{mold_bond_count} bond(s) and "
+                    f"{mold_angle_count} angle(s)."
+                )
 
         return self.crosslink_bonded

@@ -1,0 +1,73 @@
+; Glucosepane arginine-derived marker (AGS), embedded in a peptide chain.
+;
+; Bead correspondence (glucosepane model):
+;   BB  = B2, SC1 = S2, SC2 = R6, SC3 = R5 (virtual site),
+;   SC4 = R4, SC5 = R1 (shared LGX/AGS bead, hosted once on AGS),
+;   SC6 = R2 (virtual site), SC7 = R3.
+;
+; The initial SC5 coordinate is supplied by AGS:NZ.  As in ColBuilder's PYD
+; strategy, this marker-local placement is only the starting geometry; the
+; complete glucosepane bonded network controls the subsequent relaxation.
+
+[ molecule ]
+AGS
+
+[from]
+amber99
+
+[to]
+martini300C
+
+[ martini ]
+BB SC1 SC2 SC3 SC4 SC5 SC6 SC7
+
+[ mapping ]
+amber27 amber36 amber99
+
+[ atoms ]
+    1     N     BB
+    2     H     BB
+    3    CA     BB
+    4    HA    !BB
+    5    CB    SC1
+    6   HB1    SC1
+    7   HB2    SC1
+    8    CG    SC1
+    9   HG1    SC1
+   10   HG2    SC1
+   11    CD    SC1
+   12   HD1    SC1
+   13   HD2    SC1
+   14    NE    SC2
+   15    HE    SC2
+   16    CZ    SC2
+   17   NH1    SC3
+   18   NH2    SC2
+   19     C     BB
+   20     O     BB
+   21   C15    SC4
+   22   H15    SC4
+   23   C16    SC4
+   24    NZ    SC5
+   25   C17    SC6
+   26  H171    SC6
+   27  H172    SC6
+   28   C18    SC6
+   29   H18    SC6
+   30   O18    SC6
+   31  HO18    SC6
+   32   C19    SC7
+   33   H19    SC7
+   34   O19    SC7
+   35  HO19    SC7
+   36   C20    SC7
+   37  H201    SC7
+   38  H202    SC7
+
+[ chiral ]
+  CB     CA    N    C
+  HB1    CA    N    C
+  HB2    CA    N    C
+
+[ chiral ]
+  HA     CA    N    CB    C

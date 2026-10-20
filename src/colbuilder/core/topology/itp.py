@@ -6,7 +6,7 @@ from pathlib import Path
 import os
 
 from colbuilder.core.utils.logger import setup_logger
-from colbuilder.core.topology.crosslink import Crosslink
+from colbuilder.core.topology.crosslink import Crosslink, IncompleteCrosslinkError
 
 LOG = setup_logger(__name__)
 
@@ -24,6 +24,13 @@ class Itp:
     The class maintains separate data structures for initial component-wise storage
     and final merged topologies, ensuring proper index handling and connectivity.
     """
+
+    VIRTUAL_SITE_SECTIONS: Tuple[str, ...] = (
+        "virtual_sites2",
+        "virtual_sites3",
+        "virtual_sites4",
+        "virtual_sitesn",
+    )
 
     def __init__(self, system: Any = None, model_id: Optional[int] = None) -> None:
         """Initialize a new topology processor instance.
@@ -50,7 +57,12 @@ class Itp:
         self.exclusions: List[List[Any]] = self.allocate(model_id=model_id)
         self.go_exclusions: List[List[Any]] = self.allocate(model_id=model_id)
         self.dihedrals: List[List[Any]] = self.allocate(model_id=model_id)
-        self.virtual_sites: List[List[Any]] = self.allocate(model_id=model_id)
+        self.virtual_sites2: List[List[Any]] = self.allocate(model_id=model_id)
+        self.virtual_sites3: List[List[Any]] = self.allocate(model_id=model_id)
+        self.virtual_sites4: List[List[Any]] = self.allocate(model_id=model_id)
+        self.virtual_sitesn: List[List[Any]] = self.allocate(model_id=model_id)
+        # Backwards-compatible name used by the original Go virtual-sitesn path.
+        self.virtual_sites: List[List[Any]] = self.virtual_sitesn
         self.go_table: List[List[Any]] = self.allocate(model_id=model_id)
         self.pairs: List[List[Any]] = self.allocate(model_id=model_id)
 
@@ -64,7 +76,12 @@ class Itp:
         self.final_dihedrals: List[List[Any]] = []
         self.final_exclusions: List[List[Any]] = []
         self.final_go_exclusions: List[List[Any]] = []
-        self.final_virtual_sites: List[List[Any]] = []
+        self.final_virtual_sites2: List[List[Any]] = []
+        self.final_virtual_sites3: List[List[Any]] = []
+        self.final_virtual_sites4: List[List[Any]] = []
+        self.final_virtual_sitesn: List[List[Any]] = []
+        # Backwards-compatible name used by the original Go virtual-sitesn path.
+        self.final_virtual_sites: List[List[Any]] = self.final_virtual_sitesn
         self.final_pairs: List[List[Any]] = []
 
         # Crosslinking (simplified - just store the bonded parameters directly)
@@ -108,6 +125,38 @@ class Itp:
             size = 1
 
         return [[] for _ in range(size)]
+
+    @staticmethod
+    def _offset_virtual_site(
+        entry: List[Any], section: str, offset: int
+    ) -> List[Any]:
+        """Return a virtual-site row with only atom-number fields offset.
+
+        For the fixed-arity sections, the site and all constructing atoms precede
+        the function type.  For ``virtual_sitesn``, the function type is the
+        second field and every subsequent data field is a constructing atom.  The
+        latter convention includes the one-constructor rows emitted for Go sites.
+        """
+        merged = list(entry)
+        if section == "virtual_sitesn":
+            index_positions = [0]
+            for position in range(2, len(merged)):
+                if str(merged[position]).startswith(";"):
+                    break
+                index_positions.append(position)
+        else:
+            constructor_count = int(section[-1])
+            index_positions = list(range(constructor_count + 1))
+
+        for position in index_positions:
+            if position < len(merged):
+                merged[position] = str(int(merged[position]) + offset)
+        return merged
+
+    @staticmethod
+    def _write_row(handle: Any, row: List[Any]) -> None:
+        """Write one tokenized topology row with exactly one trailing newline."""
+        handle.write(" ".join(str(item).rstrip("\n") for item in row) + "\n")
 
     def read_model(
         self, model_id: Optional[int] = None, system: Optional[Any] = None
@@ -204,34 +253,46 @@ class Itp:
         try:
             with open(itp_path, "r") as f:
                 for line in f:
-                    if line[0] == ";":
+                    stripped = line.strip()
+                    if stripped.startswith(";"):
                         continue
 
                     if cnt_con is None:
                         raise ValueError("cnt_con cannot be None when appending to molecule.")
                     self.molecule[cnt_con].append(line)
 
-                    # Parse section headers
-                    if line == "[ atoms ]\n":
-                        bonded_type = "atoms"
-                    elif line == "[ position_restraints ]\n":
-                        bonded_type = "posres"
-                    elif line == "[ bonds ]\n":
-                        bonded_type = "bonds"
-                    elif line == "[ constraints ]\n":
-                        bonded_type = "constraints"
-                    elif line == "[ virtual_sitesn ]\n":
-                        bonded_type = "virtualsites"
-                    elif line == "[ angles ]\n":
-                        bonded_type = "angles"
-                    elif line == "[ dihedrals ]\n":
-                        bonded_type = "dihedrals"
-                    elif line == "[ exclusions ]\n":
-                        bonded_type = "exclusions"
+                    if not stripped:
+                        continue
+
+                    # Accept both canonical ``[ atoms ]`` headers and compact or
+                    # differently spaced variants such as ``[virtual_sites3]``.
+                    if stripped.startswith("[") and stripped.endswith("]"):
+                        section = stripped[1:-1].strip()
+                        section_types = {
+                            "atoms": "atoms",
+                            "position_restraints": "posres",
+                            "bonds": "bonds",
+                            "constraints": "constraints",
+                            "angles": "angles",
+                            "dihedrals": "dihedrals",
+                            "exclusions": "exclusions",
+                            **{name: name for name in self.VIRTUAL_SITE_SECTIONS},
+                        }
+                        bonded_type = section_types.get(section, "")
+                        continue
+
+                    if stripped.startswith("#"):
+                        continue
 
                     # Parse section content
                     if line.split(" ")[0] not in self.no_line:
-                        tokens = [k for k in line.split(" ") if k and k != "\n"]
+                        if bonded_type == "atoms" or bonded_type in self.VIRTUAL_SITE_SECTIONS:
+                            # split() handles arbitrary spaces/tabs and keeps every
+                            # data column, including optional atom masses/A-B state
+                            # columns and all virtual-site coefficients.
+                            tokens = stripped.split()
+                        else:
+                            tokens = [k for k in line.split(" ") if k and k != "\n"]
 
                         # Store tokens in appropriate data structure based on section type
                         if cnt_con is None:
@@ -244,8 +305,8 @@ class Itp:
                             self.bonds[cnt_con].append(tokens)
                         elif bonded_type == "constraints":
                             self.constraints[cnt_con].append(tokens)
-                        elif bonded_type == "virtualsites":
-                            self.virtual_sites[cnt_con].append(tokens)
+                        elif bonded_type in self.VIRTUAL_SITE_SECTIONS:
+                            getattr(self, bonded_type)[cnt_con].append(tokens)
                         elif bonded_type == "angles":
                             tokens[-1] = tokens[-1].replace("\n", "")
                             self.angles[cnt_con].append(tokens)
@@ -446,18 +507,16 @@ class Itp:
         LOG.debug(f"Merging connection {cnt_con} with {len(self.atoms[cnt_con])} atoms, delta_merge: {self.delta_merge}")
         
         # Process atoms with index adjustment
-        merged_atoms = [
-            [
-                int(a[0]) + self.delta_merge,
-                a[1],
-                a[2],
-                a[3],
-                a[4],
-                int(a[5]) + self.delta_merge,
-                a[6],
-            ]
-            for a in self.atoms[cnt_con]
-        ]
+        merged_atoms = []
+        for atom in self.atoms[cnt_con]:
+            # Keep every optional [ atoms ] field (mass and free-energy A/B
+            # columns included); only atom number and charge-group number are
+            # component-local indices that need shifting during a merge.
+            merged_atom = list(atom)
+            merged_atom[0] = int(merged_atom[0]) + self.delta_merge
+            if len(merged_atom) > 5:
+                merged_atom[5] = int(merged_atom[5]) + self.delta_merge
+            merged_atoms.append(merged_atom)
         self.final_atoms.extend(merged_atoms)
 
         # Process position restraints
@@ -479,7 +538,7 @@ class Itp:
             for b in self.bonds[cnt_con]
         ]
         for bond in merged_bonds:
-            if int(bond[-1]) == 1000000:
+            if float(bond[-1]) == 1000000.0:
                 self.final_flex_bonds.append(bond)
             else:
                 self.final_bonds.append(bond)
@@ -520,16 +579,17 @@ class Itp:
         ]
         self.final_constraints.extend(merged_constraints)
 
-        # Process virtual sites
-        merged_vsites = [
-            [
-                str(int(v[0]) + self.delta_merge),
-                str(int(1)),
-                str(int(v[2]) + self.delta_merge) + "\n",
-            ]
-            for v in self.virtual_sites[cnt_con]
-        ]
-        self.final_virtual_sites.extend(merged_vsites)
+        # Process all GROMACS virtual-site families without changing function
+        # types or coefficients.  In particular, this retains the historical Go
+        # ``virtual_sitesn`` rows while permitting arbitrary numbers of defining
+        # atoms for non-Go virtual sites.
+        for section in self.VIRTUAL_SITE_SECTIONS:
+            source = getattr(self, section)[cnt_con]
+            destination = getattr(self, f"final_{section}")
+            destination.extend(
+                self._offset_virtual_site(vsite, section, self.delta_merge)
+                for vsite in source
+            )
 
         # Process Go exclusions
         merged_go_excl = [
@@ -593,6 +653,12 @@ class Itp:
                 LOG.debug(f"  Dihedrals: {len(self.crosslink_bonded['dihedrals'])}")
             else:
                 LOG.debug(f"No crosslinks found for model {model_id}")
+        except IncompleteCrosslinkError as e:
+            # A half-mapped crosslink must abort topology construction.  Writing
+            # an otherwise valid-looking ITP without its inter-marker terms is
+            # more dangerous than failing the model explicitly.
+            LOG.error(f"Incomplete crosslink topology for model {model_id}: {str(e)}")
+            raise
         except Exception as e:
             LOG.warning(f"Could not process crosslinks for model {model_id}: {str(e)}")
             self.crosslink_bonded = {k: [] for k in ["bonds", "angles", "dihedrals"]}
@@ -626,11 +692,7 @@ class Itp:
 
                 f.write("\n\n[ atoms ]\n")
                 for atom in self.final_atoms:
-                    f.write(
-                        "{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}{:>7}\n".format(
-                            *[atom[i] for i in range(7)]
-                        )
-                    )
+                    self._write_row(f, atom)
 
                 f.write("\n[ position_restraints ]\n")
                 f.write("#ifdef POSRES\n")
@@ -662,9 +724,15 @@ class Itp:
                     f.write(" ".join(str(i) for i in constraint))
                 f.write("#endif\n")
 
-                f.write("\n[ virtual_sitesn ]\n")
-                for vsite in self.final_virtual_sites:
-                    f.write(" ".join(str(i) for i in vsite))
+                for section in self.VIRTUAL_SITE_SECTIONS:
+                    virtual_sites = getattr(self, f"final_{section}")
+                    # Preserve the historical empty [ virtual_sitesn ] section in
+                    # generated files while only emitting the new fixed-arity
+                    # sections when they contain data.
+                    if virtual_sites or section == "virtual_sitesn":
+                        f.write(f"\n[ {section} ]\n")
+                        for vsite in virtual_sites:
+                            self._write_row(f, vsite)
 
                 f.write("\n[ angles ]\n")
                 for angle in self.final_angles:
@@ -700,7 +768,8 @@ class Itp:
 
         Creates a file containing exclusion definitions for Go-model interactions,
         specifying which atom pairs should be excluded from non-bonded interactions.
-        Each exclusion entry is written in space-separated format.
+        Each entry is written as "i j ; resnr_i resnr_j": only the two atom indices
+        are data, the residue numbers are kept as a comment.
 
         Args:
             cnt_model: Model counter used for output file naming
@@ -714,10 +783,12 @@ class Itp:
         try:
             with open(output_path, "w") as f:
                 f.write(";[ exclusions ]\n")
-                for exclusion in self.final_go_exclusions:
-                    # Write space-separated items, ensuring no trailing space
-                    exclusion_str = " ".join(str(item) for item in exclusion)
-                    f.write(f"{exclusion_str}\n")
+                for i, j, _, resnr_i, resnr_j in self.final_go_exclusions:
+                    # The file is included inside the [ exclusions ] section of
+                    # col_N.itp, where grompp reads every integer on a line as an
+                    # atom excluded from the first one: the residue numbers must
+                    # stay behind ';' (read_excl drops it from the source files).
+                    f.write(f"{i} {j} ; {resnr_i} {resnr_j}\n")
 
         except PermissionError:
             LOG.error(

@@ -164,6 +164,8 @@ ratio_replace: 30                       # Percentage of crosslinks to remove (0-
 #   "non_enzymatic"           : AGE crosslinks only (Glucosepane, Pentosidine, MOLD).
 #   "all"                     : both enzymatic and non-enzymatic.
 ratio_replace_scope: "enzymatic"
+ratio_replace_mode: "random"          # Or "preserve_attachment": jointly select quotas without newly unlinked models.
+ratio_replace_seed: null              # Set an integer for reproducible replacement selection.
 
 replace_file: "rattus_norvegicus.pdb"   # PDB containing the crosslinks to replace.
 # If geometry_generator is true, this can be omitted (set to null) and the geometry

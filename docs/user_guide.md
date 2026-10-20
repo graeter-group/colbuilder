@@ -273,9 +273,17 @@ files_mix:                  # Required if mix_bool is true
 replace_bool: false         # Enable replacement of crosslinks with standard residues
 ratio_replace: 30           # Percentage of eligible crosslinks to remove (see note below)
 ratio_replace_scope: "enzymatic"  # Crosslinks to replace: "enzymatic" (default), "non_enzymatic" (AGEs + MOLD), or "all"
+ratio_replace_mode: "random"     # Or "preserve_attachment" to avoid newly unlinked models
+ratio_replace_seed: null         # Optional integer seed
 replace_file: null          # File with crosslinks to be replaced
 manual_replacements: null   # Alternative to ratio-based: explicit residues to replace (see below)
 ```
+
+For joint N/C selection that retains at least one crosslink on every initially
+linked model, use `ratio_replace_mode: preserve_attachment`. This optional
+mode rejects infeasible quotas and validates the actual final AMBER ITP bonds;
+it does not certify pulling stability. See
+[Attachment-preserving replacement](attachment_preserving_replacement.md).
 
 The `ratio_replace_scope` parameter controls which crosslinks are eligible for ratio-based
 replacement. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues);
@@ -292,9 +300,17 @@ test its mechanical contribution). Each entry has the form
 
 There's also `auto_fix_unpaired` (default `false`): if enabled, ColBuilder automatically finds
 crosslink markers left without a geometric partner (which would otherwise produce an
-incomplete, non-physical crosslink) and converts them to standard residues. It defers to any
-replacement mechanism you've already configured (`ratio_replace`, `replace_file`, or
-`manual_replacements`) rather than overriding it.
+incomplete, non-physical crosslink) and converts them to standard residues. In the default
+`random` mode, it defers to a positive `ratio_replace`, `replace_file`, or
+`manual_replacements` rather than overriding that request. In this local version,
+`preserve_attachment` keeps automatic orphan cleanup as a separate first step,
+then applies the requested ratio without converting cleanup into a manual override.
+
+Replacement automatically preserves the original backbone coordinates and polymer
+boundaries through Chimera. AMBER generation rejects missing peptide bonds rather
+than exporting an incomplete system. No additional YAML setting is required; see
+[Backbone preservation](backbone_preservation.md) for safeguards, tests and how to
+regenerate outputs produced before this fix.
 
 ### Topology Options
 
@@ -386,6 +402,14 @@ ColBuilder supports various crosslink types found in collagen:
 - **Pentosidine**: Well-characterized AGE crosslink (non-enzymatic, LYS-ARG derived)
 - **NOCROSS**: No crosslinking
 
+In this local version, the Martini 3 glucosepane model is split over the marker residues
+`LGX` and `AGS`. In the fibril, B1 and B2 are the SP2 backbone beads (`BB`) of `LGX` and
+`AGS`; S1 is `LGX:SC1`. The ring beads are on `AGS`: R1 is `AGS:SC5`, and two of them,
+R2 (`AGS:SC6`) and R5 (`AGS:SC3`), are virtual sites. The model was fitted on the all-atom
+collagen fibril. Its parameters are in `data/topology/martini300C-ff/aminoacids.ff`; the
+S1--R1 bond and the B1--S1--R1 and S1--R1--R2 angles, which cross the LGX/AGS boundary, are
+added in `core/topology/crosslink.py`.
+
 Non-enzymatic crosslinks (MOLD, Glucosepane, Pentosidine) can be used as terminal
 crosslinks just like the enzymatic ones, or added on top of an existing structure
 via the mutated PDB workflow (see [Advanced Features](#advanced-features)) —
@@ -464,6 +488,7 @@ To create a heterogeneous microfibril with different crosslink types:
 
 ```yaml
 mix_bool: true
+mix_strategy: whole_models  # Default; choose a complete A/B model component
 ratio_mix: "D:70 T:30"      # 70% type D, 30% type T
 files_mix:
  - "human-D.pdb"            # triple helix PDB with type D crosslinks
@@ -471,6 +496,27 @@ files_mix:
 ```
 
 This feature allows modeling of collagen structures with a mixture of crosslink types.
+
+For alternative crosslinks at shared loci, with additional crosslinks present
+in only one template, use the separate `shared_sites` strategy:
+
+```yaml
+mix_bool: true
+mix_strategy: shared_sites
+ratio_mix: "A:50 B:50"
+files_mix:
+  - PYD.pdb
+  - MOLD_plus_GCP.pdb
+mix_alignment_tolerance: 0.25  # Angstrom; maximum rigid-transfer backbone residual
+```
+
+This mixes PYD/MOLD at corresponding residue positions, counting complete
+crosslinks separately for each positional family (e.g. N and C). It retains
+all complete additional GCP sites, including those whose models select PYD.
+It does not apply the ratio to additional sites or to the number of marker atoms.
+Only two compatible templates are currently supported. See
+[Shared-Site Mixing](shared_site_mixing.md) for geometry requirements, validation,
+rounding, and the generated `crosslink_mix_report.json` audit.
 
 ### Replacing Crosslinks
 
@@ -500,10 +546,33 @@ topology_generator: true
 force_field: "martini3"     # For coarse-grained simulations
 ```
 
-Martini3 crosslink parametrization currently only covers PYD and HLKNL; other
-crosslink types (DPD, PYL, DPL, MOLD, and the non-enzymatic AGE types) aren't
-yet parametrized for Martini3 and won't produce correct coarse-grained bonded
-terms — use `force_field: "amber99"` for those.
+This local fork includes Martini3 models for PYD, HLKNL, Glucosepane
+(`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`), with mappings, residue
+parameters and inter-marker bonded terms. Other crosslink types, including
+DPD, PYL, DPL and Pentosidine, still require `force_field: "amber99"`.
+The Glucosepane and MOLD topologies are checked when they are built (complete
+inter-marker terms); this does not establish equilibrated MD stability or
+parameter transferability to every system.
+
+Since 18/10/2026, martinize2 builds the connectivity of each model from the amber99 residue
+templates (`-bonds-from name`) plus explicit CONECT records for every peptide bond, including
+the ACE and NME caps. It no longer guesses bonds from distances, which created fake bonds at
+close contacts and silently removed force-field angles. Compared with earlier topologies,
+atoms, coordinates and the Go model are unchanged; the force-field `-BB BB SC1` angle is now
+present on every HYP and PRO (previously missing on about 44% of HYP and 10% of PRO) and on
+the N-terminal PYD `LY2`, and `SC1 BB +BB` on the helical `LYX` (C103). Atom names that differ
+from the amber99 templates (ILE `CD1`, ACE/NME `1HH3`-`3HH3`) are renamed in the martinize2
+input only. ColBuilder stops with an error (`TOP_MART_009`) if an input atom does not match its
+template (unknown or duplicate atom name, residue split in the file), if two adjacent residues of
+a chain cannot be joined by a peptide CONECT (numbering gap or insertion code, missing C/N atom,
+C-N > 4 A), or if a martinize2 topology lacks one of these angles; with
+`TOP_MART_008` if a backbone bond still had to be repaired after martinize2; and with
+`TOP_MART_002` if any model failed, instead of writing an incomplete fibril topology.
+
+The upstream `main` update changes the Martini PYD equilibrium angles:
+`al2yx_1/2/3` are now 60/100/100 degrees and `al3yx_2` is 140 degrees.
+These PYD changes are separate from the local Glucosepane and MOLD parameters,
+which are not affected by them.
 
 ## Troubleshooting
 

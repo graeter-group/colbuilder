@@ -29,6 +29,8 @@ dependencies = [
     "vermouth==0.9.1",
     "pandas==2.2.2",
     "biopython>=1.87",
+    "scipy>=1.9",
+    "networkx>=2.8,<4",
     "PyYAML",
     "pydantic>=2.0",
     "tqdm",

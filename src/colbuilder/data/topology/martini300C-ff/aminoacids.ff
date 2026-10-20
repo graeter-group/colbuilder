@@ -13,8 +13,8 @@
 ; limitations under the License.
 
 [ macros ]
-protein_resnames "GLY|ALA|CYS|VAL|LEU|ILE|MET|PRO|HYP|ASN|GLN|ASP|ASPP|ASH|GLU|GLUP|GLH|THR|SER|LYS|LSN|LYN|ARG|HIS|HSD|HSP|HID|HIP|HIE|PHE|TYR|TRP|NME|ACE|CLA|HYP|L4Y|L5Y|LY2|LY3|LYX"
-protein_resnames_non_pro "GLY|ALA|CYS|VAL|LEU|ILE|MET|ASN|GLN|ASP|ASPP|ASH|GLU|GLUP|GLH|THR|SER|LYS|LSN|LYN|ARG|HIS|HSD|HSP|HID|HIP|HIE|PHE|TYR|TRP|NME|ACE|CLA|HYP|L4Y|L5Y|LY2|LY3|LYX"
+protein_resnames "GLY|ALA|CYS|VAL|LEU|ILE|MET|PRO|HYP|ASN|GLN|ASP|ASPP|ASH|GLU|GLUP|GLH|THR|SER|LYS|LSN|LYN|ARG|HIS|HSD|HSP|HID|HIP|HIE|PHE|TYR|TRP|NME|ACE|CLA|HYP|L4Y|L5Y|LY2|LY3|LYX|LGX|AGS|LZS|LZD"
+protein_resnames_non_pro "GLY|ALA|CYS|VAL|LEU|ILE|MET|ASN|GLN|ASP|ASPP|ASH|GLU|GLUP|GLH|THR|SER|LYS|LSN|LYN|ARG|HIS|HSD|HSP|HID|HIP|HIE|PHE|TYR|TRP|NME|ACE|CLA|HYP|L4Y|L5Y|LY2|LY3|LYX|LGX|AGS|LZS|LZD"
 prot_default_bb_type P2
 stiff_fc 1000000
 
@@ -189,8 +189,154 @@ LYX                1
 ;  i     j    k     funct   angle  force.c.
   BB   SC1  SC2       2   180   150    
  SC1   SC2  SC3       2   180   150      
- SC2   SC3  SC4       2   140   150  
+ SC2   SC3  SC4       2   160   150  
  SC2   SC3  SC5       2   100   200
+
+
+;;;; GLUCOSEPANE - LYSINE-DERIVED MARKER LGX
+;
+; Martini 3 glucosepane model with two virtual sites (R2 = AGS:SC6,
+; R5 = AGS:SC3), fitted on the all-atom collagen fibril; harmonic bonds,
+; angles and improper.
+; B1 is represented by the peptide BB bead.  R1 is the inter-marker bead
+; shared by LGX:CE and AGS:NZ; it is instantiated once as AGS:SC5, so the
+; S1--R1 bond and the two angles crossing the marker boundary (B1--S1--R1,
+; S1--R1--R2) are added in core/topology/crosslink.py after connected
+; collagen molecules have been merged.
+
+[ moleculetype ]
+; molname       nrexcl
+LGX                1
+
+[ atoms ]
+; id  type  resnr  resid  atom  cgnr  charge  [mass]
+  1   SP2      1    LGX    BB     1     0.0
+  2   SC2      1    LGX   SC1     2     0.0
+
+[ bonds ]
+#meta {"group": "Glucosepane"}
+; B1--S1
+ BB   SC1    1    0.3138    4858.3
+
+
+;;;; GLUCOSEPANE - ARGININE-DERIVED MARKER AGS
+;
+; ColBuilder aliases: BB=B2, SC1=S2, SC2=R6, SC3=R5(VS), SC4=R4,
+; SC5=R1(shared/hosted here), SC6=R2(VS), SC7=R3.
+; In the fibril, B2 (like B1 on LGX) is the SP2 peptide backbone bead.
+
+[ moleculetype ]
+; molname       nrexcl
+AGS                1
+
+[ atoms ]
+; id  type   resnr  resid  atom  cgnr  charge  [mass]
+  1   SP2       1    AGS    BB     1     0.0          ; B2
+  2   SC2       1    AGS   SC1     2     0.0          ; S2
+  3  SN4a       1    AGS   SC2     3     0.0    66.0  ; R6
+  4  TN5a       1    AGS   SC3     4     0.0     0.0  ; R5 (virtual site)
+  5   TC4       1    AGS   SC4     5     0.0    66.0  ; R4
+  6  TN3a       1    AGS   SC5     6     0.0    66.0  ; R1
+  7   SP1       1    AGS   SC6     7     0.0     0.0  ; R2 (virtual site)
+  8   SP1       1    AGS   SC7     8     0.0    72.0  ; R3
+
+[ bonds ]
+#meta {"group": "Glucosepane"}
+; R3--R1, R3--R4, R1--R4
+ SC7  SC5    1    0.4718   20991.8
+ SC7  SC4    1    0.3350   50407.9
+ SC5  SC4    1    0.2686   27725.5
+; R4--R6, R6--S2, S2--B2
+ SC4  SC2    1    0.2777   66160.2
+ SC2  SC1    1    0.3417   56660.3
+ SC1   BB    1    0.3204   25591.4
+
+[ angles ]
+#meta {"group": "Glucosepane"}
+; R3--R4--R6, R1--R4--R6
+ SC7  SC4  SC2    1     94.188    256.67
+ SC5  SC4  SC2    1    111.936    141.84
+; R4--R6--S2, R5--R6--S2, R6--S2--B2
+ SC4  SC2  SC1    1    135.443    276.46
+ SC3  SC2  SC1    1     90.135    247.80
+ SC2  SC1   BB    1    148.985    329.18
+
+[ dihedrals ]
+#meta {"group": "Glucosepane"}
+; Harmonic improper R1--R3--R4--R6
+ SC5  SC7  SC4  SC2    2   -113.763    102.57
+
+[ virtual_sites3 ]
+; R2 = R3 + a(R1-R3) + b(R4-R3) + c[(R1-R3)x(R4-R3)]
+ SC6  SC7  SC5  SC4    4    0.783624   -0.595103    1.823465
+; R5 = R1 + a(R4-R1) + b(R6-R1) + c[(R4-R1)x(R6-R1)]
+ SC3  SC5  SC4  SC2    4    1.123965    0.365040   -1.183238
+
+[ exclusions ]
+; Complete non-bonded exclusion clique over the six ring beads only
+; (R3 R2 R1 R4 R5 R6).
+ SC7  SC6  SC5  SC4  SC3  SC2
+ SC6  SC5  SC4  SC3  SC2
+ SC5  SC4  SC3  SC2
+ SC4  SC3  SC2
+ SC3  SC2
+
+
+;;;; MOLD - IMIDAZOLIUM-CORE MARKER LZS
+;
+; Final aliases: BB=B1, SC1=S1, SC2=R1, SC3=R2(shared/hosted here),
+; SC4=R3.  In the source topology these were BBR, R1, IM1, IM2 and IM3,
+; respectively.  The source IM2--L1 bond and the three angles spanning
+; the LZS/LZD marker boundary are added after connected collagen molecules
+; have been merged.
+
+[ moleculetype ]
+; molname       nrexcl
+LZS                1
+
+[ atoms ]
+; id  type   resnr  resid  atom  cgnr  charge
+  1   SP2       1    LZS    BB     1     0.0
+  2    C1       1    LZS   SC1     2     0.0
+  3  SN2q       1    LZS   SC2     3     0.3
+  4  SN4q       1    LZS   SC3     4     0.7
+  5   TC6       1    LZS   SC4     5     0.0
+
+[ bonds ]
+#meta {"group": "MOLD"}
+; IM1--IM2, IM1--IM3, IM1--R1, IM2--IM3, R1--BBR
+ SC2  SC3    1    0.355    61818.137
+ SC2  SC4    1    0.401    56364.559
+ SC2  SC1    1    0.315    16086.546
+ SC3  SC4    1    0.316    42615.647
+ SC1   BB    1    0.334    30653.693
+
+[ angles ]
+#meta {"group": "MOLD"}
+; IM2--IM1--R1, IM3--IM1--R1, IM1--R1--BBR
+ SC3  SC2  SC1    1    102.508     50.914
+ SC4  SC2  SC1    1    117.270     61.419
+ SC2  SC1   BB    1    132.714     89.886
+
+
+;;;; MOLD - SECOND LYSINE-DERIVED MARKER LZD
+;
+; Final aliases: BB=B2 and SC1=S2 (BBL and L1 in the source topology).
+; R2/IM2 is hosted on LZS:SC3.
+
+[ moleculetype ]
+; molname       nrexcl
+LZD                1
+
+[ atoms ]
+; id  type  resnr  resid  atom  cgnr  charge
+  1   SP2      1    LZD    BB     1     0.0
+  2    C1      1    LZD   SC1     2     0.0
+
+[ bonds ]
+#meta {"group": "MOLD"}
+; L1--BBL
+ SC1   BB    1    0.334    28331.059
  
  ;;; GLYCINE
 

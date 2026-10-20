@@ -399,8 +399,11 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
     ),
     "TOP_MART_002": ErrorInfo(
         code="TOP_MART_002",
-        message="No models were successfully processed with Martinize2",
+        message="Martinize2 processing failed for one or more models",
         suggestions=[
+            "The message lists the connections (col_<model>.<connection>) or models that failed at martinize2, "
+            "contact map, Go model or ITP step, were skipped by an empty input or an unexpected error, or whose "
+            "group was not merged; the log above it has the cause",
             "Check input PDB files for correct format",
             "Verify Martinize2 installation",
             "Check Martinize2 error messages for detailed information",
@@ -431,6 +434,33 @@ TOPOLOGY_ERRORS: Dict[str, ErrorInfo] = {
             "Verify Martinize2 is installed and in your PATH",
             "Check the martinize2_command setting in your configuration",
             "Ensure force field directory exists and has proper permissions",
+        ],
+    ),
+    "TOP_MART_008": ErrorInfo(
+        code="TOP_MART_008",
+        message="Martini chain integrity check failed",
+        suggestions=[
+            "A chain was split or reordered by martinize2, has no Go contacts, or misses a backbone bond",
+            "Keep the intermediate files (topology_debug: true) and inspect the per-model tmp.pdb, "
+            "<model>.<connection>.CG.pdb and col_<model>.<connection>.itp named in the message",
+            "Check the all-atom geometry of the residues named in the message (stretched peptide bonds, clashes)",
+        ],
+    ),
+    "TOP_MART_009": ErrorInfo(
+        code="TOP_MART_009",
+        message="Martini connectivity check failed",
+        suggestions=[
+            "The martinize2 input has residue names, atom names or serials that the amber99 residue templates "
+            "cannot bond (unknown or duplicate names, split residues), a peptide bond between adjacent "
+            "residues of a chain that cannot be written as CONECT (numbers not consecutive or with an "
+            "insertion code, missing C/N atom, C-N > 4 A), or the martinize2 topology misses a "
+            "backbone-side chain angle of the force field",
+            "Check the residues and atoms named in the message against data/topology/amber99/aminoacids.rtp; "
+            "if an atom name is only a naming variant, add it to AMBER99_ATOM_RENAMES in core/topology/martini.py",
+            "For a missing angle, look for a non-peptide bond between the named residues in the martinize2 "
+            "graph (martinize2 -write-graph on the kept tmp.pdb)",
+            "Keep the intermediate files (topology_debug: true) to inspect the per-model tmp.pdb and "
+            "col_<model>.<connection>.itp named in the message",
         ],
     ),
 }

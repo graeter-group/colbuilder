@@ -214,7 +214,7 @@ mixing mode (`mix_bool: true`) it defaults to 40.0 nm if not set.
   - **Ratio-based** (`ratio_replace` + `ratio_replace_scope`): a random percentage of eligible crosslinks, drawn from the chosen scope. `ratio_replace` is the fraction **removed**, not the remaining density — e.g. `ratio_replace: 70` removes 70% of eligible crosslinks, leaving 30%.
   - **Manual** (`manual_replacements`): exact residues named explicitly, for reproducible, targeted edits. Each entry targets a residue inside a per-model `{id}.caps.pdb` file, only written to disk under `debug: true`.
 - `ratio_replace_scope` selects which crosslinks may be replaced by ratio-based replacement. The default `enzymatic` targets enzymatic crosslinks (HLKNL/PYD-derived residues); `non_enzymatic` targets AGE crosslinks (Glucosepane, Pentosidine) and MOLD; `all` considers both
-- `auto_fix_unpaired` automatically finds crosslink markers that would otherwise be left without a geometric partner and converts them to standard residues. If you've already configured your own replacement (`ratio_replace`, `replace_file`, or `manual_replacements`), ColBuilder defers to it instead of silently overriding it with its own auto-fix list — it logs a warning rather than changing your config.
+- `auto_fix_unpaired` finds crosslink markers left without a geometric partner and converts them to standard residues. In the default `random` mode, a positive `ratio_replace`, `replace_file`, or `manual_replacements` takes precedence, with a warning instead of an automatic override. In this local fork's `preserve_attachment` mode, orphan cleanup runs separately before the requested ratio, including 0%, and does not become a manual override. See [attachment-preserving replacement](attachment_preserving_replacement.md).
 - Set `replace_file: null` to use geometry generation output for replacement
 
 ### Topology Generation Parameters
@@ -229,7 +229,7 @@ mixing mode (`mix_bool: true`) it defaults to 40.0 nm if not set.
 
 **Notes**:
 - **Topology-only mode**: When both `sequence_generator=false` and `geometry_generator=false` but `topology_generator=true`, ColBuilder generates topology from an existing fibril PDB
-- Martini3 crosslink parametrization currently only covers PYD and HLKNL; other crosslink types (DPD, PYL, DPL, MOLD, and the non-enzymatic AGE types) are not yet parametrized for Martini3 and will not produce correct coarse-grained bonded terms — use `force_field: "amber99"` for those
+- This local fork includes Martini3 models for PYD, HLKNL, Glucosepane (`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`). Other types, including DPD, PYL, DPL and Pentosidine, require `force_field: "amber99"`. See the [local model status and validation limits](user_guide.md#using-different-force-fields).
 - Set `topology_debug: true` to preserve intermediate files for troubleshooting
 
 ## Internal Data Structures

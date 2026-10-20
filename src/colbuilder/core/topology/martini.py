@@ -14,6 +14,7 @@ The module requires the Martinize2 tool and custom contact map utilities.
 """
 
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -39,6 +40,413 @@ from colbuilder.core.utils.logger import setup_logger
 from colbuilder.core.utils.files import FileManager
 
 LOG = setup_logger(__name__)
+
+# martinize2 -bonds-from used for every model (see _martinize_cmd in build_martini3). With "name",
+# martinize2 bonds the atoms of a residue from the amber99 block of its name and never guesses bonds
+# by distance; the only inter-residue bonds are the CONECT records written by backbone_conect.
+# Distance guessing made fake bonds at close contacts (e.g. C(i)-CD(i+1) of HYP/PRO, crosslink side
+# chains clashing with a neighbour), and these silently removed force-field angles.
+MARTINIZE2_BONDS_FROM = "name"
+# Peptide bonds of the all-atom input longer than this are logged (diagnostics only).
+STRETCHED_PEPTIDE_CN_ANGSTROM = 1.6
+# Consecutive residues of a chain whose peptide C-N is longer than this are a real gap, not a
+# stretched bond: backbone_conect stops the build (TOP_MART_009) instead of connecting them.
+MAX_PEPTIDE_CN_ANGSTROM = 4.0
+# Atom names of the all-atom models that differ from their amber99 block (data/topology/amber99/
+# aminoacids.rtp). With -bonds-from name an atom with an unknown name gets no bond, and martinize2
+# rebuilds its heavy atom without a position, which moves the bead. Only the martinize2 input is renamed.
+AMBER99_ATOM_RENAMES = {
+    ("ILE", "CD1"): "CD",
+    ("ACE", "1HH3"): "HH31",
+    ("ACE", "2HH3"): "HH32",
+    ("ACE", "3HH3"): "HH33",
+    ("NME", "1HH3"): "HH31",
+    ("NME", "2HH3"): "HH32",
+    ("NME", "3HH3"): "HH33",
+}
+# Crosslink residues whose backbone must stay connected to its chain neighbours.
+CROSSLINK_RESNAMES = frozenset({"LY2", "LY3", "L4Y", "L5Y", "LYX", "AGS", "LGX", "LZS", "LZD"})
+# Residues with their own BBS angles in martini300C (data/topology/martini300C-ff/aminoacids.ff,
+# links "BBS angles LY2/LY3/LYX"): one -BB BB SC1 angle on top of the generic one, and one SC1 BB +BB.
+CROSSLINK_BBS_RESNAMES = frozenset({"LY2", "LY3", "LYX"})
+# Sections of an amber99 .rtp block (anything else in brackets starts a new block).
+_RTP_SECTIONS = frozenset({"atoms", "bonds", "angles", "dihedrals", "impropers", "cmap", "exclusions", "bondedtypes"})
+
+
+def _pdb_residue_runs(lines: List[str]) -> List[Tuple[str, List[Tuple[str, str, str]]]]:
+    """Return the chains of PDB lines in file order as (chain, [(resname, resid, icode), ...]).
+
+    A new chain starts at every TER record and wherever the chain identifier changes.
+    """
+    runs: List[Tuple[str, List[Tuple[str, str, str]]]] = []
+    cur_chain: Optional[str] = None
+    cur: List[Tuple[str, str, str]] = []
+    last_key = None
+    for line in lines:
+        if line.startswith("TER"):
+            if cur:
+                runs.append((cur_chain, cur))
+            cur, cur_chain, last_key = [], None, None
+            continue
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        chain = line[21:22]
+        key = (line[17:20].strip(), line[22:26].strip(), line[26:27].strip())
+        if chain != cur_chain:
+            if cur:
+                runs.append((cur_chain, cur))
+            cur, cur_chain, last_key = [], chain, None
+        if key != last_key:
+            cur.append(key)
+            last_key = key
+    if cur:
+        runs.append((cur_chain, cur))
+    return runs
+
+
+def _cg_backbone_beads(cg_pdb: Union[str, Path]) -> List[Optional[Tuple[int, str, str, int]]]:
+    """BB beads of a CG PDB in atom order as (atom_index, resname, chain, resid); None marks a TER record.
+
+    atom_index is the 1-based running index of the ATOM/HETATM record, which equals the
+    atom number of the corresponding (merged) itp.
+    """
+    beads: List[Optional[Tuple[int, str, str, int]]] = []
+    idx = 0
+    with open(cg_pdb) as fh:
+        for line in fh:
+            if line.startswith(("ATOM  ", "HETATM")):
+                idx += 1
+                if line[12:16].strip() == "BB":
+                    beads.append((idx, line[17:20].strip(), line[21:22], int(line[22:26])))
+            elif line.startswith("TER") and beads and beads[-1] is not None:
+                beads.append(None)
+    return beads
+
+
+def _bead_chain_runs(beads: List[Optional[Tuple[int, str, str, int]]]) -> List[List[Tuple[int, str, str, int]]]:
+    """Split BB beads into chains: a chain ends at a TER record or where the chain identifier changes."""
+    runs: List[List[Tuple[int, str, str, int]]] = []
+    cur: List[Tuple[int, str, str, int]] = []
+    for bead in beads:
+        if bead is None or (cur and bead[2] != cur[-1][2]):
+            if cur:
+                runs.append(cur)
+            cur = []
+        if bead is not None:
+            cur.append(bead)
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def check_cg_residue_order(aa_pdb: List[str], cg_pdb: Union[str, Path], label: str) -> None:
+    """Raise if martinize2 did not keep the residues of the input PDB, chain by chain and in order.
+
+    create_goVirt.py maps the contacts of the all-atom map (residues numbered in input order) onto
+    the CG backbone beads by position, and backbone_repair only joins consecutive residues, so any
+    reordering or splitting of a chain by martinize2 silently corrupts the Go model and the backbone.
+    """
+    aa_runs = [(chain, [res[0] for res in residues]) for chain, residues in _pdb_residue_runs(aa_pdb)]
+    cg_runs = [(run[0][2], [bead[1] for bead in run]) for run in _bead_chain_runs(_cg_backbone_beads(cg_pdb))]
+    if aa_runs == cg_runs:
+        return
+    problems = []
+    if [c for c, _ in aa_runs] != [c for c, _ in cg_runs]:
+        problems.append(
+            f"chains in input {[f'{c}:{len(r)}' for c, r in aa_runs]} but in martinize2 output "
+            f"{[f'{c}:{len(r)}' for c, r in cg_runs]} (chain:residues)"
+        )
+    for (ca, ra), (cc, rc) in zip(aa_runs, cg_runs):
+        if (ca, ra) != (cc, rc):
+            first = next((i for i, (x, y) in enumerate(zip(ra, rc)) if x != y), min(len(ra), len(rc)))
+            problems.append(
+                f"chain {ca}: {len(ra)} residues in input, chain {cc}: {len(rc)} BB beads in output, "
+                f"first difference at position {first + 1} (input {ra[first:first + 3]}, output {rc[first:first + 3]})"
+            )
+            break
+    raise TopologyGenerationError(
+        message=(
+            f"{label}: martinize2 changed the residue order or chain composition of the input "
+            f"({'; '.join(problems)}). The Go contacts and backbone of this model would be wrong."
+        ),
+        error_code="TOP_MART_008",
+        context={"model": label, "cg_pdb": str(cg_pdb)},
+    )
+
+
+def check_go_contacts_per_chain(go_table: Union[str, Path], cg_pdb: Union[str, Path], moltype: str) -> Dict[str, int]:
+    """Count the Go contacts touching each chain of one martinize2 model; raise if a chain has none.
+
+    The Go virtual site ``{moltype}_{k}`` belongs to the k-th BB bead of the CG structure.
+    """
+    runs = _bead_chain_runs(_cg_backbone_beads(cg_pdb))
+    chain_of_k: Dict[int, int] = {}
+    k = 0
+    for ci, run in enumerate(runs):
+        for _ in run:
+            k += 1
+            chain_of_k[k] = ci
+    counts = [0] * len(runs)
+    prefix = f"{moltype}_"
+    with open(go_table) as fh:
+        for line in fh:
+            tokens = line.split()
+            if len(tokens) < 2 or not tokens[0].startswith(prefix) or not tokens[1].startswith(prefix):
+                continue
+            for name in tokens[:2]:
+                suffix = name[len(prefix):]
+                ci = chain_of_k.get(int(suffix)) if suffix.isdigit() else None
+                if ci is not None:
+                    counts[ci] += 1
+    labels = [f"{run[0][2]}{ci + 1}" for ci, run in enumerate(runs)]
+    empty = [label for label, n in zip(labels, counts) if n == 0]
+    if empty:
+        raise TopologyGenerationError(
+            message=(
+                f"{moltype}: no Go contacts for chain(s) {empty} (contacts per chain: "
+                f"{dict(zip(labels, counts))}). The contact map and the CG backbone do not match."
+            ),
+            error_code="TOP_MART_008",
+            context={"moltype": moltype, "go_table": str(go_table)},
+        )
+    return dict(zip(labels, counts))
+
+
+def check_backbone_continuity(itp_path: Union[str, Path], merge_pdb: Union[str, Path]) -> None:
+    """Raise if a chain of a written col_N.itp is not one continuous BB-BB bonded backbone.
+
+    Every pair of consecutive BB beads of a chain (TER records and chain identifiers of the merged
+    CG PDB delimit the chains) must be joined by a bond or a constraint.
+    """
+    connected = set()
+    section = None
+    with open(itp_path) as fh:
+        for line in fh:
+            s = line.split(";")[0].strip()
+            if not s or s.startswith("#"):
+                continue
+            if s.startswith("["):
+                section = s.strip("[] ")
+                continue
+            if section in ("bonds", "constraints"):
+                tokens = s.split()
+                if len(tokens) >= 2 and tokens[0].isdigit() and tokens[1].isdigit():
+                    connected.add(frozenset((int(tokens[0]), int(tokens[1]))))
+    missing = []
+    for run in _bead_chain_runs(_cg_backbone_beads(merge_pdb)):
+        for a, b in zip(run, run[1:]):
+            if frozenset((a[0], b[0])) not in connected:
+                tag = " (crosslink residue)" if a[1] in CROSSLINK_RESNAMES or b[1] in CROSSLINK_RESNAMES else ""
+                missing.append(f"chain {a[2]} {a[1]}{a[3]}-{b[1]}{b[3]} (BB {a[0]}-{b[0]}){tag}")
+    if missing:
+        raise TopologyGenerationError(
+            message=(
+                f"{Path(itp_path).name}: {len(missing)} chain(s) not continuous, missing backbone bond(s): "
+                f"{'; '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}"
+            ),
+            error_code="TOP_MART_008",
+            context={"itp": str(itp_path), "merge_pdb": str(merge_pdb)},
+        )
+
+
+def _amber99_block_atoms(rtp_path: Union[str, Path]) -> Dict[str, set]:
+    """Atom names of every block of an amber99 .rtp file, as {block: {atom names}}."""
+    blocks: Dict[str, set] = {}
+    block, section = None, None
+    with open(rtp_path) as fh:
+        for line in fh:
+            s = line.split(";")[0].strip()
+            match = re.match(r"^\[\s*(\S+)\s*\]$", s)
+            if match:
+                if match.group(1) in _RTP_SECTIONS:
+                    section = match.group(1)
+                else:
+                    block, section = match.group(1), None
+                    blocks[block] = set()
+            elif s and block is not None and section == "atoms":
+                blocks[block].add(s.split()[0])
+    return blocks
+
+
+def check_martinize_input(pdb: List[str], rtp_path: Union[str, Path], label: str) -> None:
+    """Raise if the martinize2 input has atoms that the amber99 residue templates cannot bond.
+
+    With -bonds-from name, martinize2 bonds the atoms of a residue from the amber99 block of its
+    name: a residue without a block, or an atom whose name is not in the block, gets no bond and is
+    rebuilt without a position (the bead moves). The peptide bonds are CONECT records, which vermouth
+    reads as fixed 5-column atom serials, so the serials must be unique numbers of at most 5 digits.
+    A residue must also be one contiguous run of uniquely named atoms: vermouth cannot bond a residue
+    with a duplicate atom name and, without distance bonds, leaves it unbonded. Missing heavy atoms
+    (rebuilt by martinize2) and CYS (disulfides are not detected without distance bonds) are only logged.
+    """
+    blocks = _amber99_block_atoms(rtp_path)
+    residues: List[Tuple[str, str, set]] = []  # (label, resname, atom names)
+    serials: set = set()
+    bad_serials: List[str] = []
+    duplicate_names: List[str] = []
+    split_residues: List[str] = []
+    seen_keys: set = set()
+    cur_key = None
+    for line in pdb:
+        if line.startswith("TER"):
+            cur_key = None
+            continue
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        resname = line[17:20].strip()
+        key = (line[21:22], line[22:27], resname)
+        if key != cur_key:
+            tag = f"{resname}{line[22:27].strip()}:{line[21:22]}"
+            if key in seen_keys:
+                split_residues.append(tag)
+            seen_keys.add(key)
+            residues.append((tag, resname, set()))
+            cur_key = key
+        name = line[12:16].strip()
+        if name in residues[-1][2]:
+            duplicate_names.append(f"{residues[-1][0]}:{name}")
+        residues[-1][2].add(name)
+        serial = line[6:11].strip()
+        if not serial.isdigit() or int(serial) in serials:
+            bad_serials.append(serial or "<blank>")
+        else:
+            serials.add(int(serial))
+
+    no_block: Dict[str, List[str]] = {}
+    unknown: Dict[Tuple[str, str], List[str]] = {}
+    missing_heavy: Dict[Tuple[str, str], int] = {}
+    for tag, resname, names in residues:
+        block = blocks.get(resname)
+        if block is None:
+            no_block.setdefault(resname, []).append(tag)
+            continue
+        for name in sorted(names - block):
+            unknown.setdefault((resname, name), []).append(tag)
+        for name in sorted(block - names):
+            if not name.lstrip("0123456789").startswith("H"):
+                missing_heavy[(resname, name)] = missing_heavy.get((resname, name), 0) + 1
+
+    if missing_heavy:
+        LOG.warning(
+            f"{label}: heavy atoms absent from the martinize2 input (rebuilt by martinize2): "
+            f"{', '.join(f'{r}:{a} x{n}' for (r, a), n in sorted(missing_heavy.items()))}"
+        )
+    if any(resname == "CYS" for _, resname, _ in residues):
+        LOG.warning(
+            f"{label}: CYS present; with -bonds-from {MARTINIZE2_BONDS_FROM} martinize2 does not detect "
+            "disulfide bridges"
+        )
+
+    problems = []
+    if no_block:
+        problems.append(
+            "residue(s) without an amber99 block: "
+            + ", ".join(f"{r} x{len(t)} (first {t[0]})" for r, t in sorted(no_block.items()))
+        )
+    if unknown:
+        problems.append(
+            "atom name(s) not in their amber99 block: "
+            + ", ".join(f"{r}:{a} x{len(t)} (first {', '.join(t[:3])})" for (r, a), t in sorted(unknown.items()))
+        )
+    if bad_serials:
+        problems.append(
+            f"{len(bad_serials)} atom serial(s) not unique or not a number of at most 5 digits "
+            f"(first {bad_serials[:5]}), {len(serials) + len(bad_serials)} atoms"
+        )
+    if duplicate_names:
+        problems.append(
+            f"{len(duplicate_names)} duplicate atom name(s) within a residue (first {duplicate_names[:5]})"
+        )
+    if split_residues:
+        problems.append(
+            f"{len(split_residues)} residue(s) split into non-contiguous runs (first {split_residues[:5]})"
+        )
+    if problems:
+        raise TopologyGenerationError(
+            message=(
+                f"{label}: martinize2 input cannot be bonded from the amber99 residue templates "
+                f"({Path(rtp_path).name}): {'; '.join(problems)}"
+            ),
+            error_code="TOP_MART_009",
+            context={"model": label, "rtp": str(rtp_path)},
+        )
+
+
+def check_bbs_angles(itp_path: Union[str, Path], label: str) -> None:
+    """Raise if a martinize2 itp lacks a backbone-side chain (BBS) angle that martini300C defines.
+
+    martini300C (data/topology/martini300C-ff/aminoacids.ff) gives every residue with an SC1 bead
+    whose BB is bonded to the BB of the previous residue the angle -BB BB SC1 ("BBS angles regular
+    martini"), the first residue of a chain (BB not bonded to a previous BB) the angle SC1 BB +BB
+    ("First SBB regular martini"), and LY2, LY3 and LYX (CROSSLINK_BBS_RESNAMES, -collagen) one more
+    -BB BB SC1 and one SC1 BB +BB angle of their own. vermouth applies links only where the beads
+    form exactly the link graph, so an extra CG edge between these beads (from a wrong all-atom
+    bond) drops the angle without a warning. Only the number of angles on each bead triple is
+    checked; their parameters come from the force field.
+    """
+    atoms: List[Tuple[int, str, str, str]] = []  # (index, resnr, resname, bead)
+    bonded: set = set()
+    angles: Dict[Tuple[int, int, int], int] = {}
+    section = None
+    with open(itp_path) as fh:
+        for line in fh:
+            s = line.split(";")[0].strip()
+            if not s or s.startswith("#"):
+                continue
+            if s.startswith("["):
+                section = s.strip("[] ")
+                continue
+            tokens = s.split()
+            if section == "atoms" and len(tokens) >= 5:
+                atoms.append((int(tokens[0]), tokens[2], tokens[3], tokens[4]))
+            elif section in ("bonds", "constraints") and len(tokens) >= 2:
+                bonded.add(frozenset((int(tokens[0]), int(tokens[1]))))
+            elif section == "angles" and len(tokens) >= 3:
+                a, b, c = (int(t) for t in tokens[:3])
+                key = (min(a, c), b, max(a, c))
+                angles[key] = angles.get(key, 0) + 1
+
+    residues: List[Tuple[str, str, Dict[str, int]]] = []  # (resnr, resname, {bead: index})
+    for index, resnr, resname, bead in atoms:
+        if not residues or residues[-1][:2] != (resnr, resname):
+            residues.append((resnr, resname, {}))
+        residues[-1][2][bead] = index
+
+    def bb_bonded(r1: Dict[str, int], r2: Dict[str, int]) -> bool:
+        return "BB" in r1 and "BB" in r2 and frozenset((r1["BB"], r2["BB"])) in bonded
+
+    missing = []
+    for k, (resnr, resname, beads) in enumerate(residues):
+        if "SC1" not in beads or "BB" not in beads:
+            continue
+        own = resname in CROSSLINK_BBS_RESNAMES
+        prev = residues[k - 1][2] if k > 0 and bb_bonded(residues[k - 1][2], beads) else None
+        nxt = residues[k + 1][2] if k + 1 < len(residues) and bb_bonded(beads, residues[k + 1][2]) else None
+        expected = []
+        if prev is not None:
+            expected.append(("-BB BB SC1", (prev["BB"], beads["BB"], beads["SC1"]), 2 if own else 1))
+        if nxt is not None and (prev is None or own):
+            expected.append(("SC1 BB +BB", (beads["SC1"], beads["BB"], nxt["BB"]), int(prev is None) + int(own)))
+        for kind, (a, b, c), need in expected:
+            have = angles.get((min(a, c), b, max(a, c)), 0)
+            if have < need:
+                missing.append((resname, kind, need - have, f"{resname}{resnr} {kind} ({a}-{b}-{c}: {have} of {need})"))
+
+    if missing:
+        missing.sort(key=lambda m: m[0] not in CROSSLINK_RESNAMES)  # crosslink residues first
+        counts: Dict[str, int] = {}
+        for resname, kind, n_missing, _ in missing:
+            counts[f"{resname} {kind}"] = counts.get(f"{resname} {kind}", 0) + n_missing
+        raise TopologyGenerationError(
+            message=(
+                f"{label}: {sum(counts.values())} BBS angle(s) of the martini300C force field missing from "
+                f"{Path(itp_path).name} ({', '.join(f'{k} x{n}' for k, n in sorted(counts.items()))}): "
+                f"{'; '.join(m[3] for m in missing[:10])}{' ...' if len(missing) > 10 else ''}. "
+                "An extra bond between these beads in the martinize2 graph suppresses the force-field angle."
+            ),
+            error_code="TOP_MART_009",
+            context={"model": label, "itp": str(itp_path), "missing": len(missing)},
+        )
 
 
 class Martini:
@@ -287,13 +695,135 @@ class Martini:
             LOG.error(f"Error in set_pdb: {str(e)}")
             return [], []
 
+    def backbone_conect(
+        self, pdb: Optional[List[str]] = None, model_label: str = ""
+    ) -> Tuple[List[str], List[str]]:
+        """
+        CONECT records for the peptide bonds of the input, the only inter-residue bonds martinize2 gets.
+
+        With -bonds-from name (MARTINIZE2_BONDS_FROM), martinize2 bonds atoms only inside a residue,
+        from its amber99 block, and adds no inter-residue bond itself. Every peptide bond must
+        therefore be listed here, including ACE C - N of the first residue and C of the last residue -
+        NME N (the caps are consecutive residues of their chain). Stretched peptide bonds at
+        crosslink sites (the N-terminal PYD LY3-SER bond of chain C measures 3.1 A) are connected
+        like any other.
+
+        Residues adjacent in the file and in the same chain (TER records are ignored, as in set_pdb) are connected;
+        a residue ends where the chain, the number+insertion code or the residue name changes.
+        ColBuilder numbers them consecutively without insertion codes; a pair that is not
+        consecutive, has no C or N atom, or has C-N above MAX_PEPTIDE_CN_ANGSTROM raises
+        TOP_MART_009: left unlisted it would be a chain break that repair_backbone_bonds re-joins
+        after martinize2, without the force-field BBS angles at the joint.
+
+        Parameters
+        ----------
+        pdb : Optional[List[str]]
+            PDB lines of the model with their original residue numbers (set_pdb only renumbers
+            residues, so the atom serials are those of the martinize2 input).
+        model_label : str
+            Model name (col_<model>.<connection>) for the error message.
+
+        Returns
+        -------
+        Tuple[List[str], List[str]]
+            CONECT lines and a description of every bond longer than STRETCHED_PEPTIDE_CN_ANGSTROM.
+        """
+        if not pdb:
+            return [], []
+        residues: List[Dict[str, Any]] = []
+        cur = None
+        for line in pdb:
+            # TER records are ignored: set_pdb drops them and separates the martinize2 chains by the
+            # chain identifier only, so a TER inside a chain must not hide a peptide bond.
+            if not line.startswith(("ATOM  ", "HETATM")):
+                continue
+            key = (line[21:22], line[22:27])
+            resname = line[17:20].strip()
+            if cur is None or cur["key"] != key or cur["resname"] != resname:
+                cur = {"key": key, "resname": resname, "atoms": {}}
+                residues.append(cur)
+            try:
+                cur["atoms"][line[12:16].strip()] = (
+                    int(line[6:11]),
+                    (float(line[30:38]), float(line[38:46]), float(line[46:54])),
+                )
+            except ValueError:
+                cur["atoms"][line[12:16].strip()] = None
+
+        conect, stretched, unconnected = [], [], []
+        for prev, nxt in zip(residues, residues[1:]):
+            if prev["key"][0] != nxt["key"][0]:
+                continue
+            try:
+                consecutive = int(nxt["key"][1][:4]) == int(prev["key"][1][:4]) + 1
+            except ValueError:
+                consecutive = False
+            pair = (
+                f"chain {prev['key'][0]} {prev['resname']} {prev['key'][1].strip()}-"
+                f"{nxt['resname']} {nxt['key'][1].strip()}"
+            )
+            if not consecutive or prev["key"][1][4:].strip() or nxt["key"][1][4:].strip():
+                unconnected.append(f"{pair} (residue numbers not consecutive or with an insertion code)")
+                continue
+            c_atom, n_atom = prev["atoms"].get("C"), nxt["atoms"].get("N")
+            if not c_atom or not n_atom:
+                unconnected.append(f"{pair} ({'C' if not c_atom else 'N'} atom missing or unreadable)")
+                continue
+            dist = sum((a - b) ** 2 for a, b in zip(c_atom[1], n_atom[1])) ** 0.5
+            label = f"{pair} (C-N {dist:.2f} A)"
+            if dist > MAX_PEPTIDE_CN_ANGSTROM:
+                unconnected.append(f"{label}, longer than {MAX_PEPTIDE_CN_ANGSTROM} A")
+                continue
+            conect.append(f"CONECT{c_atom[0]:5d}{n_atom[0]:5d}\n")
+            if dist > STRETCHED_PEPTIDE_CN_ANGSTROM:
+                stretched.append(label)
+        if unconnected:
+            raise TopologyGenerationError(
+                message=(
+                    f"{model_label + ': ' if model_label else ''}{len(unconnected)} peptide bond(s) between "
+                    f"adjacent residues cannot be written as CONECT for martinize2 (input residue numbering): "
+                    f"{'; '.join(unconnected[:10])}"
+                ),
+                error_code="TOP_MART_009",
+                context={"model": model_label, "unconnected": unconnected},
+            )
+        return conect, stretched
+
+    def canonicalize_atom_names(self, pdb: Optional[List[str]] = None) -> Tuple[List[str], int]:
+        """
+        Rename the atoms listed in AMBER99_ATOM_RENAMES to their amber99 block names.
+
+        Parameters
+        ----------
+        pdb : Optional[List[str]]
+            PDB lines of the martinize2 input
+
+        Returns
+        -------
+        Tuple[List[str], int]
+            The PDB lines and the number of renamed atoms
+        """
+        if not pdb:
+            return [], 0
+        out, n_renamed = [], 0
+        for line in pdb:
+            if line.startswith(("ATOM  ", "HETATM")):
+                new = AMBER99_ATOM_RENAMES.get((line[17:20].strip(), line[12:16].strip()))
+                if new is not None:
+                    # PDB atom-name columns 13-16: names shorter than 4 characters start in column 14.
+                    line = line[:12] + (new if len(new) == 4 else f" {new:<3}") + line[16:]
+                    n_renamed += 1
+            out.append(line)
+        return out, n_renamed
+
     def cap_pdb(self, pdb: Optional[List[str]] = None) -> Tuple[List[str], str, str]:
         """
         Decide martinize2 -nter/-cter flags robustly.
         1) Rename terminal ALA -> CLA in the PDB *before* flag decisions.
         2) If any chain starts/ends on a special block, use 'none' for that side.
-        Special blocks include ACE/CLA and crosslink blocks (LY2/LY3/L4Y/L5Y/LYX),
-        and also NME (since it's already an explicit cap).
+        Special blocks include ACE/CLA and crosslink blocks
+        (LY2/LY3/L4Y/L5Y/LYX/AGS/LGX/LZS/LZD), and also NME (since it is
+        already an explicit cap).
         """
         if not pdb:
             LOG.warning("Empty PDB provided to cap_pdb")
@@ -341,8 +871,14 @@ class Martini:
 
             # Residues meaning "this terminus is already capped / is a crosslink
             # block", so martinize2 must NOT add another terminal modification.
-            special_first = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX"}
-            special_last  = {"ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "NME"}
+            special_first = {
+                "ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "AGS", "LGX",
+                "LZS", "LZD"
+            }
+            special_last = {
+                "ACE", "CLA", "LY2", "LY3", "L4Y", "L5Y", "LYX", "AGS", "LGX",
+                "LZS", "LZD", "NME"
+            }
 
             # N-terminus: the geometry stage (caps.py) pre-caps every chain with an
             # ACE residue, so the first residue is normally ACE and needs no -nter
@@ -398,14 +934,20 @@ class Martini:
         try:
             chain_length = {key: "" for key in ["A", "B", "C"]}
 
-            for line_it in range(len(pdb) - 1):
-                if pdb[line_it][21:22] == "A" and pdb[line_it + 1][21:22] == "B":
-                    chain_length["A"] = pdb[line_it][22:26]
-                if pdb[line_it][21:22] == "B" and pdb[line_it + 1][21:22] == "C":
-                    chain_length["B"] = pdb[line_it][22:26]
-
-            if len(pdb) > 1 and pdb[-1][21:22] == "C":
-                chain_length["C"] = pdb[-1][22:26]
+            # Find each chain's last residue directly, by keeping the resid of
+            # the most recently seen ATOM/HETATM line per chain (atoms are in
+            # increasing resid order within a chain, so the last one seen is
+            # the chain's last residue). This must not rely on line adjacency
+            # (comparing pdb[i] to pdb[i+1]) -- real per-model PDBs carry a TER
+            # record after every chain, which breaks any adjacency-based
+            # transition detection and previously left chain_length empty for
+            # every chain, silently disabling the ALA -> CLA rename below.
+            for line in pdb:
+                if not line.startswith(("ATOM  ", "HETATM")):
+                    continue
+                ch = line[21:22]
+                if ch in chain_length:
+                    chain_length[ch] = line[22:26]
 
             return chain_length
         except Exception as e:
@@ -767,6 +1309,9 @@ async def build_martini3(
             )
 
         LOG.info(f"Step 3/{steps} Processing models with Martinize2")
+        # Residue templates martinize2 bonds the atoms from (-from amber99, installed into vermouth
+        # by find_and_install_custom_force_field from this directory).
+        amber99_rtp = source_ff_dir / "amber99" / "aminoacids.rtp"
         processed_models = []             # fibril model_ids that succeeded — for counts/logging ONLY
                                           # (col_N.itp file indices live in written_itp_ids)
         written_itp_ids: List[int] = []   # col_{cnt_model} indices actually written
@@ -808,6 +1353,7 @@ async def build_martini3(
 
         model_status = {}
         failed_martinize, failed_contact, failed_go, failed_itp = [], [], [], []
+        failed_other = []  # connections skipped by an empty input or an unexpected (non-TopologyGenerationError) error
         processed_in_topology: set = set()
 
         for group in tqdm(connected_groups, desc="Building topology", unit="grp"):
@@ -836,19 +1382,35 @@ async def build_martini3(
                         pdb = martini.read_pdb(pdb_id=connect_id)
                         if not pdb:
                             LOG.warning(f"Empty PDB for connect_id: {connect_id}")
+                            failed_other.append((model_id, connect_id))
                             continue
 
                         pdb = martini.translate_pdb(pdb=pdb)
                         pdb_capped, cter, nter = martini.cap_pdb(pdb=pdb)
+                        model_label = f"col_{int(model_id)}.{int(connect_id)}"
+                        # Check names, duplicates and residue runs on the input numbering: set_pdb
+                        # restarts a chain's numbering at a split residue, which hides or mislabels it.
+                        check_martinize_input(
+                            martini.canonicalize_atom_names(pdb=pdb_capped)[0], amber99_rtp, model_label
+                        )
                         order, map_pdb = martini.set_pdb(pdb=pdb_capped)
+                        conect, stretched = martini.backbone_conect(pdb=pdb_capped, model_label=model_label)
+                        # Only the martinize2 input is renamed; map.pdb (contact map, Go model) is not.
+                        order, n_renamed = martini.canonicalize_atom_names(pdb=order)
+                        LOG.debug(f"Model {model_id} -> connection {connect_id}: {n_renamed} atom(s) renamed for amber99")
+                        if stretched:
+                            LOG.info(
+                                f"Model {model_id} -> connection {connect_id}: peptide bond(s) stretched in the "
+                                f"all-atom input, connected explicitly: {'; '.join(stretched)}"
+                            )
 
-                        martini.write_pdb(pdb=order, file="tmp.pdb")
+                        martini.write_pdb(pdb=order + conect, file="tmp.pdb")
                         martini.write_pdb(pdb=map_pdb, file="map.pdb")
 
                         def _martinize_cmd(nter_flag: str, cter_flag: str) -> str:
                             args = (
                                 f"-f tmp.pdb -sep -merge A,B,C "
-                                f"-collagen -from amber99 -o topol.top -bonds-fudge 1.4 -p backbone "
+                                f"-collagen -from amber99 -o topol.top -bonds-from {MARTINIZE2_BONDS_FROM} -p backbone "
                                 f"-ff {martini.ff}00C -x {int(model_id)}.{int(connect_id)}.CG.pdb "
                                 f"-nter {nter_flag} -cter {cter_flag} "
                                 f"-govs-include -govs-moltype col_{int(model_id)}.{int(connect_id)} -maxwarn 4"
@@ -892,12 +1454,33 @@ async def build_martini3(
                             LOG.debug(f"martinize2 stdout:\n{stdout_txt}")
                             failed_martinize.append((model_id, connect_id))
                             continue
+                        # -maxwarn tolerates martinize2 warnings; with name-only bonding they flag
+                        # inconsistent input (e.g. an atom that could not be bonded), so show them.
+                        martinize_warnings = [
+                            line.strip() for line in (stderr_txt + stdout_txt).splitlines() if "WARNING -" in line
+                        ]
+                        if martinize_warnings:
+                            LOG.warning(
+                                f"martinize2 warnings for model {model_id} -> connection {connect_id}:\n"
+                                + "\n".join(martinize_warnings)
+                            )
 
                         cg_file = f"{int(model_id)}.{int(connect_id)}.CG.pdb"
-                        if not os.path.exists(cg_file):
-                            LOG.error(f"CG file not created: {cg_file}")
-                        else:
-                            LOG.debug(f"CG file created successfully: {cg_file}")
+                        model_itp = f"col_{int(model_id)}.{int(connect_id)}.itp"
+                        missing_out = [f for f in (cg_file, model_itp) if not os.path.exists(f)]
+                        if missing_out:
+                            # Merging would go on without this connection and fail later with a
+                            # misleading backbone message; stop here with the real cause.
+                            raise TopologyGenerationError(
+                                message=(
+                                    f"{model_label}: martinize2 exited 0 but did not write {', '.join(missing_out)}"
+                                ),
+                                error_code="TOP_MART_002",
+                                context={"model": model_label, "missing": missing_out},
+                            )
+                        LOG.debug(f"CG file created successfully: {cg_file}")
+                        check_cg_residue_order(order, cg_file, model_label)
+                        check_bbs_angles(model_itp, model_label)
 
                         contact_cmd = f"./contact_map ../map.pdb > ../map.out"
                         contact_process = await asyncio.create_subprocess_shell(
@@ -926,9 +1509,17 @@ async def build_martini3(
                             LOG.error(f"GO virtual sites creation failed for model {model_id} -> connection {connect_id}")
                             failed_go.append((model_id, connect_id))
                             continue
+                        check_go_contacts_per_chain(
+                            f"col_{int(model_id)}.{int(connect_id)}_go-table.itp",
+                            cg_file,
+                            f"col_{int(model_id)}.{int(connect_id)}",
+                        )
 
+                    except TopologyGenerationError:
+                        raise
                     except Exception as e:
                         LOG.error(f"Error processing model {model_id} -> connection {connect_id}: {str(e)}")
+                        failed_other.append((model_id, connect_id))
                         continue
 
                 merged_pdb = martini.merge_pdbs(model_id=int(model_id), cnt_model=cnt_model)
@@ -940,14 +1531,14 @@ async def build_martini3(
                         itp_.go_to_pairs(model_id=int(model_id))
                         itp_.make_topology(model_id=int(model_id), cnt_model=cnt_model)
 
-                        # martinize2 infers backbone bonds by distance and drops
-                        # the BB-BB peptide bond wherever crosslink strain pushes
-                        # the all-atom C-N beyond its ~1.9 A threshold, fragmenting
-                        # the CG chain. Add back the missing consecutive-residue
-                        # backbone bonds (the amber path is unaffected because
-                        # pdb2gmx bonds from templates, not geometry).
+                        # martinize2 now writes every BB-BB bond from the explicit
+                        # peptide CONECT records (-bonds-from name), so this repair is
+                        # a safety net and must add nothing. A repaired joint means
+                        # a peptide CONECT is missing: the bond, BBB angles and
+                        # dihedrals are copied from neighbours, BBS angles are not,
+                        # so the topology would be incomplete; stop the build.
                         try:
-                            repair_backbone_bonds(
+                            repaired = repair_backbone_bonds(
                                 itp_path=f"col_{int(cnt_model)}.itp",
                                 merge_pdb=f"{int(cnt_model)}.merge.pdb",
                             )
@@ -955,6 +1546,22 @@ async def build_martini3(
                             LOG.warning(
                                 f"Backbone-bond repair failed for col_{int(cnt_model)}.itp: {e}"
                             )
+                            repaired = []
+                        if repaired:
+                            raise TopologyGenerationError(
+                                message=(
+                                    f"col_{int(cnt_model)}.itp: {len(repaired)} backbone bond(s) missing from the "
+                                    f"martinize2 output (a peptide CONECT record is missing): {'; '.join(repaired[:10])}"
+                                    f"{' ...' if len(repaired) > 10 else ''}. "
+                                    f"The kept col_{int(cnt_model)}.itp already contains the re-added terms"
+                                ),
+                                error_code="TOP_MART_008",
+                                context={"itp": f"col_{int(cnt_model)}.itp", "repaired": repaired},
+                            )
+                        check_backbone_continuity(
+                            itp_path=f"col_{int(cnt_model)}.itp",
+                            merge_pdb=f"{int(cnt_model)}.merge.pdb",
+                        )
 
                         processed_models.append(model_id)
                         written_itp_ids.append(cnt_model)   # this col_{cnt_model}.itp now exists
@@ -963,6 +1570,8 @@ async def build_martini3(
                         for connect_id in connect_ids:
                             processed_in_topology.add(connect_id)
 
+                    except TopologyGenerationError:
+                        raise
                     except Exception as e:
                         LOG.error(f"Error processing ITP for model {model_id}: {str(e)}")
                         failed_itp.append(model_id)
@@ -972,6 +1581,8 @@ async def build_martini3(
 
                 cnt_model += 1
 
+            except TopologyGenerationError:
+                raise
             except Exception as e:
                 LOG.error(f"Error processing model {model_id}: {str(e)}")
                 model_status[model_id] = f"error: {str(e)}"
@@ -986,6 +1597,35 @@ async def build_martini3(
             LOG.warning(f"Failed at GO creation: {failed_go}")
         if failed_itp:
             LOG.warning(f"Failed at ITP processing: {failed_itp}")
+        # A failed connection leaves its helices out of the fibril topology; never write it incomplete.
+        failed = {
+            "martinize2": failed_martinize,
+            "contact map": failed_contact,
+            "Go model": failed_go,
+            "ITP processing": failed_itp,
+            "input or unexpected error": failed_other,
+            "group not merged": [m for m, status in model_status.items() if status != "merged"],
+        }
+        if any(failed.values()):
+
+            def _ids(ids: List[Any]) -> List[str]:
+                # (model, connection) pairs as col_<model>.<connection>, groups as their model id
+                out = []
+                for i in ids:
+                    try:
+                        out.append(f"col_{int(i[0])}.{int(i[1])}" if isinstance(i, tuple) else f"model {int(i)}")
+                    except (TypeError, ValueError):
+                        out.append(str(i))
+                return out
+
+            raise TopologyGenerationError(
+                message=(
+                    "Martini topology incomplete, model(s) failed at "
+                    + "; ".join(f"{step}: {', '.join(_ids(ids))}" for step, ids in failed.items() if ids)
+                ),
+                error_code="TOP_MART_002",
+                context={step: _ids(ids) for step, ids in failed.items() if ids},
+            )
 
         check_output_files(Path.cwd(), cnt_model)
 

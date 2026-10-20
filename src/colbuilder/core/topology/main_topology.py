@@ -7,6 +7,7 @@ topology file organization.
 """
 
 import os
+import json
 from pathlib import Path
 from typing import Any, Optional, Set, List
 import shutil
@@ -14,6 +15,7 @@ from colorama import init, Fore, Style
 
 from colbuilder.core.utils.files import FileManager
 from colbuilder.core.geometry.system import System
+from colbuilder.core.geometry.crosslink_network import active_caps
 from colbuilder.core.topology.amber import Amber, build_amber99
 from colbuilder.core.topology.martini import Martini, build_martini3
 from colbuilder.core.utils.dec import timeit
@@ -157,15 +159,33 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 geometry_dir_candidate = original_dir / ".tmp" / "geometry_gen"
 
             geometry_dir = geometry_dir_candidate if geometry_dir_candidate.exists() else None
+            if geometry_dir and getattr(config, "ratio_replace_mode", "random") == "preserve_attachment":
+                replacement_report = geometry_dir / "replacement_report.json"
+                if replacement_report.is_file():
+                    shutil.copy2(replacement_report, topology_dir / replacement_report.name)
             
             if geometry_dir is None:
                 LOG.warning("No caps directory found in expected locations")
                 LOG.debug(f"Searched: {geometry_dir_candidate}")
                 # This is not necessarily fatal - caps might be created by extract_and_cap_models_from_pdb
             
+            # Prefer exact per-model ownership, including mixed A/B systems.
+            # The legacy fallback below is only for untyped, root-level caps.
+            owned_caps = None
+            if geometry_dir:
+                typed = [geometry_dir / str(system.get_model(mid).type) / f'{int(mid)}.caps.pdb'
+                         for mid in system.get_models()]
+                if any(path.exists() for path in typed):
+                    owned_caps = active_caps(system, geometry_dir)
+                    for mid, source in owned_caps.items():
+                        destination = topology_dir / str(system.get_model(mid).type) / source.name
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        if source.resolve() != destination.resolve():
+                            shutil.copy2(source, destination)
+
             # Collect cap files if geometry_dir exists
             cap_files: List[Path] = []
-            if geometry_dir:
+            if geometry_dir and owned_caps is None:
                 # First, check for caps in the root directory
                 caps_here = list(geometry_dir.glob("*.caps.pdb"))
                 
@@ -184,11 +204,11 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 
                 cap_files = caps_here
                 LOG.debug(f"Found {len(cap_files)} cap files in {geometry_dir}")
-            else:
+            elif geometry_dir is None:
                 LOG.debug("No geometry directory found - caps may be in topology_dir already")
 
             # Copy cap files to appropriate type subdirectories in topology_dir
-            if cap_files:
+            if cap_files and owned_caps is None:
                 allowed_types = {"D", "T", "NC", "DT", "TD", "M"}
                 
                 # Determine the type for organizing files
@@ -202,6 +222,8 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 LOG.debug(f"Model types in system: {model_types}, fallback: {fallback_type}")
 
                 for cap_file in cap_files:
+                    if int(cap_file.name.split('.')[0]) not in system.get_models():
+                        continue
                     # Determine destination type based on parent directory or fallback
                     parent_type = cap_file.parent.name
                     dest_type = parent_type if parent_type in allowed_types else fallback_type
@@ -214,11 +236,21 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                     dest_file = dest_dir / cap_file.name
                     shutil.copy2(cap_file, dest_file)
                     LOG.debug(f"Copied {cap_file.name} to {dest_dir}")
-            else:
+            elif owned_caps is None:
                 LOG.debug("No cap files to copy - they may already be in topology_dir")
             
             # Generate topology based on force field
             force_field = config.force_field
+            replacement = getattr(getattr(system, "crosslink_network", None), "replacement_report", None)
+            if replacement is not None:
+                Path("replacement_report.json").write_text(json.dumps(replacement, indent=2) + "\n")
+            if (force_field != "amber99" and
+                    (getattr(config, "ratio_replace_mode", "random") == "preserve_attachment"
+                     or (replacement and replacement.get("mode") == "preserve_attachment"))):
+                raise TopologyGenerationError(
+                    message="Final ITP attachment validation currently supports amber99 only",
+                    error_code="TOP_ERR_005",
+                )
             
             if force_field == 'amber99':
                 ff = f"{force_field}sb-star-ildnp"
@@ -230,7 +262,12 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 LOG.subsection(f'Building topology based on the {force_field} force field')
                 
                 from colbuilder.core.utils.martinize_finder import find_and_install_custom_force_field
-                find_and_install_custom_force_field(config.FORCE_FIELD_DIR)
+                if not find_and_install_custom_force_field(config.FORCE_FIELD_DIR):
+                    raise TopologyGenerationError(
+                        message="Could not install the custom Martini 3 force field (see the log above)",
+                        error_code="TOP_ERR_001",
+                        context={"force_field_dir": str(config.FORCE_FIELD_DIR)},
+                    )
                 
                 await build_martini3(system=system, config=config, file_manager=file_manager)
             else:
@@ -263,6 +300,19 @@ async def build_topology(system: System, config: ColbuilderConfig, file_manager:
                 file_manager.copy_to_directory(go_file, dest_dir=output_topology_dir)
             
             # Copy topology files
+            network_report = Path('crosslink_network.json')
+            if network_report.exists():
+                file_manager.copy_to_directory(network_report, dest_dir=output_topology_dir)
+            current_network = getattr(system, "crosslink_network", None)
+            if getattr(current_network, "replacement_report", None) is not None:
+                file_manager.copy_to_directory(Path("replacement_report.json"), dest_dir=output_topology_dir)
+                if current_network.replacement_report.get("mode") == "preserve_attachment":
+                    file_manager.copy_to_directory(Path("replacement_attachment_validation.json"),
+                                                   dest_dir=output_topology_dir)
+            if geometry_dir and getattr(config, "mix_strategy", None) == "shared_sites":
+                mix_report = geometry_dir / 'crosslink_mix_report.json'
+                if mix_report.exists():
+                    file_manager.copy_to_directory(mix_report, dest_dir=output_topology_dir)
             for top_file in Path().glob(f"collagen_fibril_*.top"):
                 file_manager.copy_to_directory(top_file, dest_dir=output_topology_dir)
             

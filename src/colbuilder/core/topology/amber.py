@@ -10,12 +10,17 @@ import os
 import shutil
 from pathlib import Path
 import asyncio
+import json
 import numpy as np
 from colorama import Fore, Style
 from typing import List, Any, Optional, Dict, Union, Tuple, Set
 import re
 
 from colbuilder.core.geometry.system import System
+from colbuilder.core.geometry.backbone import validate_backbone_topology, read_pdb_residues
+from colbuilder.core.geometry.crosslink_network import (
+    active_caps, resolve_network, refresh_network, install_network, CrosslinkIntegrityError,
+)
 from colbuilder.core.geometry.crosslink import read_crosslink, Crosslink
 from colbuilder.core.utils.dec import timeit
 from colbuilder.core.utils.files import FileManager
@@ -34,6 +39,7 @@ class Amber:
         self.system = system
         self.ff = ff + '.ff' if ff else None
         self.pdb_line_types = ('ATOM  ', 'HETATM', 'ANISOU', 'TER   ')
+        self._merged_residue_maps = {}
 
     def get_connected_groups(self) -> List[List[int]]:
         """Group models that are connected together."""
@@ -101,7 +107,10 @@ class Amber:
 
         # DETECT CROSSLINKS FROM INDIVIDUAL MODEL FILES BEFORE MERGING
         crosslink_pairs = []
-        if len(model_group) > 1:
+        network = getattr(self.system, 'crosslink_network', None)
+        if network is not None:
+            crosslink_pairs = network.pairs(model_group)
+        elif len(model_group) > 1:
             all_crosslinks = []
 
             for mid in model_group:
@@ -145,34 +154,37 @@ class Amber:
             if crosslink_pairs:
                 LOG.info(f"Found {len(crosslink_pairs)} crosslink pairs for group {group_id}")
 
-        def write_caps(path, out):
-            if os.path.exists(path):
-                with open(path, "r") as f_in:
-                    for line in f_in:
-                        # Loose "TER" fallback: a TER record not padded to
-                        # the full 6-char pdb_line_types entry must still be
-                        # kept -- dropping it silently merges two chains,
-                        # which pdb2gmx (-merge all) then relies solely on
-                        # TER to separate.
-                        if line.startswith(self.pdb_line_types) or line.startswith("TER"):
-                            out.write(line)
-            else:
-                LOG.debug(f"Caps file not found: {path}")
+        residue_map = {}
+        residue_count = 0
+        residue_numbers = []
+
+        def write_caps(mid, out):
+            nonlocal residue_count
+            source_type = self.system.get_model(float(mid)).type
+            path = Path(source_type) / f'{int(mid)}.caps.pdb'
+            if not path.is_file():
+                raise CrosslinkIntegrityError(f'Missing caps while merging: {path}')
+            lines = path.read_text().splitlines(keepends=True)
+            for residue in read_pdb_residues(lines, str(path)):
+                _, chain, number, insertion = residue.address
+                key = (int(mid), number + insertion, chain, residue.name)
+                if key in residue_map:
+                    raise CrosslinkIntegrityError(f'Ambiguous merged residue: {key}')
+                residue_map[key] = residue_count
+                residue_numbers.append(number)
+                residue_count += 1
+            for line in lines:
+                # Keep unpadded TER records so pdb2gmx can separate chains.
+                if line.startswith(self.pdb_line_types) or line.startswith("TER"):
+                    out.write(line)
 
         with open(output_file, "w") as f_out:
             for mid in model_group:
-                caps = os.path.join(model_type, f"{int(mid)}.caps.pdb")
-                write_caps(caps, f_out)
-
-            for mid in model_group:
-                model = self.system.get_model(model_id=float(mid))
-                if model and model.connect:
-                    for cid in model.connect:
-                        if int(cid) not in model_group:
-                            caps = os.path.join(model_type, f"{int(cid)}.caps.pdb")
-                            write_caps(caps, f_out)
+                write_caps(mid, f_out)
 
             f_out.write("END\n")
+
+        self._merged_residue_maps[str(Path(output_file).resolve())] = (residue_map, residue_count, residue_numbers)
 
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             return (model_type, group_id, crosslink_pairs)
@@ -238,6 +250,41 @@ class Amber:
     ) -> List[Tuple[Tuple[Crosslink, Crosslink], Tuple[int, int]]]:
         """Map crosslink markers to atom indices, skipping invalid same-side T pairs."""
         mapped: List[Tuple[Tuple[Crosslink, Crosslink], Tuple[int, int]]] = []
+
+        registered = self._merged_residue_maps.get(str(Path(merged_pdb_file).resolve()))
+        if registered is not None:
+            source_map, source_count, *source_numbers = registered
+            residues = []
+            section = None
+            for line in Path(itp_file).read_text().splitlines():
+                text = line.split(';', 1)[0].strip()
+                if not text or text.startswith('#'):
+                    continue
+                if text.startswith('['):
+                    section = text.strip('[] ').lower()
+                    continue
+                if section == 'atoms':
+                    fields = text.split()
+                    key, name = (fields[2], fields[3]), fields[4]
+                    if not residues or residues[-1][0] != key or name in residues[-1][1]:
+                        residues.append((key, {}))
+                    residues[-1][1][name] = int(fields[0])
+            if len(residues) != source_count:
+                raise CrosslinkIntegrityError('PDB/ITP residue inventory differs during crosslink mapping')
+            for pair in crosslink_pairs:
+                indices = []
+                for cl in pair:
+                    key = (int(cl.model_id), cl.resid, cl.chain, cl.resname)
+                    index = source_map.get(key)
+                    number = source_numbers[0][index] if source_numbers and index is not None else cl.resid
+                    if index is None or residues[index][0] != (number, cl.resname):
+                        raise CrosslinkIntegrityError(f'Crosslink residue not mapped exactly: {key}')
+                    atom = residues[index][1].get(cl.atom)
+                    if atom is None:
+                        raise CrosslinkIntegrityError(f'Forming atom missing from ITP: {key}:{cl.atom}')
+                    indices.append(atom)
+                mapped.append((pair, tuple(indices)))
+            return mapped
 
         with open(itp_file, 'r') as f:
             lines = f.readlines()
@@ -392,14 +439,8 @@ class Amber:
             # exclusions for that crosslink -> close contacts that crash MD.
             total = len(crosslink_pairs)
             n_mapped = len(mapped_pairs)
-            if n_mapped < total:
-                LOG.error(
-                    f"Crosslink mapping incomplete in {os.path.basename(itp_file)}: "
-                    f"{n_mapped}/{total} pair(s) mapped, {total - n_mapped} dropped. "
-                    f"Dropped crosslinks get no bond and no exclusions (likely clashes "
-                    f"during equilibration). Check residue/atom-name coverage in "
-                    f"_is_crosslink_atom and the 5 A marker cutoff."
-                )
+            if n_mapped != total:
+                raise CrosslinkIntegrityError(f'Crosslink mapping incomplete: {n_mapped}/{total} in {itp_file}')
 
             if not mapped_pairs:
                 LOG.warning(f"No atom indices found for crosslink topology in {itp_file}")
@@ -429,11 +470,10 @@ class Amber:
             # them in a single graph pass (angles, proper dihedrals, 1-4 pairs).
             self._add_crosslink_bonds(itp_file, valid_bond_data)
 
-            try:
-                self._complete_crosslink_topology(itp_file, valid_bond_data)
-            except Exception as e:
-                LOG.warning(f"Failed to complete crosslink angles/dihedrals/pairs, "
-                            f"but bonds were added: {str(e)}")
+            self._complete_crosslink_topology(itp_file, valid_bond_data)
+            from .crosslink_validation import validate_crosslink_terms
+            validate_crosslink_terms(Path(itp_file), [tuple(item['atoms']) for item in valid_bond_data],
+                                     Path(self.ff) / 'aminoacids.rtp' if self.ff else None)
 
             # No explicit [ exclusions ] are written: grompp derives all nonbonded
             # exclusions from the final bond graph of the moleculetype (nrexcl=3),
@@ -443,7 +483,10 @@ class Amber:
             LOG.debug(f"    Successfully added crosslink topology to {itp_file}")
 
         except Exception as e:
-            LOG.error(f"Failed to add crosslink topology to {itp_file}: {str(e)}")
+            raise TopologyGenerationError(
+                message=f'Incomplete crosslink topology in {itp_file}: {e}',
+                original_error=e, error_code='TOP_ERR_005',
+            ) from e
 
     def _add_crosslink_bonds(self, itp_file: str, valid_bond_data: List[Dict]) -> None:
         """Add crosslink bonds, skipping any pdb2gmx already wrote via specbond.dat
@@ -594,7 +637,7 @@ class Amber:
                     bonds.append((int(p[0]), int(p[1])))
                 elif section == 'angles' and len(p) >= 3:
                     have_angles.add(canon3((int(p[0]), int(p[1]), int(p[2]))))
-                elif section == 'dihedrals' and len(p) >= 4:
+                elif section == 'dihedrals' and len(p) >= 5 and int(p[4]) not in (2, 4):
                     have_diheds.add(canon4((int(p[0]), int(p[1]), int(p[2]), int(p[3]))))
                 elif section == 'pairs' and len(p) >= 2:
                     have_pairs.add(canon2(int(p[0]), int(p[1])))
@@ -608,7 +651,7 @@ class Amber:
             adj.setdefault(b, set()).add(a)
 
         def is_H(i: int) -> bool:
-            return atom_name.get(i, '').startswith('H')
+            return atom_name.get(i, '').lstrip('0123456789').startswith('H')
 
         def graph_dist(u: int, v: int, cap: int = 3):
             if u == v:
@@ -812,12 +855,34 @@ class Amber:
             LOG.info(f"Adding {len(crosslink_pairs)} crosslink pairs to {output_file.name}")
             self.add_crosslink_topology_to_itp(str(output_file), crosslink_pairs, merged_pdb_file)
 
+        if merged_pdb_file:
+            try:
+                validate_backbone_topology(Path(merged_pdb_file), output_file)
+            except Exception as exc:
+                raise TopologyGenerationError(
+                    message=f"Backbone integrity validation failed: {exc}",
+                    original_error=exc,
+                    error_code="TOP_ERR_005",
+                    context={"pdb": merged_pdb_file, "itp": str(output_file)},
+                ) from exc
+
+        if not crosslink_pairs:
+            from .crosslink_validation import validate_crosslink_terms
+            try:
+                validate_crosslink_terms(output_file, [])
+            except Exception as exc:
+                raise TopologyGenerationError(message=f'Crosslink integrity validation failed: {exc}',
+                                              original_error=exc, error_code='TOP_ERR_005') from exc
+
     def write_topology(self, topology_file: str, processed_groups: List[Tuple[str, str]]) -> None:
         """Generate AMBER99-ILDNP-STAR force field topology file for connected model groups."""
         if not processed_groups:
             raise ValueError("processed_groups cannot be empty")
         if not self.ff:
             raise ValueError("Force field (self.ff) is not set")
+        for _, group_id in processed_groups:
+            if not Path(f'col_{group_id}.itp').is_file():
+                raise TopologyGenerationError(message=f'Missing validated ITP for {group_id}', error_code='TOP_ERR_005')
 
         with open(topology_file, 'w') as f:
             f.write('; Topology for Collagen Microfibril from Colbuilder 2.0\n')
@@ -849,10 +914,17 @@ class Amber:
             if os.path.exists(group_gro):
                 with open(group_gro, 'r') as gro_f:
                     gro_lines = gro_f.readlines()
+                    from .crosslink_validation import sections
+                    atom_rows = [fields for section, fields, _ in sections(Path(f'col_{group_id}.itp')) if section == 'atoms']
+                    if len(gro_lines) < 3 or int(gro_lines[1]) != len(atom_rows) or len(gro_lines[2:-1]) != len(atom_rows):
+                        raise TopologyGenerationError(message=f'GRO/ITP atom count mismatch for {group_id}', error_code='TOP_ERR_005')
+                    if any((line[5:10].strip(), line[10:15].strip()) != (fields[3], fields[4])
+                           for line, fields in zip(gro_lines[2:-1], atom_rows)):
+                        raise TopologyGenerationError(message=f'GRO/ITP atom order mismatch for {group_id}', error_code='TOP_ERR_005')
                     all_atom_lines.extend(gro_lines[2:-1])
                 os.remove(group_gro)
             else:
-                LOG.warning(f"GRO file not found for group: {group_id}")
+                raise TopologyGenerationError(message=f'Missing GRO for {group_id}', error_code='TOP_ERR_005')
 
         # Each per-group GRO carries a box sized for just that one (small)
         # molecule, computed independently by pdb2gmx. Reusing any single
@@ -933,6 +1005,24 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
 
         LOG.info(f'Step 2/{steps} Grouping connected models and processing with GROMACS')
 
+        try:
+            caps = active_caps(system, working_dir)
+            previous = getattr(system, 'crosslink_network', None)
+            network = refresh_network(previous, caps) if previous is not None else resolve_network(caps, config)
+            if network.replacement_report is None and getattr(config, 'ratio_replace_mode', 'random') == 'preserve_attachment':
+                report_path = working_dir / 'replacement_report.json'
+                if not report_path.is_file():
+                    raise CrosslinkIntegrityError(
+                        'Missing replacement_report.json: cannot verify original model attachment from a PDB alone'
+                    )
+                network.replacement_report = json.loads(report_path.read_text())
+            if (getattr(config, 'ratio_replace_mode', 'random') == 'preserve_attachment'
+                    and network.replacement_report.get('mode') != 'preserve_attachment'):
+                raise CrosslinkIntegrityError('A constrained replacement plan is required for preserve_attachment')
+            install_network(system, network, caps, working_dir)
+        except Exception as exc:
+            raise TopologyGenerationError(message=f'Final crosslink graph is invalid: {exc}',
+                                          original_error=exc, error_code='TOP_ERR_005') from exc
         connected_groups = amber.get_connected_groups()
         LOG.debug(f"    Found {len(connected_groups)} molecular groups: {connected_groups}")
 
@@ -942,15 +1032,13 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
             try:
                 merge_result = amber.merge_connected_models(group)
                 if merge_result is None:
-                    LOG.warning(f"Skipping group {group} - merge failed")
-                    continue
+                    raise TopologyGenerationError(message=f'Merge failed for group {group}', error_code='TOP_ERR_005')
 
                 model_type, group_id, crosslink_pairs = merge_result
                 merge_pdb_path = working_dir / model_type / f"{group_id}.merge.pdb"
 
                 if not merge_pdb_path.exists() or not os.path.getsize(merge_pdb_path):
-                    LOG.error(f'Invalid merged PDB file: {merge_pdb_path}')
-                    continue
+                    raise TopologyGenerationError(message=f'Invalid merged PDB: {merge_pdb_path}', error_code='TOP_ERR_005')
 
                 gmx_cmd = (f'export GMXLIB={working_dir} && gmx pdb2gmx -f {merge_pdb_path} '
                           f'-ignh -merge all -ff {ff} -water tip3p '
@@ -990,7 +1078,8 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
             except TopologyGenerationError:
                 raise
             except Exception as e:
-                LOG.error(f'Group {group} processing failed: {str(e)}')
+                raise TopologyGenerationError(message=f'Group {group} processing failed: {e}',
+                                              original_error=e, error_code='TOP_ERR_005') from e
 
         if not processed_groups:
             raise TopologyGenerationError(
@@ -1000,11 +1089,31 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
 
         LOG.info(f'Step 3/{steps} Generating system topology files')
         try:
+            from .replacement_validation import validate_replacement_itps
+            attachment_groups = []
+            if network.replacement_report and network.replacement_report.get('mode') == 'preserve_attachment':
+                for group_type, group in processed_groups:
+                    source_map, _, source_numbers = amber._merged_residue_maps[
+                        str((working_dir / group_type / f'{group}.merge.pdb').resolve())
+                    ]
+                    attachment_groups.append((working_dir / f'col_{group}.itp', source_map, source_numbers))
+            attachment_result = validate_replacement_itps(network, attachment_groups)
+            if attachment_result is not None:
+                (working_dir / 'replacement_attachment_validation.json').write_text(
+                    json.dumps(attachment_result, indent=2) + '\n'
+                )
+                LOG.info('Final ITP attachment check passed for %d protected models',
+                         len(attachment_result['protected_models']))
             topology_file = str(working_dir / f"collagen_fibril_{config.species}.top")
             gro_file = str(working_dir / f"collagen_fibril_{config.species}.gro")
 
             amber.write_topology(topology_file=topology_file, processed_groups=processed_groups)
             amber.write_gro(gro_file=gro_file, processed_groups=processed_groups)
+            from colbuilder.core.topology.coordinate_validation import validate_glucosepane_contacts
+
+            validate_glucosepane_contacts(
+                gro_file, [f"col_{group}.itp" for _, group in processed_groups]
+            )
 
             LOG.info(f"Successfully generated topology for {len(processed_groups)} molecular groups")
             LOG.debug(f"    Groups processed: {[group_id for _, group_id in processed_groups]}")

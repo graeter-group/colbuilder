@@ -1,0 +1,69 @@
+; MOLD lysine-derived marker carrying the imidazolium core (LZS), embedded
+; in a peptide chain.
+;
+; Correspondence to the renamed seven-bead standalone mapping:
+;   BB  = B1 (peptide backbone, formerly BBR in the source mapping)
+;   SC1 = S1 (LZS aliphatic arm; formerly R1)
+;   SC2 = R1 (formerly IM1)
+;   SC3 = R2 (inter-marker bead, hosted once on LZS; formerly IM2)
+;   SC4 = R3 (formerly IM3)
+;
+; R2/IM2 comprises LZS:NZ1+C31+H31 and LZD:CE+HE1+HE2 in the intended
+; atomistic mapping.  Vermouth maps one residue at a time, so the bead is
+; instantiated on LZS from its LZS contribution.  The LZD contribution is
+; retained with zero coordinate weight in lzd.amber99.map; the complete
+; bonded network subsequently relaxes the initial marker-local placement.
+
+[ molecule ]
+LZS
+
+[from]
+amber99
+
+[to]
+martini300C
+
+[ martini ]
+BB SC1 SC2 SC3 SC4
+
+[ mapping ]
+amber27 amber36 amber99
+
+[ atoms ]
+    1     N     BB
+    2     H     BB
+    3    CA     BB
+    4    HA    !BB
+    5    CB    SC1
+    6   HB1    SC1
+    7   HB2    SC1
+    8    CG    SC1
+    9   HG1    SC1
+   10   HG2    SC1
+   11    CD    SC1
+   12   HD1    SC1
+   13   HD2    SC1
+   14    CE    SC2
+   15   HE1    SC2
+   16   HE2    SC2
+   17   NZ2    SC2
+   18     C     BB
+   19     O     BB
+   20   C31    SC3
+   21   H31    SC3
+   22   NZ1    SC3
+   23   C30    SC2
+   24   H30    SC2
+   25   C28    SC4
+   26   CH3    SC4
+   27  HH31    SC4
+   28  HH32    SC4
+   29  HH33    SC4
+
+[ chiral ]
+  CB     CA    N    C
+  HB1    CA    N    C
+  HB2    CA    N    C
+
+[ chiral ]
+  HA     CA    N    CB    C

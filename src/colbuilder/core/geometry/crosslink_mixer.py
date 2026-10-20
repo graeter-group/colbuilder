@@ -15,10 +15,9 @@ from colbuilder.core.geometry.crystalcontacts import CrystalContacts
 from colbuilder.core.geometry.mix import Mix
 from colbuilder.core.geometry.optimize import Optimizer
 from colbuilder.core.geometry.unpaired_crosslinks import UnpairedCrosslinkFinder
-from colbuilder.core.geometry.geometry_replacer import (
-    snapshot_residue_atoms,
-    repair_missing_backbone_atoms,
-)
+from colbuilder.core.geometry.backbone import preserve_backbone
+from colbuilder.core.geometry.crosslink_network import active_caps
+from colbuilder.core.geometry.shared_site_mixing import compose_shared_sites
 from colbuilder.core.utils.config import ColbuilderConfig
 from colbuilder.core.utils.logger import setup_logger
 
@@ -222,11 +221,12 @@ class CrosslinkMixer:
             lines: List[str] = []
             for line in entries:
                 parts = line.split()
-                if len(parts) < 4:
-                    continue
-                pdb_name, _, resid, chain = parts[:4]
-                orig_res = parts[1].upper()
-                target_res = "ARG" if orig_res in {"AGS", "APD"} else "LYS"
+                if len(parts) != 4:
+                    raise ValueError(f"Invalid unpaired replacement instruction: {line!r}")
+                pdb_name, target_res, resid, chain = parts
+                target_res = target_res.upper()
+                if target_res not in {"ARG", "LYS"}:
+                    raise ValueError(f"Unsupported native replacement target: {target_res}")
                 lines.append(f"{pdb_name} {target_res} {resid} {chain}")
 
             if not lines:
@@ -234,24 +234,16 @@ class CrosslinkMixer:
 
             replace_file.write_text("\n".join(lines) + "\n")
 
-            pre_mutation_snapshot = snapshot_residue_atoms(system_dir, lines)
-
-            chim = Chimera(cfg, pdb=str(system_dir))
-            result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
-            if result.returncode != 0:
-                # Chimera.swapaa runs subprocess.run with text=True on its normal
-                # completion path, so result.stderr is already a str there; only
-                # its internal exception-handling fallback returns bytes. Calling
-                # .decode() unconditionally raised AttributeError on the (far more
-                # common) str case, masking the real Chimera error under a generic
-                # "'str' object has no attribute 'decode'" from the outer except.
-                stderr = result.stderr
-                if isinstance(stderr, bytes):
-                    stderr = stderr.decode()
-                LOG.error("Chimera swapaa failed for %s: %s", system_dir, stderr)
-                return False
-
-            repair_missing_backbone_atoms(system_dir, lines, pre_mutation_snapshot)
+            with preserve_backbone(system_dir, lines):
+                chim = Chimera(cfg, pdb=str(system_dir))
+                result = chim.swapaa(replace=str(replace_file), system_type=str(system_dir))
+                if result.returncode != 0:
+                    # Normal subprocess results contain text; Chimera's fallback
+                    # may contain bytes. Raise inside the guard to restore inputs.
+                    stderr = result.stderr
+                    if isinstance(stderr, bytes):
+                        stderr = stderr.decode(errors="replace")
+                    raise RuntimeError(f"Chimera swapaa failed for {system_dir}: {stderr}")
             return True
         except Exception as e:
             LOG.warning("Chimera swapaa application failed: %s", e)
@@ -431,6 +423,7 @@ class CrosslinkMixer:
                     f"Crystalcontacts file: {system.crystalcontacts.crystalcontacts_file}"
                 )
 
+            variant_caps = {}
             for key in list(config.ratio_mix.keys()):
                 if key not in mix_pdb:
                     LOG.warning(f"No PDB file mapped for type {key}, skipping")
@@ -523,45 +516,14 @@ class CrosslinkMixer:
                     allowed_resnames=None,
                     config=config,
                 )
+                variant_caps[key] = {
+                    int(mid): type_dir / f"{int(mid)}.caps.pdb" for mid in system.get_models()
+                }
 
             LOG.info("Step 2/2 Mixing systems")
 
-            mix_ = Mix(ratio_mix=config.ratio_mix, system=system)
-            system = mix_.add_mix(system=system)
+            self._mix_generated_variants(system, config, temp_dir, variant_caps)
 
-            type_counts = {}
-            for model_id in system.get_models():
-                model = system.get_model(model_id=model_id)
-                model_type = getattr(model, "type", "UNKNOWN")
-                type_counts[model_type] = type_counts.get(model_type, 0) + 1
-
-                if not hasattr(model, "transformation") or model.transformation is None:
-                    LOG.warning(
-                        f"Model {model_id} has no transformation matrix after mixing"
-                    )
-
-            connect_file_path = self.path_wd / "connect_from_colbuilder.txt"
-            LOG.debug(f"Writing connect file {connect_file_path}")
-            Connect(system=system).write_connect(
-                system=system, connect_file=connect_file_path
-            )
-
-            # Auto-fix unpaired AGE markers in the mixed caps before final output
-            try:
-                fixer = UnpairedCrosslinkFinder(
-                    base_dir=self.path_wd,
-                    geom_dir=temp_dir,
-                    allowed_resnames=None,
-                )
-                entries, _ = fixer.run()
-                if entries:
-                    LOG.info("Removing %d unpaired markers in mixed caps", len(entries))
-                    if not self._apply_chimera_swaps(entries, temp_dir, config=config):
-                        raise RuntimeError("Chimera swapaa failed for unpaired markers in mixed caps")
-            except Exception as e:
-                LOG.error("Auto-fix for unpaired markers failed: %s", e)
-                raise
-            
             temp_pdb = temp_dir / f"{config.output or 'collagen_fibril'}.pdb"
 
             LOG.debug(f"Writing temporary output PDB to {temp_pdb}")
@@ -581,3 +543,34 @@ class CrosslinkMixer:
 
         finally:
             os.chdir(original_dir)
+
+    def _mix_generated_variants(self, system, config, temp_dir, variant_caps):
+        """Select/combine generated caps without rebuilding their lattice."""
+        if getattr(config, "mix_strategy", "whole_models") == "shared_sites":
+            report = compose_shared_sites(
+                system, variant_caps, config.ratio_mix, temp_dir, config
+            )
+            LOG.info("Shared-site mixing completed: %s", report["counts"])
+            return report
+
+        Mix(ratio_mix=config.ratio_mix, system=system).add_mix(system=system)
+        Connect(system=system).write_connect(
+            system=system, connect_file=Path(temp_dir) / "connect_from_colbuilder.txt"
+        )
+        selected = active_caps(system, temp_dir)
+        fixer = UnpairedCrosslinkFinder(
+            base_dir=Path(temp_dir), geom_dir=Path(temp_dir), selected_caps=selected,
+        )
+        entries, _ = fixer.run()
+        by_directory = {}
+        for entry in entries:
+            mid = int(entry.split()[0].split(".")[0])
+            by_directory.setdefault(selected[mid].parent, []).append(entry)
+        for directory, instructions in by_directory.items():
+            LOG.info("Removing %d unpaired markers in active caps %s", len(instructions), directory)
+            if not self._apply_chimera_swaps(instructions, directory, config=config):
+                raise RuntimeError(f"Chimera swapaa failed for unpaired markers in {directory}")
+        from .ring_validation import validate_caps_rings
+        validate_caps_rings(selected, repair=False,
+                            policy=getattr(config, "ring_penetration_policy", "warn"),
+                            report_path=Path(temp_dir) / "ring_geometry_report.json")

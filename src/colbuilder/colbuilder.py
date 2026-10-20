@@ -728,8 +728,11 @@ def log_configuration_summary(cfg: ColbuilderConfig) -> None:
                 f"Fibril Length: {cfg.fibril_length}",
                 "Crosslinks:",
                 f"    Mix Ratio: {cfg.ratio_mix}" if cfg.mix_bool else None,
+                f"    Mix Strategy: {cfg.mix_strategy}" if cfg.mix_bool else None,
                 f"    Mix Files: {cfg.files_mix}" if cfg.mix_bool else None,
                 f"    Replace Ratio: {cfg.ratio_replace}%" if cfg.replace_bool else None,
+                f"    Replace Mode: {cfg.ratio_replace_mode}" if cfg.replace_bool else None,
+                f"    Replace Seed: {cfg.ratio_replace_seed}" if cfg.replace_bool else None,
                 (
                     f"    N-terminal: {cfg.n_term_type}, {cfg.n_term_combination}"
                     if (cfg.crosslink and not cfg.mix_bool)

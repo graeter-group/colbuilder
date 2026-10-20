@@ -9,6 +9,7 @@ including manual replacement lists and ratio-based automated selection.
 import os
 import random
 import math
+import json
 import traceback
 import subprocess
 import shutil
@@ -23,12 +24,21 @@ from .system import System
 from .crystal import Crystal
 from .connect import Connect
 from .model import Model
+from .backbone import preserve_backbone
+from .crosslink_network import (
+    resolve_network, select_replacements, after_replacement, install_network,
+    active_caps, CrosslinkIntegrityError, replacement_survivors,
+)
+from .replacement_policy import validate_replacement_mode
 
 LOG = setup_logger(__name__)
 
 # ==================================================================================
 # Backbone Repair After Chimera Mutation
 # ==================================================================================
+#
+# Legacy atom-only helpers retained for callers outside this module. All pipeline
+# mutation paths now use preserve_backbone, which also protects polymer boundaries.
 #
 # Chimera's ``swapaa`` can silently drop the backbone O atom when the residue
 # being mutated is missing a sidechain atom the target residue needs (e.g.
@@ -357,6 +367,7 @@ class CrosslinkReplacer:
             GeometryGenerationError: If replacement fails for any reason
         """
         try:
+            validate_replacement_mode(config)
             # =================================================================================
             # PATH SETUP
             # =================================================================================
@@ -399,13 +410,15 @@ class CrosslinkReplacer:
 
             source_dir = geometry_gen_dir
             auto_fix_applied = False
-            if getattr(config, "auto_fix_unpaired", False) and getattr(config, "manual_replacements", None):
+            cleanup_instructions = (getattr(config, "_auto_unpaired_replacements", None)
+                                    or getattr(config, "manual_replacements", None))
+            if getattr(config, "auto_fix_unpaired", False) and cleanup_instructions:
                 await self._apply_manual_replacements_to_dir(
                     source_dir=geometry_gen_dir,
                     dest_dir=replace_manual_dir,
                     manual_list=[
                         str(instr).strip()
-                        for instr in config.manual_replacements
+                        for instr in cleanup_instructions
                         if str(instr).strip()
                     ],
                     working_dir_root=working_dir_root,
@@ -480,6 +493,8 @@ class CrosslinkReplacer:
                         caps_by_model[model_id] = pdb_file
 
             for model_id, source_caps in sorted(caps_by_model.items()):
+                if model_id not in system.get_models():
+                    continue
                 dest_caps = type_dir / source_caps.name
                 if source_caps.resolve() != dest_caps.resolve():
                     shutil.copy2(source_caps, dest_caps)
@@ -491,9 +506,12 @@ class CrosslinkReplacer:
             manual_list: List[str] = []
             ratio_requested = (
                 config.ratio_replace is not None
-                and float(config.ratio_replace) > 0
+                and (float(config.ratio_replace) > 0
+                     or getattr(config, "ratio_replace_mode", "random") == "preserve_attachment")
             )
             generated_from_ratio = False
+            selected_caps = {int(mid): type_dir / f"{int(mid)}.caps.pdb" for mid in system.get_models()}
+            input_network = resolve_network(selected_caps, config, strict=False)
 
             # Manual replacements take precedence over ratio-based replacement
             # when both are configured (see config.yaml's documented contract).
@@ -507,34 +525,22 @@ class CrosslinkReplacer:
 
             # If ratio requested and no manual list took precedence, use connect-based replacement
             if ratio_requested and not manual_list:
-                connect_groups = (
-                    self._load_connect_groups(connect_file) if connect_file else []
+                input_network = after_replacement(input_network, [], selected_caps)
+                manual_list, ratio_report = select_replacements(
+                    input_network, float(config.ratio_replace),
+                    getattr(config, "ratio_replace_scope", "enzymatic"),
+                    seed=getattr(config, "ratio_replace_seed", None),
+                    mode=getattr(config, "ratio_replace_mode", "random"),
                 )
-                
-                if connect_groups:
-                    records = self._load_crosslinks_from_models(type_dir)
-                    manual_list = self._build_ratio_replacements_from_connect(
-                        records=records,
-                        connect_groups=connect_groups,
-                        ratio_replace=float(config.ratio_replace),
-                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
-                        config=config,
-                    )
-                    generated_from_ratio = bool(manual_list)
-                    LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from connect groups")
-                else:
-                    # Fall back to system-based ratio replacement
-                    manual_list = self._build_ratio_replacements(
-                        system=system,
-                        ratio_replace=float(config.ratio_replace),
-                        fibril_length=config.fibril_length,
-                        scope=getattr(config, "ratio_replace_scope", "enzymatic"),
-                    )
-                    generated_from_ratio = bool(manual_list)
-                    LOG.debug(f"Generated {len(manual_list)} ratio-based instructions from system")
+                input_network.replacement_report = ratio_report
+                generated_from_ratio = bool(manual_list)
+                (temp_dir / "replacement_report.json").write_text(json.dumps(ratio_report, indent=2) + "\n")
+                LOG.info("Replacement targets by chemical entity: %s", ratio_report['targets'])
 
             # No replacements to make
             if not manual_list:
+                final_network = after_replacement(input_network, [], selected_caps)
+                install_network(system, final_network, selected_caps, temp_dir)
                 if ratio_requested:
                     LOG.warning(
                         "No replacement instructions generated (ratio=%s%%, scope=%s). "
@@ -546,7 +552,9 @@ class CrosslinkReplacer:
                     LOG.debug("No replacement instructions provided")
                     
                 try:
-                    config._replacement_skipped = True  # type: ignore[attr-defined]
+                    config._replacement_skipped = (  # type: ignore[attr-defined]
+                        getattr(config, "ratio_replace_mode", "random") != "preserve_attachment"
+                    )
                 except Exception:
                     pass
                 return system
@@ -603,27 +611,29 @@ class CrosslinkReplacer:
             # Skip if _apply_manual_replacements_to_dir already mutated these exact
             # instructions in STEP 1 (type_dir was populated from its output above).
 
-            if auto_fix_applied:
+            # Reject partial removal of a complete crosslink before touching files.
+            replacement_survivors(input_network, manual_list)
+
+            if auto_fix_applied and not generated_from_ratio:
                 LOG.debug("Skipping redundant Chimera run; auto-fix already applied in STEP 1.")
             else:
-                pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
-
-                success = await self._run_chimera_command(
-                    config,
-                    str(replace_file),
-                    type_dir,
-                    working_dir_root
-                )
-
-                if not success:
-                    raise GeometryGenerationError(
-                        message="Chimera execution failed.",
-                        error_code="GEO_ERR_004",
+                with preserve_backbone(type_dir, manual_list):
+                    success = await self._run_chimera_command(
+                        config,
+                        str(replace_file),
+                        type_dir,
+                        working_dir_root
                     )
-
-                repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+                    if not success:
+                        raise GeometryGenerationError(
+                            message="Chimera execution failed.",
+                            error_code="GEO_ERR_004",
+                        )
 
                 LOG.debug("Chimera replacements executed.")
+
+            final_network = after_replacement(input_network, manual_list, selected_caps)
+            install_network(system, final_network, selected_caps, temp_dir)
 
             # =================================================================================
             # STEP 4: AGGRESSIVE BACK-PROPAGATION (FIX TOPOLOGY)
@@ -661,28 +671,9 @@ class CrosslinkReplacer:
             # Updates in-memory connects and rewrites connect_from_colbuilder.txt
             # =================================================================================
             
-            try:
-                connector = Connect(system=system)
-                new_connect = connector.run_connect(system=system)
-
-                if new_connect:
-                    for mid, conns in new_connect.items():
-                        model_obj = system.get_model(model_id=mid)
-                        if model_obj:
-                            model_obj.connect = conns
-
-                    connect_file_path = temp_dir / "connect_from_colbuilder.txt"
-                    connector.write_connect(system=system, connect_file=connect_file_path)
-
-                    try:
-                        geom_connect_path = geometry_gen_dir / "connect_from_colbuilder.txt"
-                        shutil.copy2(connect_file_path, geom_connect_path)
-                    except Exception as e:
-                        LOG.warning(f"Could not sync connectivity to geometry_gen: {e}")
-                else:
-                    LOG.warning("Connectivity recomputation returned empty; keeping previous connects.")
-            except Exception as e:
-                LOG.warning(f"Failed to recompute connectivity after replacement: {e}")
+            # install_network already updated System and the output connect file.
+            # Do not rerun the 3 A lattice-growth detector or overwrite the
+            # pre-replacement connect file with a different graph.
 
             LOG.info(f"{Fore.GREEN}Replacement completed successfully{Style.RESET_ALL}")
             
@@ -746,6 +737,8 @@ class CrosslinkReplacer:
             # Split PDB into models
             self._split_pdb_into_models(local_pdb, type_dir)
             system_from_caps: Optional[System] = None
+            selected_caps = {int(p.name.split('.')[0]): p for p in type_dir.glob('*.caps.pdb')}
+            input_network = resolve_network(selected_caps, config, strict=False)
 
             # Copy manual_replacements.txt if present
             candidate_path = working_dir_root / "manual_replacements.txt"
@@ -757,7 +750,11 @@ class CrosslinkReplacer:
 
             # Determine replacement strategy
             manual_list: List[str] = []
-            ratio_requested = config.ratio_replace is not None and float(config.ratio_replace) > 0
+            validate_replacement_mode(config)
+            ratio_requested = config.ratio_replace is not None and (
+                float(config.ratio_replace) > 0
+                or getattr(config, "ratio_replace_mode", "random") == "preserve_attachment"
+            )
             generated_from_ratio = False
 
             # Check for manual replacements
@@ -770,13 +767,15 @@ class CrosslinkReplacer:
 
             # If ratio requested, generate instructions
             if not manual_list and ratio_requested:
-                records = self._load_crosslinks_from_models(type_dir)
-                manual_list = self._build_ratio_replacements_from_records(
-                    records=records,
-                    ratio_replace=float(config.ratio_replace),
-                    fibril_length=getattr(config, "fibril_length", 0.0),
-                    scope=getattr(config, "ratio_replace_scope", "enzymatic"),
+                input_network = after_replacement(input_network, [], selected_caps)
+                manual_list, ratio_report = select_replacements(
+                    input_network, float(config.ratio_replace),
+                    getattr(config, "ratio_replace_scope", "enzymatic"),
+                    seed=getattr(config, "ratio_replace_seed", None),
+                    mode=getattr(config, "ratio_replace_mode", "random"),
                 )
+                input_network.replacement_report = ratio_report
+                (temp_dir / 'replacement_report.json').write_text(json.dumps(ratio_report, indent=2) + '\n')
                 generated_from_ratio = bool(manual_list)
 
             # Try loading from manual_replacements.txt file
@@ -798,7 +797,16 @@ class CrosslinkReplacer:
                     shutil.copy2(local_pdb, output_pdb)
                 else:
                     output_pdb = local_pdb
-                return None, output_pdb
+                if input_network.replacement_report is not None:
+                    final_network = after_replacement(input_network, [], selected_caps)
+                    system_from_caps = self._categorize_caps_and_build_system(
+                        base_dir=temp_dir, source_dir=type_dir, reference_pdb=local_pdb
+                    )
+                    if system_from_caps is None:
+                        raise CrosslinkIntegrityError("Cannot preserve replacement provenance without a System")
+                    install_network(system_from_caps, final_network,
+                                    active_caps(system_from_caps, temp_dir), temp_dir)
+                return system_from_caps, output_pdb
 
             # Save generated instructions if from ratio
             if generated_from_ratio:
@@ -821,22 +829,21 @@ class CrosslinkReplacer:
                     f.write(f"{clean_instr}\n")
 
             # Run Chimera
-            pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
-
-            success = await self._run_chimera_command(
-                config,
-                str(replace_file),
-                type_dir,
-                working_dir_root,
-            )
-
-            if not success:
-                raise GeometryGenerationError(
-                    message="Chimera replacement failed in direct mode",
-                    error_code="GEO_ERR_004",
+            replacement_survivors(input_network, manual_list)
+            with preserve_backbone(type_dir, manual_list):
+                success = await self._run_chimera_command(
+                    config,
+                    str(replace_file),
+                    type_dir,
+                    working_dir_root,
                 )
+                if not success:
+                    raise GeometryGenerationError(
+                        message="Chimera replacement failed in direct mode",
+                        error_code="GEO_ERR_004",
+                    )
 
-            repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+            final_network = after_replacement(input_network, manual_list, selected_caps)
 
             # Combine caps files into output PDB
             output_pdb = temp_dir / f"{config.output or 'output'}.pdb"
@@ -847,14 +854,13 @@ class CrosslinkReplacer:
             )
 
             # Try to build system and recompute connectivity
-            try:
-                system_from_caps = self._categorize_caps_and_build_system(
-                    base_dir=temp_dir, source_dir=type_dir, reference_pdb=local_pdb
-                )
-                if system_from_caps:
-                    self._recompute_connectivity_from_caps(system_from_caps, temp_dir)
-            except Exception as e:
-                LOG.warning(f"Failed to build system/connectivity from replaced caps: {e}")
+            system_from_caps = self._categorize_caps_and_build_system(
+                base_dir=temp_dir, source_dir=type_dir, reference_pdb=local_pdb
+            )
+            if system_from_caps:
+                install_network(system_from_caps, final_network, active_caps(system_from_caps, temp_dir), temp_dir)
+            elif getattr(config, "ratio_replace_mode", "random") == "preserve_attachment":
+                raise CrosslinkIntegrityError("Cannot preserve replacement provenance without a System")
 
             return system_from_caps, output_pdb
 
@@ -1372,7 +1378,7 @@ class CrosslinkReplacer:
             LOG.warning("Failed to parse connect file %s: %s", connect_file, e)
             return []
 
-        return groups
+        return [list(group) for group in sorted({tuple(group) for group in groups})]
 
     def _parse_term_combination(
         self, combo: Optional[str]
@@ -1473,22 +1479,18 @@ class CrosslinkReplacer:
                 clean_instr = instruction.strip().strip('"').strip("'")
                 f.write(f"{clean_instr}\n")
 
-        pre_mutation_snapshot = snapshot_residue_atoms(type_dir, manual_list)
-
-        success = await self._run_chimera_command(
-            config=config,
-            replace_file_path=str(replace_file),
-            type_dir_path=type_dir,
-            root_dir=working_dir_root,
-        )
-
-        if not success:
-            raise GeometryGenerationError(
-                message="Chimera execution failed for auto-fix manual replacements.",
-                error_code="GEO_ERR_004",
+        with preserve_backbone(type_dir, manual_list):
+            success = await self._run_chimera_command(
+                config=config,
+                replace_file_path=str(replace_file),
+                type_dir_path=type_dir,
+                root_dir=working_dir_root,
             )
-
-        repair_missing_backbone_atoms(type_dir, manual_list, pre_mutation_snapshot)
+            if not success:
+                raise GeometryGenerationError(
+                    message="Chimera execution failed for auto-fix manual replacements.",
+                    error_code="GEO_ERR_004",
+                )
 
         return True
 
@@ -1621,6 +1623,20 @@ class CrosslinkReplacer:
 
         if not entity_pool:
             return []
+
+        # Compatibility path for external callers: chemical identities, not
+        # repeated/overlapping connect-file rows, are the sampling units.
+        unique_entities = {}
+        owners = {}
+        for tag, members in entity_pool:
+            identity = tuple(sorted({(int(r['model_id']), r['resid'], r['chain'], r['resname']) for r in members}))
+            key = (tag, identity)
+            for marker in identity:
+                if marker in owners and owners[marker] != key:
+                    raise CrosslinkIntegrityError(f"Overlapping replacement entities at {marker}")
+                owners[marker] = key
+            unique_entities[key] = (tag, members)
+        entity_pool = list(unique_entities.values())
 
         if scope == "enzymatic":
             eligible_entities = [
@@ -2187,3 +2203,23 @@ class CrosslinkReplacer:
                     fh.write("TER\n")
 
         return len(models)
+
+
+# Backward compatibility functions
+
+async def replace_in_system(system: Any, config: ColbuilderConfig) -> Any:
+    """
+    Backward compatibility function for system-based crosslink replacement.
+    """
+    replacer = CrosslinkReplacer()
+    return await replacer.replace_in_system(system, config)
+
+
+async def direct_replace_geometry(config: ColbuilderConfig) -> None:
+    """
+    Backward compatibility function for direct PDB-based crosslink replacement.
+    """
+    replacer = CrosslinkReplacer()
+    temp_dir = Path(config.working_directory) / ".tmp" / "replacement_direct"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    await replacer.replace_direct(config, temp_dir)

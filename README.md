@@ -233,7 +233,10 @@ These form spontaneously rather than through enzyme activity, and can be used as
 - **Glucosepane** - Divalent, LYS-ARG derived; most abundant advanced glycation end-product (AGE) in human tissue
 - **Pentosidine** - Divalent, LYS-ARG derived; well-characterized AGE crosslink
 
-**Note**: Martini3 crosslink parametrization currently only covers PYD and HLKNL. Other types require `force_field: "amber99"`.
+**Note**: This local fork includes Martini3 models for PYD, HLKNL, Glucosepane
+(`LGX`/`AGS`, two virtual sites) and MOLD (`LZS`/`LZD`). Other types, including
+Pentosidine, require `force_field: "amber99"`. See the
+[local model status and validation limits](docs/user_guide.md#using-different-force-fields).
 
 ### Crosslink Combinations
 
@@ -293,6 +296,27 @@ fibril_length: 60.0       # nm, length of the microfibril
 
 force_field: "martini3"   # or "amber99"
 ```
+
+### Martini 3 connectivity
+
+martinize2 builds the connectivity of each model from the amber99 residue templates
+(`-bonds-from name`) plus explicit CONECT records for every peptide bond, including the
+ACE and NME caps; it no longer guesses bonds from distances, which created fake bonds at
+close contacts and silently removed force-field angles (since 18/10/2026).
+
+- Compared with earlier topologies, atoms, coordinates and the Go model are unchanged.
+- The force-field `-BB BB SC1` angle is now present on every HYP and PRO (previously
+  missing on about 44% of HYP and 10% of PRO) and on the N-terminal PYD `LY2`, and
+  `SC1 BB +BB` on the helical `LYX` (C103).
+- Atom names that differ from the amber99 templates (ILE `CD1`, ACE/NME `1HH3`-`3HH3`)
+  are renamed in the martinize2 input only.
+- ColBuilder stops with an error (`TOP_MART_009`) if an input atom does not match its
+  template (unknown or duplicate atom name, residue split in the file), if two adjacent
+  residues of a chain cannot be joined by a peptide CONECT (numbering gap or insertion
+  code, missing C/N atom, C-N > 4 A), or if a martinize2 topology lacks one of
+  these angles; with `TOP_MART_008` if a backbone bond still had to be repaired after
+  martinize2; and with `TOP_MART_002` if any model failed instead of writing an incomplete
+  fibril topology.
 
 For the **complete reference** of every configuration option (mixing,
 replacement, AGE/mutated-PDB workflow, custom species, all defaults and

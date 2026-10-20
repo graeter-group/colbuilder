@@ -5,8 +5,8 @@ topology_generator: true
 
 species: "rattus_norvegicus"
 
-# PYD: trivalent (3-residue) enzymatic crosslink. Martini3 crosslink
-# parametrization currently only covers PYD and HLKNL.
+# PYD: trivalent (3-residue) enzymatic crosslink. In this local fork, Martini3
+# crosslink parameters cover PYD, HLKNL, Glucosepane and MOLD.
 crosslink: true
 n_term_type: "PYD"
 c_term_type: "PYD"
