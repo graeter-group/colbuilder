@@ -76,6 +76,48 @@ class Amber:
 
         return groups
 
+    def connect_bondable_models(self, cutoff: float = 5.0) -> None:
+        """
+        Connect models whose caps files contain a bondable crosslink pair.
+
+        Geometry links models only when their crosslink atoms are within
+        LATTICE_GROWTH_CUTOFF (3.0 A), but merge_connected_models bonds pairs
+        up to 5.0 A apart. A pair in between ends up in two separate
+        molecules and its bond is silently dropped, so add those links here
+        using the same test merge_connected_models applies.
+        """
+        crosslinks = {}
+        for model_id in self.system.get_models():
+            model = self.system.get_model(model_id=model_id)
+            caps_file = os.path.join(model.type, f"{int(model_id)}.caps.pdb")
+            if os.path.exists(caps_file):
+                crosslinks[model_id] = read_crosslink(caps_file)
+
+        added = 0
+        model_ids = sorted(crosslinks)
+        for i, id_a in enumerate(model_ids):
+            model_a = self.system.get_model(model_id=id_a)
+            for id_b in model_ids[i + 1:]:
+                model_b = self.system.get_model(model_id=id_b)
+                # merge_connected_models reads all caps of a group from one type directory
+                if model_a.type != model_b.type:
+                    continue
+                if model_a.connect and id_b in model_a.connect:
+                    continue
+                if any(
+                    self._are_compatible_crosslinks(cl_a, cl_b)
+                    and np.linalg.norm(cl_a.position - cl_b.position) < cutoff
+                    for cl_a in crosslinks[id_a]
+                    for cl_b in crosslinks[id_b]
+                ):
+                    model_a.connect = sorted(set(model_a.connect or [id_a]) | {id_b})
+                    model_b.connect = sorted(set(model_b.connect or [id_b]) | {id_a})
+                    LOG.debug(f"Connected models {int(id_a)} and {int(id_b)} (crosslink within {cutoff} A)")
+                    added += 1
+
+        if added:
+            LOG.info(f"Connected {added} model pairs with crosslinks missed by geometry")
+
     def merge_connected_models(
         self,
         model_group: List[int]
@@ -952,6 +994,7 @@ async def build_amber99(system: System, config: ColbuilderConfig, file_manager: 
 
         LOG.info(f'Step 2/{steps} Grouping connected models and processing with GROMACS')
 
+        amber.connect_bondable_models()
         connected_groups = amber.get_connected_groups()
         LOG.debug(f"    Found {len(connected_groups)} molecular groups: {connected_groups}")
 
